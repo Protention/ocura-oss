@@ -213,6 +213,23 @@ class DistributionTests(unittest.TestCase):
         problems = check_release.check_distributions(self.dist, "1.2.3")
         self.assertEqual(problems, ["source distribution includes repository-only examples"])
 
+    def test_migration_tools_in_the_source_distribution_are_reported(self):
+        write_distributions(
+            self.dist,
+            sdist_extra=("ocura_oss-1.2.3/tools/migrations/migrate_0_4.py",),
+        )
+        self.assertEqual(
+            check_release.check_distributions(self.dist, "1.2.3"),
+            ["source distribution includes repository-only migration tools"],
+        )
+
+    def test_migration_tools_inside_the_wheel_package_are_reported(self):
+        write_distributions(self.dist, wheel_extra=("ocura_oss/migrate_0_4.py",))
+        self.assertEqual(
+            check_release.check_distributions(self.dist, "1.2.3"),
+            ["wheel includes repository-only migration tools"],
+        )
+
     def test_oversized_wheel_is_reported(self):
         write_distributions(self.dist)
         wheel = self.dist / "ocura_oss-1.2.3-py3-none-any.whl"

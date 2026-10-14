@@ -121,6 +121,8 @@ def check_distributions(dist: Path, version: str) -> list[str]:
     unexpected = [name for name in members if not name.startswith(("ocura_oss/", info))]
     if unexpected:
         problems.append(f"wheel contains unexpected files: {', '.join(unexpected)}")
+    if _contains_migration_tools(members):
+        problems.append("wheel includes repository-only migration tools")
     problems += _metadata_problems("wheel", metadata, version)
 
     # The archive's name is not evidence of what it installs: pip reads PKG-INFO.
@@ -135,7 +137,16 @@ def check_distributions(dist: Path, version: str) -> list[str]:
         problems += _metadata_problems("source distribution", source_metadata, version)
     if any(name.startswith(f"ocura_oss-{version}/examples/") for name in names):
         problems.append("source distribution includes repository-only examples")
+    if _contains_migration_tools(names):
+        problems.append("source distribution includes repository-only migration tools")
     return problems
+
+
+def _contains_migration_tools(names: Sequence[str]) -> bool:
+    return any(
+        "migrations" in name.split("/") or name.rsplit("/", 1)[-1] == "migrate_0_4.py"
+        for name in names
+    )
 
 
 def _metadata_problems(label: str, metadata: email.message.Message, version: str) -> list[str]:

@@ -1,0 +1,3 @@
+# Frozen ledger checksums and the inventory digest require the writer's exact bytes.
+fixtures/** -text
+fixtures/**/logs/** -diff

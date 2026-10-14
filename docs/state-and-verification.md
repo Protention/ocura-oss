@@ -70,10 +70,18 @@ The old directory is never modified. Decide per project before upgrading:
 | You want to | Do this |
 | --- | --- |
 | Keep working with the existing records | Stay on 0.4 for that project: `python -m pip install "ocura-oss<0.5"` in its environment. 0.4 reads and extends the directory as before |
+| Carry complete 0.4 records into schema 2 | Use the optional [repository-only migration script](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md). It verifies the input and creates a separate copy with a migration receipt, retaining IDs, history, and log bytes. It is excluded from both pip distributions |
 | Start recording with 0.5 in the same project | Move the old directory aside, then run `ocura-oss init`. For example `mv .ocura-oss .ocura-oss-0.4`, or in PowerShell `Rename-Item .ocura-oss .ocura-oss-0.4` |
 | Look at old records after upgrading | The logs under the moved directory's `logs/` are plain files, and the records are plain JSON. To use 0.4's commands on them again, move the directory back to `.ocura-oss` in an environment that has 0.4 |
 
 A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old chokepoint as its source: record the baseline again under 0.5 before branching from it.
+
+A migrated copy instead retains the old identifiers and branch relationships, so
+it can use those records as branch sources. The optional script never activates
+the converted ledger in the original project, deletes old state, copies workload
+files, or executes recorded commands. Follow its guide to inspect and activate
+the result after verification. Incomplete or inconsistent 0.4 state needs
+separate inspection; migration does not reconstruct missing evidence.
 
 If you need comparisons or listings from the old records later, save them with 0.4 first, for example `ocura-oss compare --json --from ID` and `ocura-oss chokepoints --json`.
 

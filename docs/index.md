@@ -55,6 +55,11 @@ whose records you still need (`python -m pip install "ocura-oss<0.5"`), or move 
 directory aside and run `ocura-oss init`. See
 [upgrading from 0.4](state-and-verification.md#upgrading-from-04) before you upgrade.
 
+An optional [repository-only migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md)
+can copy a complete 0.4 ledger into schema 2 while retaining its original records
+and logs. The tool uses only the standard library and is excluded from the pip
+package; ordinary package commands still perform no automatic conversion.
+
 ## Install and try
 
 Python 3.11 or later is required. Ocura OSS uses only the standard library at runtime.

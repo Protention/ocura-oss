@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "kind": "atom",
+  "payload": {
+    "id": "atom-0000000000000000000000000000000a",
+    "pathway_id": "pathway-00000000000000000000000000000005",
+    "started_at": "2026-09-16T00:00:08.000000+00:00",
+    "finished_at": "2026-09-16T00:00:09.000000+00:00",
+    "duration_seconds": 0.003959,
+    "outcome": "launch_failed",
+    "return_code": null,
+    "launch_error_category": "executable_not_found",
+    "declared_parameters": {},
+    "command": [
+      "ocura-fixture-command-that-does-not-exist"
+    ],
+    "stdout_log": ".ocura-oss/logs/atom-0000000000000000000000000000000a.stdout.log",
+    "stderr_log": ".ocura-oss/logs/atom-0000000000000000000000000000000a.stderr.log",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "8104712f9f6d544b5d66c81d0f61328acd392aba14b2f7014b3c55a02e01d491"
+  }
+}
