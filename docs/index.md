@@ -144,7 +144,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
 - [Autoregressive example](../examples/autoregressive/README.md): PyTorch, JAX, and Ray
-- [Hosted documentation](https://ocuna-ai.com/docs): the currently published release
+- [Hosted documentation](https://protention.dev/): the currently published release
 
 Repository references describe this checkout and remain readable directly on GitHub.
 

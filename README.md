@@ -65,7 +65,7 @@ second exits immediately and leaves the attempt for `ocura-oss recover` to close
 
 ## Autoregressive example: PyTorch, JAX, and Ray
 
-The [autoregressive example](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md) trains a small
+The [autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md) trains a small
 character-level next-token model on an included text corpus. Choose PyTorch or
 JAX, run a baseline and a longer-training variant, then reconstruct the comparison
 from saved evidence. An optional Ray Core executor runs either backend as a local
@@ -100,21 +100,21 @@ comparison = compare(baseline.chokepoint.id, root=root)
 Use `Store(root).read_verified_log(atom_id, stream="stdout")` to consume recorded
 output as bytes checked against the stored atom's byte count and SHA-256 digest.
 The method also accepts `stream="stderr"`; decoding and metric interpretation
-remain with your script. See the [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md#storeread_verified_log).
+remain with your script. See the [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md#storeread_verified_log).
 
 An agent can use the same CLI or Python workflow inside its existing execution
-environment. The [automation guide](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/automation.md) explains JSON results,
+environment. The [automation guide](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md) explains JSON results,
 exit codes, parameter labels, and how to inspect earlier attempts.
 
 ## Documentation
 
-- [Overview](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/index.md): installation, concepts, and the complete workflow
-- [CLI reference](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/cli.md): every command, JSON fields, and exit codes
-- [Python API](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/python-api.md): functions, typed results, and `Store`
-- [Scripts and AI agents](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
-- [State and verification](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
-- [Autoregressive example](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
-- [Hosted documentation](https://ocuna-ai.com/docs): the currently published release
+- [Overview](https://github.com/Protention/ocura-oss/blob/main/docs/index.md): installation, concepts, and the complete workflow
+- [CLI reference](https://github.com/Protention/ocura-oss/blob/main/docs/cli.md): every command, JSON fields, and exit codes
+- [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md): functions, typed results, and `Store`
+- [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
+- [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
+- [Autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
+- [Hosted documentation](https://protention.dev/): the currently published release
 
 The full references are included in this checkout and remain readable directly on GitHub.
 
@@ -147,13 +147,13 @@ not convert one.** Commands pointed at old state stop with exit status 2 and say
 the directory is left untouched. To keep working with existing records, stay on 0.4
 for that project (`python -m pip install "ocura-oss<0.5"`). To record with 0.5, move
 the old directory aside and run `ocura-oss init`. The
-[upgrade notes](https://github.com/BlakeMasters/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
+[upgrade notes](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
 cover each case.
 
 ## Project status
 
-Ocura OSS is research software under [MPL-2.0](https://github.com/BlakeMasters/ocura-oss/blob/main/LICENSE). The 0.x interface and record
+Ocura OSS is research software under [MPL-2.0](https://github.com/Protention/ocura-oss/blob/main/LICENSE). The 0.x interface and record
 format may change before 1.0, and there is no production support commitment.
 
-Bug reports and focused pull requests are welcome. See [Contributing](https://github.com/BlakeMasters/ocura-oss/blob/main/CONTRIBUTING.md)
-and the [security policy](https://github.com/BlakeMasters/ocura-oss/blob/main/SECURITY.md).
+Bug reports and focused pull requests are welcome. See [Contributing](https://github.com/Protention/ocura-oss/blob/main/CONTRIBUTING.md)
+and the [security policy](https://github.com/Protention/ocura-oss/blob/main/SECURITY.md).
