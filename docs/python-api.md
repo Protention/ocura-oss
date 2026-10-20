@@ -1541,7 +1541,7 @@ Dataclass fields use concrete record and result types. Parameter inputs use `col
 
 ## State and concurrency
 
-The supported programmatic workflows write project-local `.ocura-oss/` state in schema version 2. State written by 0.4 and earlier, and legacy `.ocura/` records, are not compatible.
+The supported programmatic workflows write project-local `.ocura-oss/` state in schema version 2. State written by 0.4 and earlier is not compatible.
 
 Several processes may record runs under one state root at the same time, and verification and comparison may run while they do. Public workflow functions perform record mutation; direct record writers remain internal. The liveness of an unfinished attempt is read from an operating-system file lock, which is reliable on local filesystems only.
 

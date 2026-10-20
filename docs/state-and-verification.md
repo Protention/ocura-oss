@@ -45,7 +45,7 @@ The checksum covers the schema version, kind, and canonical payload. It provides
 
 ## Format compatibility
 
-Records carry schema version 2. This release reads schema 2 only. State written by Ocura OSS 0.4 and earlier carries schema 1 and is rejected; see [upgrading from 0.4](#upgrading-from-04). Legacy `.ocura/` state is not compatible either.
+Records carry schema version 2. This release reads schema 2 only. State written by Ocura OSS 0.4 and earlier carries schema 1 and is rejected; see [upgrading from 0.4](#upgrading-from-04).
 
 Within one schema version, a record changes only by gaining optional fields:
 
