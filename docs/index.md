@@ -151,7 +151,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
 - [Autoregressive example](../examples/autoregressive/README.md): PyTorch, JAX, and Ray
-- [Hosted documentation](https://ocuna-ai.com/docs): the currently published release
+- [Hosted documentation](https://protention.dev/): the currently published release
 
 Repository references describe this checkout and remain readable directly on GitHub.
 
@@ -164,8 +164,7 @@ a **chokepoint** identifies terminal evidence from which a branch can be created
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.
 Several processes may record runs under one state root at once. Delete `.ocura-oss/`
-to discard that project's records. State from 0.4 and earlier, and legacy `.ocura/`
-records, are unsupported.
+to discard that project's records. State from 0.4 and earlier is unsupported.
 
 Commands run with `shell=False` in the project root and inherit the invoking
 environment's permissions. Use trusted, owner-authorized workloads. For generated

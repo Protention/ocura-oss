@@ -23,12 +23,12 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/BlakeMasters/ocura-oss"
-Repository = "https://github.com/BlakeMasters/ocura-oss"
-Issues = "https://github.com/BlakeMasters/ocura-oss/issues"
-Changelog = "https://github.com/BlakeMasters/ocura-oss/blob/main/CHANGELOG.md"
-Documentation = "https://ocuna-ai.com/docs"
-Security = "https://github.com/BlakeMasters/ocura-oss/blob/main/SECURITY.md"
+Homepage = "https://protention.dev/"
+Repository = "https://github.com/Protention/ocura-oss"
+Issues = "https://github.com/Protention/ocura-oss/issues"
+Changelog = "https://github.com/Protention/ocura-oss/blob/main/CHANGELOG.md"
+Documentation = "https://protention.dev/"
+Security = "https://github.com/Protention/ocura-oss/blob/main/SECURITY.md"
 
 [project.scripts]
 ocura-oss = "ocura_oss.cli:main"

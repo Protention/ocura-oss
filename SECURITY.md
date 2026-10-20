@@ -4,7 +4,7 @@ Ocura OSS runs trusted local commands directly on your machine. It does not sand
 
 ## Reporting a vulnerability
 
-Please do not open a public issue with exploitable details. Use [GitHub private vulnerability reporting](https://github.com/BlakeMasters/ocura-oss/security/advisories/new) when it is available.
+Please do not open a public issue with exploitable details. Use [GitHub private vulnerability reporting](https://github.com/Protention/ocura-oss/security/advisories/new) when it is available.
 
 If private reporting is unavailable, open a minimal issue asking for a private contact channel. Do not include the vulnerability details in that issue.
 
