@@ -47,7 +47,7 @@ When you change a command that the README shows, update those two scripts to mat
 The test suite uses `unittest`; pytest is not required. Please add or update tests when behavior changes, and update the README and changelog when a public command or record changes.
 
 When changing examples, also run Ruff on `examples/` and use the optional integration
-checks described in [the autoregressive guide](https://github.com/BlakeMasters/ocura-oss/blob/main/examples/autoregressive/README.md).
+checks described in [the autoregressive guide](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md).
 Continuous integration lints `examples/` and runs the PyTorch and JAX check on Linux;
 it does not run the Ray check.
 The normal test suite keeps framework imports optional. Examples, their requirements,
