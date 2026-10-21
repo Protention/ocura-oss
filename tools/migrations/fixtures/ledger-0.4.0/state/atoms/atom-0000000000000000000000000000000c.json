@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "atom",
+  "payload": {
+    "id": "atom-0000000000000000000000000000000c",
+    "pathway_id": "pathway-00000000000000000000000000000005",
+    "started_at": "2026-09-16T00:00:10.000000+00:00",
+    "finished_at": "2026-09-16T00:00:11.000000+00:00",
+    "duration_seconds": 0.008702,
+    "outcome": "interrupted",
+    "return_code": null,
+    "launch_error_category": "interrupted",
+    "declared_parameters": {},
+    "command": [
+      "python",
+      "-c",
+      "import time; time.sleep(60)"
+    ],
+    "stdout_log": ".ocura-oss/logs/atom-0000000000000000000000000000000c.stdout.log",
+    "stderr_log": ".ocura-oss/logs/atom-0000000000000000000000000000000c.stderr.log",
+    "stdout_bytes": 0,
+    "stderr_bytes": 0,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "068fc00a300572f255ae2deeaa2d81b20ce9708d36a2dbcafb6961ac02e585a7"
+  }
+}

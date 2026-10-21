@@ -35,6 +35,10 @@ This file records user-visible changes to Ocura OSS.
   `docs/state-and-verification.md`.
 - Documentation: the README and overview show what `compare` prints, say when a
   different tool is the better choice, and state how to remove the package's data.
+- Add an optional, standalone tool to copy complete 0.4 ledgers into schema 2.
+  It verifies the source, preserves IDs and log bytes, and writes a separate copy
+  with a migration receipt. Download it from `tools/migrations/`; it is excluded
+  from both the wheel and source distribution and adds no runtime dependencies.
 - The record format is unchanged. This release reads and extends state written by
   0.5.0.
 

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "chokepoint",
+  "payload": {
+    "id": "chokepoint-0000000000000000000000000000000d",
+    "pathway_id": "pathway-00000000000000000000000000000005",
+    "atom_id": "atom-0000000000000000000000000000000c",
+    "created_at": "2026-09-16T00:00:11.000000+00:00",
+    "kind": "terminal",
+    "outcome": "interrupted",
+    "branchable": true
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "d6daa3f5ad40ceedd7c69e9038181500bdae9359f7a3978e0e8f3295448b2adb"
+  }
+}

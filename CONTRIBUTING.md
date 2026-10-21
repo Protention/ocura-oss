@@ -29,9 +29,11 @@ Run these checks before opening a pull request:
 
 ```console
 python -m unittest discover -s tests
+python -m unittest discover -s tools/migrations/tests
 python -m ruff check src tests tools
 python -m ruff format --check src tests tools
 python -m mypy src/ocura_oss
+python -m mypy --strict tools/migrations/migrate_0_4.py
 python tools/check_release.py
 python -m build
 python -m twine check dist/*

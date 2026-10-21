@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "kind": "pathway",
+  "payload": {
+    "id": "pathway-00000000000000000000000000000002",
+    "den_id": "den-00000000000000000000000000000001",
+    "created_at": "2026-09-16T00:00:00.000000+00:00",
+    "parent_pathway_id": null,
+    "source_chokepoint_id": null,
+    "reason": "default pathway",
+    "parameters": {}
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "d5832cd465332a482c00aeb6b44b999ecbd5c77adf3ef3e4f74cf9085fc41649"
+  }
+}
