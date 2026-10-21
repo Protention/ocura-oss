@@ -195,6 +195,12 @@ version, move the old directory aside and run `ocura-oss init`. The
 [upgrade notes](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
 cover each case.
 
+For a complete 0.4 ledger, the optional
+[migration script](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md)
+verifies the old state and creates a separate schema-2 copy. It uses only the
+standard library and is downloaded from the repository separately from the pip
+package. The original records and logs are retained.
+
 ## Project status
 
 Ocura OSS is research software under the [Apache License 2.0](https://github.com/Protention/ocura-oss/blob/main/LICENSE).
