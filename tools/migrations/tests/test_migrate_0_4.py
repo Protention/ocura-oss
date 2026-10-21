@@ -362,7 +362,8 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(log.read_bytes().endswith(b"concurrent writer"))
 
     def test_parsed_record_bytes_must_match_the_verified_inventory(self):
-        atom = self.record("atoms")
+        # The migration resolves temporary-directory aliases before reading records.
+        atom = self.record("atoms").resolve()
         alternate = migration.read_json(atom)
         alternate["payload"]["declared_parameters"]["batch"] = "999"
         alternate["checksum"] = migration.checksum(alternate)
