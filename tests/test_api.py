@@ -27,6 +27,8 @@ class PublicSurfaceTests(unittest.TestCase):
                 "Den",
                 "FileDigest",
                 "Initialization",
+                "LogInfo",
+                "LogStorageChange",
                 "Outcome",
                 "OutputCapture",
                 "ParameterDelta",

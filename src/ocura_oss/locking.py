@@ -151,13 +151,15 @@ def is_held(path: Path) -> bool:
 
 
 @contextlib.contextmanager
-def hold(path: Path) -> Iterator[None]:
+def hold(path: Path, *, wait_limit: float | None = _WAIT_LIMIT) -> Iterator[None]:
     """Create and hold the lock file at *path* until the block exits.
 
     The file is removed on exit. If the process dies first, the file remains
     but the operating system drops the lock, so :func:`is_held` reports false.
+    ``wait_limit=None`` waits until the owner releases it, for storage changes
+    whose duration depends on the size of a log.
     """
-    descriptor = _acquire(path, _WAIT_LIMIT)
+    descriptor = _acquire(path, wait_limit)
     if descriptor is None:
         raise TimeoutError(f"could not lock {path.name}")
     try:
@@ -184,14 +186,14 @@ def try_hold(path: Path) -> Iterator[bool]:
         _release(descriptor, path)
 
 
-def _acquire(path: Path, limit: float) -> int | None:
+def _acquire(path: Path, limit: float | None) -> int | None:
     """Take the lock exclusively within *limit* seconds, or return ``None``."""
-    deadline = time.monotonic() + limit
+    deadline = time.monotonic() + limit if limit is not None else None
     while True:
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
         try:
             while not _try_lock(descriptor):
-                if time.monotonic() > deadline:
+                if deadline is not None and time.monotonic() > deadline:
                     os.close(descriptor)
                     return None
                 time.sleep(_WAIT_STEP)

@@ -8,6 +8,7 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from dataclasses import asdict
 from pathlib import Path
 
 from ocura_oss import branching, demo, model, runner, store, supervise
@@ -119,7 +120,10 @@ def _build_parser() -> argparse.ArgumentParser:
             " `ocura-oss recover` closes it. With --json, command output"
             " stays in the logs and stdout contains one result object.\n"
             "Use --no-capture when output must not be retained, and --mask-arg"
-            " for a command token that must not be recorded.\n"
+            " for a command token that must not be recorded. Captured logs of at"
+            " least 1 MiB are considered once after finalization for lossless gzip"
+            " storage, requiring at least 10% savings. Use --no-compress to keep"
+            " raw storage and `ocura-oss logs ID` to read either form.\n"
             "With --substitute, write {KEY} in COMMAND to pass a parameter's value"
             " and record it from one declaration: --param batch=4 --substitute --"
             ' python train.py --batch "{batch}". Quote the placeholder in PowerShell.\n'
@@ -166,6 +170,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-capture",
         action="store_true",
         help="retain no stdout or stderr; the record states that output was not captured",
+    )
+    run_parser.add_argument(
+        "--no-compress",
+        action="store_true",
+        help="leave this run's captured logs uncompressed after finalization",
+    )
+    run_parser.add_argument(
+        "--compress-min-bytes",
+        type=int,
+        default=1_048_576,
+        metavar="N",
+        help="minimum original log size for automatic compression (default: 1048576)",
     )
     run_parser.add_argument(
         "--mask-arg",
@@ -411,6 +427,58 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="print machine-readable JSON instead of text"
     )
 
+    logs_parser = subparsers.add_parser(
+        "logs",
+        help="read verified original log bytes or inspect storage metadata",
+        description=(
+            "Writes the selected log's verified original bytes to stdout, transparently"
+            " decoding compressed storage. --info or --json emits metadata instead."
+            " The atom ID may be a unique prefix of at least four hexadecimal characters."
+        ),
+    )
+    logs_parser.add_argument("atom", metavar="ID", help="atom ID or unique prefix")
+    logs_parser.add_argument(
+        "--stream", choices=("stdout", "stderr"), default="stdout", help="log stream"
+    )
+    logs_parser.add_argument(
+        "--info", action="store_true", help="print verified metadata instead of log contents"
+    )
+    logs_parser.add_argument(
+        "--json", action="store_true", help="print verified metadata as JSON; implies --info"
+    )
+    logs_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+
+    for name, verb in (("compress", "compress"), ("decompress", "restore")):
+        storage_parser = subparsers.add_parser(
+            name,
+            help=f"{verb} finalized captured logs without changing recorded evidence",
+            description=(
+                "Changes only physical log storage after verifying the original bytes."
+                " Defaults to all finalized atoms; --atom accepts a full ID or unique prefix."
+                " --dry-run previews changes without replacing files."
+            ),
+        )
+        storage_parser.add_argument(
+            "--atom", default=None, metavar="ID", help="only this atom ID or unique prefix"
+        )
+        if name == "compress":
+            storage_parser.add_argument(
+                "--min-bytes",
+                type=int,
+                default=1_048_576,
+                metavar="N",
+                help="minimum original log size to compress (default: 1048576)",
+            )
+        storage_parser.add_argument(
+            "--dry-run", action="store_true", help="preview storage changes without writing"
+        )
+        storage_parser.add_argument(
+            "--json", action="store_true", help="print storage changes as JSON"
+        )
+        storage_parser.add_argument(
+            "--root", default=None, metavar="PATH", help="project root directory"
+        )
+
     demo_parser = subparsers.add_parser(
         "demo",
         help="run the complete workflow in a new retained directory",
@@ -457,6 +525,10 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _attempts(args)
     if name == "recover":
         return _recover(args)
+    if name == "logs":
+        return _logs(args)
+    if name in ("compress", "decompress"):
+        return _change_log_storage(args)
     if name == "demo":
         return _demo(args)
     raise StoreError(f"unknown command: {name}")
@@ -527,27 +599,32 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             declared_parameters=declared,
             mirror=mirror,
             capture=not args.no_capture,
+            compress=not args.no_compress,
+            compression_min_bytes=args.compress_min_bytes,
             masked_arguments=args.mask_arg,
             substitute=args.substitute,
             context=args.context,
             context_files=args.context_file,
         )
     atom = execution.atom
+    for message in execution.storage_warnings:
+        print(f"warning: {message}", file=sys.stderr)
     if args.json:
-        _emit_json(
-            {
-                "atom_id": atom.id,
-                "chokepoint_id": execution.chokepoint.id,
-                "pathway_id": atom.pathway_id,
-                "outcome": atom.outcome.value,
-                "duration_seconds": atom.duration_seconds,
-                "return_code": atom.return_code,
-                "launch_error_category": atom.launch_error_category,
-                "output_capture": atom.output_capture.value,
-                "stdout_log": atom.stdout_log,
-                "stderr_log": atom.stderr_log,
-            }
-        )
+        payload: dict[str, object] = {
+            "atom_id": atom.id,
+            "chokepoint_id": execution.chokepoint.id,
+            "pathway_id": atom.pathway_id,
+            "outcome": atom.outcome.value,
+            "duration_seconds": atom.duration_seconds,
+            "return_code": atom.return_code,
+            "launch_error_category": atom.launch_error_category,
+            "output_capture": atom.output_capture.value,
+            "stdout_log": atom.stdout_log,
+            "stderr_log": atom.stderr_log,
+        }
+        if execution.storage_warnings:
+            payload["storage_warnings"] = list(execution.storage_warnings)
+        _emit_json(payload)
     else:
         _print_run(execution)
     if atom.outcome is model.Outcome.LAUNCH_FAILED:
@@ -567,6 +644,7 @@ def _print_run(execution: runner.RunExecution) -> None:
     if atom.output_capture is model.OutputCapture.FULL:
         print(f"stdout log: {atom.stdout_log}")
         print(f"stderr log: {atom.stderr_log}")
+        print(f"read: ocura-oss logs {atom.id}")
     else:
         print("output: not captured")
     if atom.return_code is not None:
@@ -835,4 +913,55 @@ def _demo(args: argparse.Namespace) -> int:
         print(f"  {step.step}: {step.detail}")
     print(f"comparison: {report.comparison.state.value}")
     print("retained state under .ocura-oss/")
+    return EXIT_OK
+
+
+def _logs(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    atom_id = state.resolve_id(args.atom, "atom")
+    if args.info or args.json:
+        info = state.log_info(atom_id, stream=args.stream)
+        if args.json:
+            _emit_json(asdict(info))
+            return EXIT_OK
+        print(f"fingerprint: {info.fingerprint}")
+        print(f"atom: {info.atom_id}")
+        print(f"stream: {info.stream}")
+        print(f"outcome: {info.outcome}")
+        print(f"started: {info.started_at}")
+        print(f"encoding: {info.encoding}")
+        print(f"original bytes: {info.original_bytes}")
+        print(f"stored bytes: {info.stored_bytes}")
+        print(f"sha256: {info.sha256}")
+        print(f"storage path: {info.path}")
+        return EXIT_OK
+    data = state.read_verified_log(atom_id, stream=args.stream)
+    output = getattr(sys.stdout, "buffer", None)
+    if output is None:
+        raise StoreError("reading log bytes requires binary stdout; use --info or --json")
+    output.write(data)
+    output.flush()
+    return EXIT_OK
+
+
+def _change_log_storage(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    atom_id = None if args.atom is None else state.resolve_id(args.atom, "atom")
+    if args.command_name == "compress":
+        changes = state.compress_logs(
+            atom_id=atom_id, min_bytes=args.min_bytes, dry_run=args.dry_run
+        )
+    else:
+        changes = state.decompress_logs(atom_id=atom_id, dry_run=args.dry_run)
+    if args.json:
+        _emit_json({"dry_run": args.dry_run, "changes": [asdict(item) for item in changes]})
+        return EXIT_OK
+    if args.dry_run:
+        print("dry run: no storage changes written")
+    for item in changes:
+        print(
+            f"{item.action}: atom {item.atom_id}  stream={item.stream}"
+            f"  original={item.original_bytes}  stored={item.stored_bytes}  path={item.path}"
+        )
+    print(f"logs considered: {len(changes)}")
     return EXIT_OK

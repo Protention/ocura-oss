@@ -34,7 +34,14 @@ from ocura_oss.model import (
     RunSummary,
 )
 from ocura_oss.runner import RunExecution
-from ocura_oss.store import RecoveredAttempt, StateVerification, Store, StoreError
+from ocura_oss.store import (
+    LogInfo,
+    LogStorageChange,
+    RecoveredAttempt,
+    StateVerification,
+    Store,
+    StoreError,
+)
 
 __all__ = (
     "Atom",
@@ -50,6 +57,8 @@ __all__ = (
     "Den",
     "FileDigest",
     "Initialization",
+    "LogInfo",
+    "LogStorageChange",
     "Outcome",
     "OutputCapture",
     "ParameterDelta",
