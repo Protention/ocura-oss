@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.6.0 - Unreleased
+## 0.6.0 - 2026-10-22
 
 - **License:** Ocura OSS is now released under the Apache License 2.0. Versions 0.5.0
   and earlier remain under MPL-2.0. Contributions are accepted under Apache-2.0.
@@ -39,8 +39,6 @@ This file records user-visible changes to Ocura OSS.
   It verifies the source, preserves IDs and log bytes, and writes a separate copy
   with a migration receipt. Download it from `tools/migrations/`; it is excluded
   from both the wheel and source distribution and adds no runtime dependencies.
-- The record format is unchanged. This release reads and extends state written by
-  0.5.0.
 
 ## 0.5.0 - 2026-10-07
 
