@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import hashlib
+import heapq
 import json
 import os
 import tempfile
@@ -70,6 +71,40 @@ class RecoveredAttempt:
 
 class StoreError(Exception):
     """State, schema, or integrity failure. The CLI maps this to exit code 2."""
+
+
+@dataclass(frozen=True)
+class RunPage:
+    """A bounded page of finalized run metadata; log contents are not verified."""
+
+    runs: tuple[model.RunSummary, ...]
+    next_after: str | None
+
+    def to_dict(self) -> dict:
+        return {
+            "runs": [item.to_dict() for item in self.runs],
+            "next_after": self.next_after,
+            "verification": {"scope": "records", "logs_checked": 0},
+        }
+
+
+@dataclass(frozen=True)
+class RunInspection:
+    """One validated run and its pathway, without reading log contents."""
+
+    atom: model.Atom
+    pathway: model.Pathway
+
+    def to_dict(self, *, include_command: bool = False) -> dict:
+        payload = model.atom_to_payload(self.atom)
+        if not include_command:
+            payload.pop("command")
+            payload.pop("masked_arguments")
+        return {
+            "atom": payload,
+            "pathway": model.pathway_to_payload(self.pathway),
+            "verification": {"scope": "record_and_lineage", "logs_checked": 0},
+        }
 
 
 def resolve_root(root: os.PathLike[str] | str | None = None) -> Path:
@@ -421,6 +456,51 @@ class Store:
         records.sort(key=lambda item: (item.started_at, item.id))
         return records
 
+    def list_runs(
+        self,
+        *,
+        pathway_id: str | None = None,
+        outcome: model.Outcome | None = None,
+        after: str | None = None,
+        limit: int = 100,
+    ) -> RunPage:
+        """Page finalized runs in start/ID order, retaining only limit+1 candidates.
+
+        Every scanned atom's envelope and fields are checked; relationships and
+        log contents are not. This is a live listing, not a frozen snapshot: runs
+        finalized later with an earlier start time can fall behind the cursor.
+        """
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise StoreError("run page limit must be between 1 and 1000")
+        if outcome is not None and not isinstance(outcome, model.Outcome):
+            raise StoreError("outcome must be an Outcome value")
+        self.require()
+        self.load_den()
+        if pathway_id is not None:
+            self.load_pathway(pathway_id)
+        boundary = self.load_atom(after) if after is not None else None
+        start = None if boundary is None else (boundary.started_at, boundary.id)
+        candidates = (
+            atom
+            for atom in self._iter_typed(self.atoms_dir, "atom", model.atom_from_payload)
+            if (pathway_id is None or atom.pathway_id == pathway_id)
+            and (outcome is None or atom.outcome is outcome)
+            and (start is None or (atom.started_at, atom.id) > start)
+        )
+        selected = heapq.nsmallest(
+            limit + 1, candidates, key=lambda item: (item.started_at, item.id)
+        )
+        return RunPage(
+            runs=tuple(model.run_summary_from_atom(atom) for atom in selected[:limit]),
+            next_after=selected[limit - 1].id if len(selected) > limit else None,
+        )
+
+    def inspect_run(self, atom_id: str) -> RunInspection:
+        """Load one run and its reason/lineage without scanning or decoding logs."""
+        self.require()
+        atom = self.load_atom(atom_id)
+        return RunInspection(atom=atom, pathway=self.load_pathway(atom.pathway_id))
+
     def list_chokepoints(self) -> list[model.Chokepoint]:
         """Return validated chokepoints in reverse creation order."""
         records = self._list_typed(
@@ -740,12 +820,13 @@ class Store:
         _atomic_write_bytes(path, text.encode("utf-8"))
 
     def _list_typed(self, directory: Path, kind: str, converter: Callable[[dict], _T]) -> list[_T]:
-        records: list[_T] = []
-        if not directory.is_dir():
-            return records
-        for path in sorted(directory.glob("*.json")):
-            records.append(self._load_listed(path, kind, converter))
-        return records
+        return list(self._iter_typed(directory, kind, converter))
+
+    def _iter_typed(
+        self, directory: Path, kind: str, converter: Callable[[dict], _T]
+    ) -> Iterator[_T]:
+        for path in directory.glob("*.json"):
+            yield self._load_listed(path, kind, converter)
 
     def _load_listed(
         self,

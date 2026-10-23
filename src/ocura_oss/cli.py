@@ -206,6 +206,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="command tokens after -- (required); executed verbatim",
     )
 
+    runs_parser = subparsers.add_parser("runs", help="page recorded runs without reading logs")
+    runs_parser.add_argument("--pathway", metavar="ID", help="only runs on this pathway")
+    runs_parser.add_argument("--outcome", choices=[item.value for item in model.Outcome])
+    runs_parser.add_argument(
+        "--after", metavar="ID", help="continue after this run in start/ID order"
+    )
+    runs_parser.add_argument(
+        "--limit", type=int, default=100, help="page size, 1 to 1000 (default: 100)"
+    )
+    runs_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+    runs_parser.add_argument(
+        "--json", action="store_true", help="print a JSON page and next_after ID"
+    )
+
+    show_parser = subparsers.add_parser(
+        "show", help="inspect a run, its reason and log identities without reading logs"
+    )
+    show_parser.add_argument("atom", metavar="ID", help="atom ID or unique prefix")
+    show_parser.add_argument(
+        "--command", action="store_true", help="also include recorded arguments"
+    )
+    show_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+    show_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
     pathways_parser = subparsers.add_parser(
         "pathways",
         help="list pathways oldest first",
@@ -442,6 +466,10 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _init(args)
     if name == "run":
         return _run(args, command_tail)
+    if name == "runs":
+        return _runs(args)
+    if name == "show":
+        return _show(args)
     if name == "pathways":
         return _pathways(args)
     if name == "chokepoints":
@@ -643,6 +671,49 @@ def _chokepoints(args: argparse.Namespace) -> int:
             f"  atom={item.atom_id}  outcome={item.outcome.value}"
             f"  branchable={branchable}"
         )
+    return EXIT_OK
+
+
+def _runs(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    page = state.list_runs(
+        pathway_id=None if args.pathway is None else state.resolve_id(args.pathway, "pathway"),
+        outcome=None if args.outcome is None else model.Outcome(args.outcome),
+        after=None if args.after is None else state.resolve_id(args.after, "atom"),
+        limit=args.limit,
+    )
+    if args.json:
+        _emit_json(page.to_dict())
+    else:
+        for item in page.runs:
+            print(f"{item.started_at}  {item.id}  pathway={item.pathway_id}  {_run_phrase(item)}")
+        if page.next_after is not None:
+            print(f"next after: {page.next_after}")
+        print("verification: records checked; logs not checked")
+    return EXIT_OK
+
+
+def _show(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    inspected = state.inspect_run(state.resolve_id(args.atom, "atom"))
+    if args.json:
+        _emit_json(inspected.to_dict(include_command=args.command))
+        return EXIT_OK
+    atom, pathway = inspected.atom, inspected.pathway
+    print(f"atom: {atom.id}")
+    print(f"run: {_run_phrase(model.run_summary_from_atom(atom))}")
+    print(f"pathway: {pathway.id}")
+    print(f"reason: {pathway.reason}")
+    print(f"source chokepoint: {pathway.source_chokepoint_id or '-'}")
+    print(f"parameters: {json.dumps(dict(atom.declared_parameters), ensure_ascii=True)}")
+    for stream in ("stdout", "stderr"):
+        print(f"{stream}: {getattr(atom, f'{stream}_log') or 'not captured'}")
+        if atom.output_capture is model.OutputCapture.FULL:
+            print(f"  bytes: {getattr(atom, f'{stream}_bytes')}")
+            print(f"  sha256: {getattr(atom, f'{stream}_sha256')}")
+    if args.command:
+        print(f"command: {json.dumps(list(atom.command), ensure_ascii=True)}")
+    print("verification: record and lineage checked; logs not checked")
     return EXIT_OK
 
 

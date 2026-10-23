@@ -2,6 +2,8 @@
 
 Version 0.6.0.
 
+This local branch adds an unreleased [agent access prototype](planning/0.7-agent-access.md).
+
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
 
 ```text
@@ -16,6 +18,8 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | --- | --- |
 | `init` | Create one den and its default pathway |
 | `run` | Run one command and record an atom, logs, and a chokepoint |
+| `runs` | Page recorded run metadata, including failed retries |
+| `show` | Inspect one run and its pathway without reading logs |
 | `pathways` | List pathway lineage and evidence status |
 | `chokepoints` | List terminal evidence boundaries |
 | `branch` | Create a metadata-only child pathway |
@@ -217,6 +221,41 @@ Keep a token out of the records and its output off disk. Position 3 is the value
 ```console
 ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 ```
+
+## `runs` and `show`
+
+```text
+ocura-oss runs [--pathway ID] [--outcome OUTCOME] [--after ID] [--limit N]
+               [--json] [--root PATH]
+ocura-oss show ID [--command] [--json] [--root PATH]
+```
+
+`runs` lists atoms in ascending `(started_at, id)` order, including earlier failed
+attempts on a pathway. `--limit` defaults to 100 and accepts 1 through 1000.
+`--pathway` selects one pathway; `--outcome` accepts the recorded outcomes listed
+under `run`. `--after` resumes strictly after a known atom's ordering key.
+
+JSON contains `runs` (the same reduced run summaries used by `compare`),
+`next_after` (the last returned full atom ID when more matches exist, otherwise
+null), and `verification: {"scope": "records", "logs_checked": 0}`. Every scanned
+atom's envelope and fields must validate, even when filters exclude it. Relationships
+and log contents are not checked. Each page scans the atom records once, retaining
+at most `limit + 1` candidates; there is no persistent search index.
+
+This is a live listing. Runs finalized later with an earlier start time can fall
+behind its cursor. Use a stable archive for a complete paginated snapshot.
+`attempts` continues to list unfinished executions separately.
+
+`show` selects one atom, validates its record and lineage, and returns `atom`,
+`pathway`, and `verification: {"scope": "record_and_lineage", "logs_checked": 0}`.
+The atom includes declared parameters, timing, outcome and recorded log paths,
+sizes and digests. The pathway includes the reason and source relationship.
+Command arguments and masking positions are omitted unless `--command` is supplied.
+No log contents are read; use `logs` to consume verified bytes.
+
+Both commands accept unique ID prefixes in their ID options. Agents should retain
+and reuse the full returned IDs. A successful view returns 0, and invalid input
+or records return 2 without a partial JSON result.
 
 ## `pathways`
 

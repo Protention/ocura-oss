@@ -2,6 +2,8 @@
 
 Version 0.6.0.
 
+This local branch adds an unreleased [agent access prototype](planning/0.7-agent-access.md).
+
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
 Names listed in `ocura_oss.__all__` form the documented top-level API. Internal record writers and implementation helpers remain package internals.
@@ -702,6 +704,28 @@ A list sorted by `started_at`, then `id`.
 | `StoreError` | Any listed JSON record has an invalid envelope, checksum, payload, outcome invariants, kind, or filename-to-ID relationship |
 
 `load_atom()` adds pathway validation. `verify_state()` adds complete relationship and log verification.
+
+### `Store.list_runs` and `Store.inspect_run`
+
+```python
+store.list_runs(
+    *, pathway_id: str | None = None, outcome: Outcome | None = None,
+    after: str | None = None, limit: int = 100,
+) -> RunPage
+store.inspect_run(atom_id: str) -> RunInspection
+```
+
+`RunPage` contains `runs: tuple[RunSummary, ...]` and `next_after: str | None`.
+`RunInspection` contains `atom: Atom` and `pathway: Pathway`. Both result types
+live in `ocura_oss.store`; the top-level exports are unchanged. Their `to_dict()`
+methods include verification scope. `RunInspection.to_dict(include_command=True)`
+includes command arguments, which are omitted by default.
+
+Listing checks scanned atom envelopes and fields, retains earlier failures, and
+uses a bounded selection buffer. Inspection validates one selected run and its
+lineage. Neither reads log contents. Limits, live pagination, filters and failure
+behavior follow the [CLI contract](cli.md#runs-and-show). Python callers supply
+full IDs and `Outcome` values. Invalid limits, selectors or records raise `StoreError`.
 
 ### `Store.list_chokepoints`
 
