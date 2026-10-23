@@ -25,7 +25,7 @@ class CompressionTests(unittest.TestCase):
     def setUp(self):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
-        self.root = Path(self._temporary.name) / "project"
+        self.root = (Path(self._temporary.name) / "project").resolve()
         self.store = Store(self.root)
         _, self.pathway = self.store.initialize_state(name="compression tests")
 
