@@ -592,6 +592,35 @@ class CompressionTests(unittest.TestCase):
                 self.assertEqual(result.stdout, expected)
                 self.assertEqual(result.stderr, b"")
 
+    def test_cli_rejects_late_gzip_corruption_without_releasing_log_bytes(self):
+        data = b"original verified output\n" * 150000
+        atom = self._run_bytes(data).atom
+        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+        _raw, packed = self._paths(atom)
+        original = packed.read_bytes()
+        for changed, error in (
+            (gzip.compress(data[:-1] + b"!", mtime=0), b"checksum mismatch"),
+            (original[:-8], b"unreadable"),
+        ):
+            with self.subTest(error=error):
+                packed.write_bytes(changed)
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "ocura_oss",
+                        "logs",
+                        atom.id,
+                        "--root",
+                        str(self.root),
+                    ],
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, b"")
+                self.assertIn(error, result.stderr)
+
     def test_cli_run_compression_flags(self):
         for flags, compressed in (
             (["--no-compress"], False),

@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextlib
 import gzip
 import hashlib
+import io
 import os
 import tempfile
 import zlib
@@ -91,7 +92,7 @@ def _consume(
 ) -> bytes | None:
     measured = 0
     checksum = hashlib.sha256()
-    contents = bytearray() if collect else None
+    contents = io.BytesIO() if collect else None
     while True:
         # The extra byte both bounds expansion and asks gzip to validate its
         # footer and any trailing members even when output size matches.
@@ -103,12 +104,12 @@ def _consume(
             _check_size(measured, size, path)
         checksum.update(chunk)
         if contents is not None:
-            contents.extend(chunk)
+            contents.write(chunk)
         if sink is not None:
             sink.write(chunk)
     _check_size(measured, size, path)
     _check_digest(checksum.hexdigest(), digest, path)
-    return bytes(contents) if contents is not None else None
+    return contents.getvalue() if contents is not None else None
 
 
 def _verify_raw(path: Path, size: int, digest: str, *, collect: bool) -> bytes | None:

@@ -18,6 +18,7 @@ for future consideration until the decisions below are settled.
   declared before promising schema compatibility or a downgrade path.
 - **Reading large logs:** verification streams with bounded memory, while
   `logs` and `read_verified_log()` collect the complete original stream in memory.
+  The reader avoids a second full-log copy when returning the decoded bytes.
   Decide how a consumer should inspect large logs without that allocation.
 - **Read-only ledgers:** readers and verification currently create temporary
   lock files in `.ocura-oss/log-locks/`, requiring write access to the ledger.
@@ -73,6 +74,12 @@ stdout, with no extra newline or summary. It handles raw and compressed storage
 transparently. The terminal or receiving tool decides how to display those bytes.
 `Store(root).read_verified_log(atom_id, stream="stdout")` returns the same bytes
 to Python; decoding and metric interpretation remain the caller's responsibility.
+
+The complete selected stream is verified before any content is released. Gzip
+decoding uses a single output buffer, avoiding a second full-log copy at return
+time on CPython. Memory still grows with the original log size. Direct streaming
+could reduce that memory further, but can discover a bad checksum only after
+earlier output has escaped; this draft preserves verification before output.
 
 `--info` shows storage metadata, including the run's outcome and start time,
 original and stored sizes, actual backing path, and full original SHA-256.
