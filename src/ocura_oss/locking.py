@@ -190,7 +190,7 @@ def _acquire(path: Path, limit: float | None) -> int | None:
     """Take the lock exclusively within *limit* seconds, or return ``None``."""
     deadline = time.monotonic() + limit if limit is not None else None
     while True:
-        descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        descriptor = _open_lock(path)
         try:
             while not _try_lock(descriptor):
                 if deadline is not None and time.monotonic() > deadline:
@@ -203,3 +203,17 @@ def _acquire(path: Path, limit: float | None) -> int | None:
             os.close(descriptor)
             raise
         os.close(descriptor)
+
+
+def _open_lock(path: Path) -> int:
+    """Tolerate a Windows lock name still being removed by its previous owner."""
+    deadline = time.monotonic() + _READER_GRACE
+    while True:
+        try:
+            return os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+        except PermissionError:
+            # Frequent storage readers expose a short open/delete handoff on
+            # Windows. Bound retries so a genuine access denial still raises.
+            if sys.platform != "win32" or time.monotonic() >= deadline:
+                raise
+            time.sleep(_WAIT_STEP)

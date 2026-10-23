@@ -2,6 +2,10 @@
 
 Version 0.6.0.
 
+This draft builds on 0.6.0. Compression options, storage metadata, and conversion
+methods below are proposed branch behavior, absent from the released package.
+See [open design decisions](autocompression.md#decisions-before-merge).
+
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
 Names listed in `ocura_oss.__all__` form the documented top-level API. Internal record writers and implementation helpers remain package internals.
@@ -867,7 +871,9 @@ Verify one captured log and return storage metadata without returning its
 contents. `atom_id` must be a full identifier. Invalid lineage, stream, capture
 mode, or evidence raises `StoreError`, as for `read_verified_log()`.
 
-`LogInfo` has these fields:
+The draft defines `LogInfo` in `ocura_oss.store`, without adding it to
+`ocura_oss.__all__`. Its shape and public status remain part of the design review.
+It has these fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -912,6 +918,7 @@ replacing files.
 
 Each returned `LogStorageChange` contains `atom_id`, `stream`, `action`,
 `original_bytes`, `stored_bytes`, and `path` (the project-relative backing path).
+This draft result type also lives in `ocura_oss.store`, without a top-level export.
 Actions are `compressed`, `would-compress`, `restored`, `would-restore`,
 `unchanged`, `small`, or `no-savings`.
 The records and original digests remain unchanged, as do retained manifests.
@@ -1650,7 +1657,7 @@ Dataclass fields use concrete record and result types. Parameter inputs use `col
 
 ## State and concurrency
 
-The supported programmatic workflows write project-local `.ocura-oss/` state in schema version 2. State written by 0.4 and earlier is not compatible.
+The supported programmatic workflows write project-local `.ocura-oss/` state. See [state and verification](state-and-verification.md) for record details and upgrade tools.
 
 Several processes may record runs under one state root at the same time, and verification and comparison may run while they do. Public workflow functions perform record mutation; direct record writers remain internal. The liveness of an unfinished attempt is read from an operating-system file lock, which is reliable on local filesystems only.
 

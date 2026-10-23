@@ -10,6 +10,9 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
+This branch contains a [draft autocompression prototype](docs/autocompression.md)
+for future discussion. Its compression features are not part of released 0.6.0.
+
 ## Why use it
 
 Ocura OSS is built to just work. It aims to be the easiest way to start recording
@@ -21,9 +24,9 @@ runs in a new project, especially for local development:
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
-- **Easy to modify.** The package is a small set of typed Python modules, and its
-  records are plain JSON files. You or an agent can read all
-  of it and change it to fit your workflow, and the Apache-2.0 license does not
+- **Easy to modify.** This draft is thirteen modules, about 4,800 lines of typed
+  Python, and its records are plain JSON files. You or an agent can read all of
+  it and change it to fit your workflow, and the Apache-2.0 license does not
   require you to publish your changes.
 
 To remove the ledger, delete `.ocura-oss/` in your project. That directory holds
@@ -172,6 +175,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
 - [Local autocompression prototype](docs/autocompression.md): timing, verified reading, fingerprints, and reversible storage
 - [Autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
+- [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The full references are included in this checkout and remain readable directly on GitHub.
 The documentation for the published release is also [available online](https://protention.dev/).
@@ -185,7 +189,7 @@ a **chokepoint** identifies terminal evidence from which a branch can be created
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.
 Several processes may record runs under one state root at once. Delete `.ocura-oss/`
-to discard that project's records. State from 0.4 and earlier is unsupported.
+to discard that project's records.
 
 Commands run with `shell=False` in the project root and inherit the invoking
 environment's permissions. Use trusted, owner-authorized workloads. For generated
@@ -196,22 +200,6 @@ Records retain command arguments, parameter labels, reasons, and output. Keep se
 out of these fields; `run --mask-arg` and `run --no-capture` cover a command token or
 output that cannot be avoided. SHA-256 checksums detect local inconsistencies; they do not
 authenticate authorship or prevent a writer from replacing records and checksums.
-
-## Upgrading from 0.4
-
-**Versions 0.5 and later cannot read a `.ocura-oss/` directory written by 0.4 or earlier,
-and do not convert one.** Commands pointed at old state stop with exit status 2 and say so;
-the directory is left untouched. To keep working with existing records, stay on 0.4
-for that project (`python -m pip install "ocura-oss<0.5"`). To record with a current
-version, move the old directory aside and run `ocura-oss init`. The
-[upgrade notes](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#upgrading-from-04)
-cover each case.
-
-For a complete 0.4 ledger, the optional
-[migration script](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md)
-verifies the old state and creates a separate schema-2 copy. It uses only the
-standard library and is downloaded from the repository separately from the pip
-package. The original records and logs are retained.
 
 ## Project status
 

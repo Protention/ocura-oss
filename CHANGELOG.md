@@ -2,18 +2,8 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.6.0 - Unreleased
+## 0.6.0 - 2026-10-22
 
-- **Local branch prototype:** losslessly compress finalized captured logs once
-  after each run at 1 MiB or larger, using gzip level 6 only when it saves at
-  least 10%. Add `run --no-compress` and `--compress-min-bytes`, explicit
-  `compress`/`decompress` commands with previews, and `logs` for verified original
-  bytes or readable storage metadata. Python exposes equivalent `run()` options,
-  `Store.compress_logs()`, `Store.decompress_logs()`, and `Store.log_info()`.
-  Original hashes, JSON records, and manifests stay unchanged. Gzip backing is
-  a physical storage compatibility extension despite unchanged schema 2:
-  decompress with this branch before using older readers. The prototype is not
-  published; see `docs/autocompression.md` for limits.
 - **License:** Ocura OSS is now released under the Apache License 2.0. Versions 0.5.0
   and earlier remain under MPL-2.0. Contributions are accepted under Apache-2.0.
 - `branch --from`, `compare --from`, and `run --pathway` accept a shortened ID: at
@@ -49,9 +39,6 @@ This file records user-visible changes to Ocura OSS.
   It verifies the source, preserves IDs and log bytes, and writes a separate copy
   with a migration receipt. Download it from `tools/migrations/`; it is excluded
   from both the wheel and source distribution and adds no runtime dependencies.
-- The record format is unchanged. This release reads and extends state written by
-  0.5.0. The local compression prototype's physical storage extension is described
-  separately above.
 
 ## 0.5.0 - 2026-10-07
 

@@ -2,6 +2,10 @@
 
 Version 0.6.0.
 
+This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
+`decompress` commands below are proposed branch behavior, absent from the released
+package. See [open design decisions](autocompression.md#decisions-before-merge).
+
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
 
 ```text

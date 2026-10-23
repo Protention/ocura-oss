@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
-from ocura_oss import api, cli, model, runner
+from ocura_oss import api, cli, locking, model, runner
 from ocura_oss.store import Store, StoreError
 
 _MIB = 1024 * 1024
@@ -470,6 +470,34 @@ class CompressionTests(unittest.TestCase):
         self.assertEqual(self.store.read_verified_log(execution.atom.id), b"recorded output")
         self.assertEqual(self.store.list_attempts(), [])
         self.assertTrue(self.store.verify_state().ok)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows lock-file handoff")
+    def test_reader_retries_transient_windows_lock_open_denial(self):
+        atom = self._run_bytes(b"retained output").atom
+        lock_path = self.store.state_dir / "log-locks" / f"{atom.id}.stdout.log.lock"
+        original_open = locking.os.open
+        denied = False
+
+        def deny_once(path, *args, **kwargs):
+            nonlocal denied
+            if Path(path) == lock_path and not denied:
+                denied = True
+                raise PermissionError("lock name is being removed")
+            return original_open(path, *args, **kwargs)
+
+        with mock.patch.object(locking.os, "open", side_effect=deny_once):
+            self.assertEqual(self.store.read_verified_log(atom.id), b"retained output")
+        self.assertTrue(denied)
+
+    def test_reader_still_reports_persistent_lock_open_denial(self):
+        atom = self._run_bytes(b"retained output").atom
+        with (
+            mock.patch.object(locking, "_READER_GRACE", 0.02),
+            mock.patch.object(locking.os, "open", side_effect=PermissionError("access denied")),
+            self.assertRaises(StoreError) as caught,
+        ):
+            self.store.read_verified_log(atom.id)
+        self.assertIsInstance(caught.exception.__cause__, PermissionError)
 
     def test_readers_and_opposing_storage_operations_coordinate(self):
         data = bytes(range(256)) * 1000

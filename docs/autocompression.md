@@ -2,10 +2,33 @@
 
 Version 0.6.0.
 
-This local branch prototypes lossless compression for captured stdout and stderr.
+This draft branch prototypes lossless compression for captured stdout and stderr.
 It uses Python's standard library and leaves the original execution records,
 byte counts, SHA-256 digests, and retained manifests unchanged. It has not been
-published as a package release.
+published as a package release. Version 0.6.0 above identifies the base release;
+the prototype has no assigned release version. Keep the pull request in draft
+for future consideration until the decisions below are settled.
+
+## Decisions before merge
+
+- **Default policy:** this prototype compresses new eligible logs automatically.
+  Decide whether the eventual feature should instead require an explicit opt-in.
+- **Compatibility:** unchanged JSON and retained manifests do not make gzip
+  backing readable by earlier versions. Settle how storage capabilities are
+  declared before promising schema compatibility or a downgrade path.
+- **Reading large logs:** verification streams with bounded memory, while
+  `logs` and `read_verified_log()` collect the complete original stream in memory.
+  Decide how a consumer should inspect large logs without that allocation.
+- **Read-only ledgers:** readers and verification currently create temporary
+  lock files in `.ocura-oss/log-locks/`, requiring write access to the ledger.
+  Settle how read-only archives can be verified without changing their storage.
+- **Minimal interface:** review the three added CLI commands, run flags, and
+  `Store` methods. Result types remain in `ocura_oss.store`, with no new top-level
+  exports. These draft names and shapes are not a release commitment.
+
+The runtime remains standard-library only. Compression manages captured logs;
+it does not manage workload checkpoints or impose a disk quota. The controls
+below describe a runnable prototype, rather than a completed rollout policy.
 
 ## When compression runs
 
