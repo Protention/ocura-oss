@@ -2,6 +2,8 @@
 
 Version 0.6.0.
 
+This local branch adds an unreleased [archive reading prototype](planning/0.7-archive-reading.md).
+
 This draft builds on 0.6.0. Compression options, storage metadata, and conversion
 methods below are proposed branch behavior, absent from the released package.
 See [open design decisions](autocompression.md#decisions-before-merge).
@@ -476,6 +478,8 @@ print(report.comparison.state.value)
 ```python
 Store(
     root: os.PathLike[str] | str | None = None,
+    *,
+    archive: bool = False,
 )
 ```
 
@@ -488,6 +492,7 @@ The documented constructor, attributes, loading methods, listing methods, initia
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | `root` | path-like, string, or None | `None` | Project root; `None` selects the current working directory |
+| `archive` | bool | `False` | Read stable archived storage without ledger locks or mutations; stop writers and finalize all attempts first |
 
 #### Attributes
 
@@ -856,6 +861,33 @@ metrics = json.loads(raw.decode("utf-8"))  # For a workload that emits UTF-8 JSO
 
 diagnostics = store.read_verified_log("atom-<id>", stream="stderr")
 ```
+
+### `Store.open_verified_log`
+
+```python
+with store.open_verified_log(
+    atom_id, stream="stdout", offset=0, length=None,
+) as source:
+    chunk = source.read(4096)
+```
+
+This context manager returns a seekable binary snapshot after verifying the full
+selected stream. Only the requested original-byte window is retained; seeking is
+relative to that window. A window up to 1 MiB stays in memory. Larger windows use
+OS temporary storage and bounded buffers, with one source decoding pass. The
+snapshot closes on exit, including when the caller raises, and remains valid if
+backing storage changes after verification.
+
+Offsets and lengths follow [`logs`](cli.md#logs). Corruption outside a requested
+range still fails before the context yields. The other stream and the whole
+ledger are not checked. Invalid ranges or evidence raise `StoreError`.
+`read_verified_log()` retains its existing bytes-returning behavior and whole-log
+memory allocation.
+
+`Store(root, archive=True)` permits these reads and `verify_state()` on stable,
+read-only archives without creating ledger locks. It rejects unfinished attempts
+and mutation operations. This mode assumes there are no concurrent writers; see
+[stable archives](cli.md#stable-archives).
 
 ### `Store.log_info`
 

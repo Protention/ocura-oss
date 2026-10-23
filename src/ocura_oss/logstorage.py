@@ -112,7 +112,9 @@ def _consume(
     return contents.getvalue() if contents is not None else None
 
 
-def _verify_raw(path: Path, size: int, digest: str, *, collect: bool) -> bytes | None:
+def _verify_raw(
+    path: Path, size: int, digest: str, *, collect: bool, sink: BinaryIO | None = None
+) -> bytes | None:
     try:
         if collect:
             # Keep the same read-and-verify contract as the public verified
@@ -122,7 +124,7 @@ def _verify_raw(path: Path, size: int, digest: str, *, collect: bool) -> bytes |
             _check_digest(hashlib.sha256(contents).hexdigest(), digest, path)
             return contents
         with path.open("rb") as source:
-            return _consume(source, size, digest, path)
+            return _consume(source, size, digest, path, sink=sink)
     except (OSError, ValueError) as exc:
         raise LogStorageError(f"log is unreadable: {path}") from exc
 
@@ -143,7 +145,12 @@ def _verify_gzip(
 
 
 def read_verified(
-    path: Path, size: int, digest: str, *, collect: bool = False
+    path: Path,
+    size: int,
+    digest: str,
+    *,
+    collect: bool = False,
+    sink: BinaryIO | None = None,
 ) -> tuple[Path, bytes | None]:
     """Verify logical bytes in every present representation of a log.
 
@@ -154,13 +161,63 @@ def read_verified(
     _validate_size(size)
     raw, compressed = _paths(path)
     if raw.is_file():
-        data = _verify_raw(raw, size, digest, collect=collect)
+        data = _verify_raw(raw, size, digest, collect=collect, sink=sink)
         if compressed.is_file():
             _verify_gzip(compressed, size, digest)
         return raw, data
     if compressed.is_file():
-        return compressed, _verify_gzip(compressed, size, digest, collect=collect)
+        return compressed, _verify_gzip(compressed, size, digest, collect=collect, sink=sink)
     raise LogStorageError(f"log is missing: {raw}")
+
+
+class _RangeWriter:
+    """Retain only a byte window while the verifier consumes the whole stream."""
+
+    def __init__(self, sink: BinaryIO, offset: int, length: int) -> None:
+        self.sink, self.offset, self.length, self.position = sink, offset, length, 0
+
+    def write(self, data: bytes) -> int:
+        start = max(0, self.offset - self.position)
+        end = min(len(data), self.offset + self.length - self.position)
+        if start < end:
+            self.sink.write(data[start:end])
+        self.position += len(data)
+        return len(data)
+
+
+def verified_snapshot(
+    path: Path, size: int, digest: str, *, offset: int = 0, length: int | None = None
+) -> BinaryIO:
+    """Return a seekable private snapshot, releasing no bytes before verification.
+
+    Small streams stay in memory. Larger streams use OS temporary storage, with
+    bounded read buffers and one decoding pass. The caller owns the returned file.
+    """
+    _validate_size(size)
+    if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= size:
+        raise LogStorageError(f"log offset must be between 0 and original size {size}")
+    if length is not None and (
+        isinstance(length, bool) or not isinstance(length, int) or length < 0
+    ):
+        raise LogStorageError("log length must be a nonnegative integer")
+    extent = size - offset if length is None else min(length, size - offset)
+    # Ownership passes to the caller; failures close it below.
+    snapshot = cast(
+        BinaryIO,
+        tempfile.TemporaryFile() if extent > _CHUNK else io.BytesIO(),  # noqa: SIM115
+    )
+    try:
+        sink = (
+            snapshot
+            if offset == 0 and extent == size
+            else cast(BinaryIO, _RangeWriter(snapshot, offset, extent))
+        )
+        read_verified(path, size, digest, sink=sink)
+        snapshot.seek(0)
+        return snapshot
+    except BaseException:
+        snapshot.close()
+        raise
 
 
 class _CountingWriter:

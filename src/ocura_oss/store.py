@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypeVar
+from typing import BinaryIO, Literal, TypeVar
 
 from ocura_oss import locking, logstorage, model
 
@@ -114,8 +114,11 @@ class Store:
     remains internal to the package workflows.
     """
 
-    def __init__(self, root: os.PathLike[str] | str | None = None) -> None:
+    def __init__(
+        self, root: os.PathLike[str] | str | None = None, *, archive: bool = False
+    ) -> None:
         self.root = resolve_root(root)
+        self.archive = archive
         self.state_dir = self.root / STATE_DIR_NAME
         self.pathways_dir = self.state_dir / "pathways"
         self.atoms_dir = self.state_dir / "atoms"
@@ -130,6 +133,7 @@ class Store:
 
     def require(self) -> None:
         """Require an initialized den under this project root."""
+        self._check_archive()
         if self.den_path.is_file():
             return
         missing = f"no Ocura OSS state found under {self.root}"
@@ -143,6 +147,14 @@ class Store:
                     " or run `ocura-oss init` to create new state here"
                 )
         raise StoreError(f"{missing}; run `ocura-oss init` there to create it")
+
+    def _check_archive(self) -> None:
+        if self.archive and next(self.attempts_dir.glob("*.json"), None) is not None:
+            raise StoreError("archive contains unfinished attempts; finalize them before archiving")
+
+    def _require_writable(self) -> None:
+        if self.archive:
+            raise StoreError("archive mode does not permit ledger changes")
 
     def resolve_id(self, value: str, kind: Literal["pathway", "atom", "chokepoint"]) -> str:
         """Return the full identifier that *value* names.
@@ -277,6 +289,7 @@ class Store:
         The lock is taken before the record is written and outlives it, so a
         reader that finds the record unlocked knows its recorder is gone.
         """
+        self._require_writable()
         self.attempts_dir.mkdir(parents=True, exist_ok=True)
         with locking.hold(self._attempt_lock(attempt.id)):
             self._write_record(
@@ -285,6 +298,7 @@ class Store:
             yield
 
     def _remove_attempt(self, attempt_id: str) -> None:
+        self._require_writable()
         _remove_file(self._attempt_path(attempt_id))
 
     def list_attempts(self) -> list[tuple[model.Attempt, model.AttemptState]]:
@@ -320,6 +334,7 @@ class Store:
         Recover only after the command itself has stopped: a command that
         outlived its recorder can keep writing to logs measured here.
         """
+        self._require_writable()
         self.require()
         self.load_den()
         clock = now or model.utc_now
@@ -482,6 +497,31 @@ class Store:
         assert data is not None
         return data
 
+    @contextlib.contextmanager
+    def open_verified_log(
+        self,
+        atom_id: str,
+        *,
+        stream: Literal["stdout", "stderr"] = "stdout",
+        offset: int = 0,
+        length: int | None = None,
+    ) -> Iterator[BinaryIO]:
+        """Open an exact verified snapshot with bounded RAM for large logs.
+
+        The complete selected stream is checked before yielding. Only the requested
+        original-byte window is retained; file positions are relative to that
+        window. Large windows use OS temporary storage, removed on close. The
+        snapshot stays valid if backing storage changes.
+        """
+        atom = self.load_atom(atom_id)
+        relative, size, digest = _recorded_log(atom, stream)
+        with self._log_guard(atom_id, relative) as path:
+            snapshot = logstorage.verified_snapshot(
+                path, size, digest, offset=offset, length=length
+            )
+        with snapshot:
+            yield snapshot
+
     def _verify_log(
         self, atom_id: str, relative: str, recorded_size: int, recorded_digest: str
     ) -> Path:
@@ -494,12 +534,16 @@ class Store:
         """Serialize cooperating readers and storage changes of one logical log."""
         try:
             path = self._evidence_path(atom_id, relative)
-            lock_dir = self.state_dir / "log-locks"
-            lock_dir.mkdir(exist_ok=True)
-            if lock_dir.resolve().parent != self.state_dir.resolve():
-                raise StoreError("log lock directory escapes the state directory")
-            with locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None):
+            if self.archive:
+                self._check_archive()
                 yield path
+            else:
+                lock_dir = self.state_dir / "log-locks"
+                lock_dir.mkdir(exist_ok=True)
+                if lock_dir.resolve().parent != self.state_dir.resolve():
+                    raise StoreError("log lock directory escapes the state directory")
+                with locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None):
+                    yield path
         except logstorage.LogStorageError as exc:
             raise StoreError(f"atom {atom_id} {exc}: {relative}") from (exc.__cause__ or exc)
         except (OSError, ValueError, TimeoutError) as exc:
@@ -551,6 +595,7 @@ class Store:
     def _change_log_storage(
         self, atom_id: str | None, *, restore: bool, min_bytes: int, dry_run: bool
     ) -> tuple[LogStorageChange, ...]:
+        self._require_writable()
         self.require()
         self.load_den()
         atoms = [self.load_atom(atom_id)] if atom_id is not None else self.list_atoms()
@@ -578,6 +623,7 @@ class Store:
         dry_run: bool = False,
         eligible_only: bool = False,
     ) -> tuple[LogStorageChange, ...]:
+        self._require_writable()
         changes: list[LogStorageChange] = []
         if atom.output_capture is model.OutputCapture.NONE:
             return ()
@@ -624,6 +670,7 @@ class Store:
         allowed. Kept somewhere this state's writers cannot reach, it detects
         records that were later rewritten together with their checksums.
         """
+        self._check_archive()
         retained = _parse_manifest(against)
         den = self.load_den()
         problems: list[tuple[str, str]] = []
@@ -717,6 +764,7 @@ class Store:
         name: str,
     ) -> tuple[model.Den, model.Pathway]:
         """Create one den and one default pathway; fail if state already exists."""
+        self._require_writable()
         if self.exists():
             raise StoreError(f"cannot initialize: state directory already exists: {self.state_dir}")
         if not isinstance(name, str) or not name.strip():
@@ -831,6 +879,7 @@ class Store:
         return data["payload"]
 
     def _write_record(self, path: Path, kind: str, payload: dict) -> None:
+        self._require_writable()
         envelope = {
             "schema_version": model.SCHEMA_VERSION,
             "kind": kind,

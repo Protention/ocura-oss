@@ -2,6 +2,8 @@
 
 Version 0.6.0.
 
+This local branch adds an unreleased [archive reading prototype](planning/0.7-archive-reading.md).
+
 This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
 `decompress` commands below are proposed branch behavior, absent from the released
 package. See [open design decisions](autocompression.md#decisions-before-merge).
@@ -243,12 +245,26 @@ Keep a token out of the records and its output off disk. Position 3 is the value
 ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 ```
 
+## Stable archives
+
+`--archive` is available on `pathways`, `chokepoints`, `compare`,
+`verify`, `manifest`, `attempts`, and `logs`. It reads without creating ledger
+lock files, allowing a stable archive to live on read-only storage. Stop all
+writers and finalize or recover unfinished attempts before making the archive.
+The mode rejects archives containing attempt records and assumes the storage
+remains unchanged while reading; it does not coordinate with active writers.
+Normal mode retains its existing locks.
+
+Content snapshots may need writable OS temporary storage outside the archive.
+Archive mode does not introduce an export format or snapshot an active ledger.
+
 ## `logs`
 
 Read one finalized atom's verified original log bytes or inspect its metadata.
 
 ```text
-ocura-oss logs ID [--stream stdout|stderr] [--info] [--json] [--root PATH]
+ocura-oss logs ID [--stream stdout|stderr] [--offset N] [--length N]
+                [--info] [--json] [--archive] [--root PATH]
 ```
 
 | Name | Default | Description |
@@ -258,6 +274,18 @@ ocura-oss logs ID [--stream stdout|stderr] [--info] [--json] [--root PATH]
 | `--info` | false | Emit verified metadata instead of contents |
 | `--json` | false | Emit metadata as JSON; implies `--info` |
 | `--root PATH` | current directory | Project root containing initialized state |
+
+`--offset` starts at an original-byte position (default 0); `--length` returns at
+most that many bytes (default the remaining stream). Values must be nonnegative,
+and an offset beyond the recorded size is rejected. An offset at EOF or a zero
+length returns empty output after verification. Ranges cannot be combined with
+metadata modes. Verification still checks the complete selected stream, including
+bytes outside the range, before releasing any output.
+
+Only the returned window is retained. Windows of at most 1 MiB stay in memory;
+larger windows use OS temporary storage, removed on close. RAM stays bounded for
+large content reads, with one decoding pass. A short range still scans the entire
+original stream for SHA-256 verification.
 
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded

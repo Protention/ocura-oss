@@ -448,6 +448,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     logs_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
 
+    logs_parser.add_argument(
+        "--offset", type=int, default=0, metavar="N", help="start at original byte N"
+    )
+    logs_parser.add_argument(
+        "--length", type=int, metavar="N", help="return at most N original bytes"
+    )
+
     for name, verb in (("compress", "compress"), ("decompress", "restore")):
         storage_parser = subparsers.add_parser(
             name,
@@ -500,6 +507,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="print a JSON report of steps and comparison"
     )
 
+    for read_parser in (
+        pathways_parser,
+        chokepoints_parser,
+        compare_parser,
+        verify_parser,
+        manifest_parser,
+        attempts_parser,
+        logs_parser,
+    ):
+        read_parser.add_argument(
+            "--archive",
+            action="store_true",
+            help="read a stable archive without ledger writes or writer coordination",
+        )
+
     return parser
 
 
@@ -534,9 +556,11 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
     raise StoreError(f"unknown command: {name}")
 
 
-def _open_store(root_value: str | None, *, require_state: bool = True) -> store.Store:
+def _open_store(
+    root_value: str | None, *, require_state: bool = True, archive: bool = False
+) -> store.Store:
     root = store.resolve_root(root_value)
-    state = store.Store(root)
+    state = store.Store(root, archive=archive)
     if require_state:
         state.require()
     return state
@@ -674,7 +698,7 @@ def _pathway_summaries(state: store.Store) -> list[model.PathwaySummary]:
 
 
 def _pathways(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     summaries = _pathway_summaries(state)
     if args.json:
         _emit_json({"pathways": [item.to_dict() for item in summaries]})
@@ -697,7 +721,7 @@ def _pathways(args: argparse.Namespace) -> int:
 
 
 def _chokepoints(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     summaries = [
         model.ChokepointSummary(
             id=item.id,
@@ -754,7 +778,7 @@ def _branch(args: argparse.Namespace) -> int:
 
 
 def _compare(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     source = None if args.source is None else state.resolve_id(args.source, "chokepoint")
     result = branching.compare(state, source)
     if args.json:
@@ -784,7 +808,7 @@ def _run_phrase(summary: model.RunSummary | None) -> str:
 
 
 def _verify(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     retained = None if args.against is None else _read_manifest(args.against)
     report = state.verify_state(against=retained)
     den = state.load_den()
@@ -837,7 +861,7 @@ def _read_manifest(location: str) -> list[str]:
 
 
 def _manifest(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     report = state.verify_state()
     if not report.ok:
         record, problem = report.problems[0]
@@ -851,7 +875,7 @@ def _manifest(args: argparse.Namespace) -> int:
 
 
 def _attempts(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     attempts = state.list_attempts()
     if args.json:
         _emit_json(
@@ -917,7 +941,11 @@ def _demo(args: argparse.Namespace) -> int:
 
 
 def _logs(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    if args.offset < 0 or (args.length is not None and args.length < 0):
+        raise StoreError("log offset and length must be nonnegative")
+    if (args.info or args.json) and (args.offset or args.length is not None):
+        raise StoreError("log byte ranges cannot be combined with --info or --json")
+    state = _open_store(args.root, archive=args.archive)
     atom_id = state.resolve_id(args.atom, "atom")
     if args.info or args.json:
         info = state.log_info(atom_id, stream=args.stream)
@@ -935,11 +963,14 @@ def _logs(args: argparse.Namespace) -> int:
         print(f"sha256: {info.sha256}")
         print(f"storage path: {info.path}")
         return EXIT_OK
-    data = state.read_verified_log(atom_id, stream=args.stream)
     output = getattr(sys.stdout, "buffer", None)
     if output is None:
         raise StoreError("reading log bytes requires binary stdout; use --info or --json")
-    output.write(data)
+    with state.open_verified_log(
+        atom_id, stream=args.stream, offset=args.offset, length=args.length
+    ) as source:
+        while chunk := source.read(1024 * 1024):
+            output.write(chunk)
     output.flush()
     return EXIT_OK
 
