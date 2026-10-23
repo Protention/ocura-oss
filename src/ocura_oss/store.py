@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypeVar
 
-from ocura_oss import locking, model
+from ocura_oss import locking, logstorage, model
 
 STATE_DIR_NAME = ".ocura-oss"
 
@@ -70,6 +70,34 @@ class RecoveredAttempt:
 
 class StoreError(Exception):
     """State, schema, or integrity failure. The CLI maps this to exit code 2."""
+
+
+@dataclass(frozen=True)
+class LogStorageChange:
+    """The result of considering one finalized stream for a storage change."""
+
+    atom_id: str
+    stream: str
+    action: str
+    original_bytes: int
+    stored_bytes: int
+    path: str
+
+
+@dataclass(frozen=True)
+class LogInfo:
+    """Verified content identity and readable metadata, without log contents."""
+
+    atom_id: str
+    stream: str
+    outcome: str
+    started_at: str
+    encoding: str
+    original_bytes: int
+    stored_bytes: int
+    sha256: str
+    fingerprint: str
+    path: str
 
 
 def resolve_root(root: os.PathLike[str] | str | None = None) -> Path:
@@ -423,14 +451,17 @@ class Store:
             self._verify_log(atom.id, relative, recorded_size, recorded_digest)
 
     def resolve_log_path(self, atom: model.Atom, stream: Literal["stdout", "stderr"]) -> Path:
-        """Resolve one recorded log path after containment checks.
+        """Resolve the physical raw or gzip file after containment checks.
 
         Call :meth:`verify_atom_evidence` first when the log's recorded size and
         digest must also be checked. Use :meth:`read_verified_log` to consume
-        bytes whose size and digest are checked as part of the same read.
+        original bytes whose size and digest are checked as part of the same
+        read. A returned ``.gz`` path contains encoded bytes.
         Raises StoreError for an atom recorded without output capture.
         """
-        return self._evidence_path(atom.id, _recorded_log(atom, stream)[0])
+        relative = _recorded_log(atom, stream)[0]
+        with self._log_guard(atom.id, relative) as path:
+            return logstorage.physical_path(path)
 
     def read_verified_log(
         self, atom_id: str, *, stream: Literal["stdout", "stderr"] = "stdout"
@@ -446,38 +477,132 @@ class Store:
         """
         atom = self.load_atom(atom_id)
         relative, size, digest = _recorded_log(atom, stream)
-        try:
-            path = self.resolve_log_path(atom, stream)
-            if not path.is_file():
-                raise StoreError(f"atom {atom_id} log is missing: {relative}")
-            data = path.read_bytes()
-        except (OSError, ValueError) as exc:
-            raise StoreError(f"atom {atom_id} log is unreadable: {relative}") from exc
-        if len(data) != size:
-            raise StoreError(
-                f"atom {atom_id} log size mismatch for {relative}: "
-                f"recorded {size}, found {len(data)}"
-            )
-        if hashlib.sha256(data).hexdigest() != digest:
-            raise StoreError(f"atom {atom_id} log checksum mismatch for {relative}")
+        with self._log_guard(atom_id, relative) as path:
+            _physical, data = logstorage.read_verified(path, size, digest, collect=True)
+        assert data is not None
         return data
 
     def _verify_log(
         self, atom_id: str, relative: str, recorded_size: int, recorded_digest: str
     ) -> Path:
-        candidate = self._evidence_path(atom_id, relative)
-        if not candidate.is_file():
-            raise StoreError(f"atom {atom_id} log is missing: {relative}")
-        actual_size = candidate.stat().st_size
-        if actual_size != recorded_size:
-            raise StoreError(
-                f"atom {atom_id} log size mismatch for {relative}: "
-                f"recorded {recorded_size}, found {actual_size}"
+        with self._log_guard(atom_id, relative) as path:
+            physical, _data = logstorage.read_verified(path, recorded_size, recorded_digest)
+        return physical
+
+    @contextlib.contextmanager
+    def _log_guard(self, atom_id: str, relative: str) -> Iterator[Path]:
+        """Serialize cooperating readers and storage changes of one logical log."""
+        try:
+            path = self._evidence_path(atom_id, relative)
+            lock_dir = self.state_dir / "log-locks"
+            lock_dir.mkdir(exist_ok=True)
+            if lock_dir.resolve().parent != self.state_dir.resolve():
+                raise StoreError("log lock directory escapes the state directory")
+            with locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None):
+                yield path
+        except logstorage.LogStorageError as exc:
+            raise StoreError(f"atom {atom_id} {exc}: {relative}") from (exc.__cause__ or exc)
+        except (OSError, ValueError, TimeoutError) as exc:
+            raise StoreError(f"atom {atom_id} log is unreadable: {relative}") from exc
+
+    def log_info(self, atom_id: str, *, stream: Literal["stdout", "stderr"] = "stdout") -> LogInfo:
+        """Verify a stream and describe its physical storage and original identity."""
+        atom = self.load_atom(atom_id)
+        relative, size, digest = _recorded_log(atom, stream)
+        with self._log_guard(atom_id, relative) as path:
+            physical, _data = logstorage.read_verified(path, size, digest)
+            return LogInfo(
+                atom_id=atom_id,
+                stream=stream,
+                outcome=atom.outcome.value,
+                started_at=atom.started_at,
+                encoding="raw" if physical == path else "gzip",
+                original_bytes=size,
+                stored_bytes=physical.stat().st_size,
+                sha256=digest,
+                fingerprint=f"{stream}/{atom_id[5:13]}/sha256:{digest[:12]}",
+                path=physical.relative_to(self.root).as_posix(),
             )
-        actual_digest = sha256_of_file(candidate)
-        if actual_digest != recorded_digest:
-            raise StoreError(f"atom {atom_id} log checksum mismatch for {relative}")
-        return candidate
+
+    def compress_logs(
+        self,
+        *,
+        atom_id: str | None = None,
+        min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
+        dry_run: bool = False,
+    ) -> tuple[LogStorageChange, ...]:
+        """Losslessly compact finalized logs without rewriting evidence records.
+
+        Streams below *min_bytes*, or saving less than ten percent, stay raw.
+        Unfinished attempts are skipped. A dry run measures exact compression
+        without publishing or removing log files.
+        """
+        _validate_compression_min_bytes(min_bytes)
+        return self._change_log_storage(
+            atom_id, restore=False, min_bytes=min_bytes, dry_run=dry_run
+        )
+
+    def decompress_logs(
+        self, *, atom_id: str | None = None, dry_run: bool = False
+    ) -> tuple[LogStorageChange, ...]:
+        """Restore raw logs for ordinary tools and readers without gzip support."""
+        return self._change_log_storage(atom_id, restore=True, min_bytes=0, dry_run=dry_run)
+
+    def _change_log_storage(
+        self, atom_id: str | None, *, restore: bool, min_bytes: int, dry_run: bool
+    ) -> tuple[LogStorageChange, ...]:
+        self.require()
+        self.load_den()
+        atoms = [self.load_atom(atom_id)] if atom_id is not None else self.list_atoms()
+        terminal_atoms = {point.atom_id for point in self.list_chokepoints()}
+        changes: list[LogStorageChange] = []
+        for listed in atoms:
+            if self._attempt_path(listed.id).exists():
+                continue
+            atom = self.load_atom(listed.id)
+            if atom.id not in terminal_atoms:
+                raise StoreError(f"atom {atom.id} has no terminal chokepoint")
+            changes.extend(
+                self._change_atom_storage(
+                    atom, restore=restore, min_bytes=min_bytes, dry_run=dry_run
+                )
+            )
+        return tuple(changes)
+
+    def _change_atom_storage(
+        self,
+        atom: model.Atom,
+        *,
+        restore: bool = False,
+        min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
+        dry_run: bool = False,
+        eligible_only: bool = False,
+    ) -> tuple[LogStorageChange, ...]:
+        changes: list[LogStorageChange] = []
+        if atom.output_capture is model.OutputCapture.NONE:
+            return ()
+        for stream in ("stdout", "stderr"):
+            relative, size, digest = _recorded_log(atom, stream)
+            if eligible_only and size < min_bytes:
+                continue
+            with self._log_guard(atom.id, relative) as path:
+                if restore:
+                    result = logstorage.restore(path, size, digest, dry_run=dry_run)
+                else:
+                    result = logstorage.compress(
+                        path, size, digest, min_bytes=min_bytes, dry_run=dry_run
+                    )
+                changes.append(
+                    LogStorageChange(
+                        atom_id=atom.id,
+                        stream=stream,
+                        action=result.action,
+                        original_bytes=result.original_bytes,
+                        stored_bytes=result.stored_bytes,
+                        path=result.path.relative_to(self.root).as_posix(),
+                    )
+                )
+        return tuple(changes)
 
     def verify_state(self, *, against: Iterable[str] | None = None) -> StateVerification:
         """Verify every state record and every log referenced by a valid atom.
@@ -794,7 +919,16 @@ class Store:
     ) -> None:
         """Report entries under the logs directory that no record references."""
         for entry in log_entries:
-            if entry.resolve() in referenced_logs:
+            # Resolve the containing directory, not a file being renamed by
+            # concurrent compression/restoration. Windows can resolve an open
+            # file handle to its temporary name during an atomic rename.
+            logical = entry.parent.resolve() / entry.name
+            if logical in referenced_logs:
+                continue
+            # A gzip is the physical representation of the logical .log path
+            # retained in the atom. Both copies can exist across a crashed
+            # storage transition; _verify_log checks both in that case.
+            if entry.suffix == ".gz" and logical.with_suffix("") in referenced_logs:
                 continue
             if entry.is_dir():
                 problems.append((f"logs/{entry.name}", "unexpected directory under logs/"))
@@ -847,12 +981,22 @@ class Store:
         posix = PurePosixPath(relative)
         if posix.is_absolute() or ".." in posix.parts:
             raise StoreError(f"atom {atom_id} log path escapes the state directory: {relative}")
-        candidate = (self.root / Path(*posix.parts)).resolve()
-        if candidate.parent != self.logs_dir.resolve():
+        candidate = self.root / Path(*posix.parts)
+        parent = candidate.parent.resolve()
+        if parent != self.logs_dir.resolve():
             raise StoreError(
                 f"atom {atom_id} log path does not point inside .ocura-oss/logs/: {relative}"
             )
-        return candidate
+        if candidate.is_symlink():
+            raise StoreError(f"atom {atom_id} log path must not be a symlink: {relative}")
+        # Never resolve the mutable final filename. Its canonical directory
+        # and literal basename also give every reader/writer the same lock.
+        return parent / candidate.name
+
+
+def _validate_compression_min_bytes(value: int) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise StoreError("compression minimum bytes must be a nonnegative integer")
 
 
 def size_and_sha256(path: Path) -> tuple[int, str]:

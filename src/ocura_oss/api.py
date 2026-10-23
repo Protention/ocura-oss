@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ocura_oss import branching, runner
+from ocura_oss import branching, logstorage, runner
 from ocura_oss.demo import DemoReport
 from ocura_oss.demo import run_demo as _run_demo
 from ocura_oss.model import ComparisonResult, Den, Pathway
@@ -47,6 +47,8 @@ def run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
+    compress: bool = True,
+    compression_min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
     context: bool = False,
@@ -62,6 +64,12 @@ def run(
     that it has no logs. *masked_arguments* lists zero-based positions in
     *command* whose values are replaced by a placeholder in every record. The
     command still receives the real values.
+
+    Large completed logs are losslessly compressed once per run when this
+    saves at least ten percent. Pass ``compress=False`` for raw files, or set
+    ``compression_min_bytes`` (default 1 MiB). Read original output with
+    ``Store.read_verified_log()``. Storage errors appear in the returned
+    ``storage_warnings`` and do not change the command's recorded outcome.
 
     The run records its pathway's effective parameters together with
     *parameters*, which wins for a key both name. With ``substitute=True``,
@@ -79,6 +87,8 @@ def run(
         declared_parameters={} if parameters is None else parameters,
         mirror=mirror,
         capture=capture,
+        compress=compress,
+        compression_min_bytes=compression_min_bytes,
         masked_arguments=masked_arguments,
         substitute=substitute,
         context=context,
