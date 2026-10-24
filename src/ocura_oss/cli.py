@@ -232,9 +232,7 @@ def _build_parser() -> argparse.ArgumentParser:
     page_size.add_argument(
         "--limit", type=int, default=100, help="page size, 1 to 1000 (default: 100)"
     )
-    page_size.add_argument(
-        "--all", action="store_true", help="list every match from one scan instead of a page"
-    )
+    page_size.add_argument("--all", action="store_true", help="list every match")
     runs_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
     runs_parser.add_argument(
         "--json", action="store_true", help="print a JSON page and next_after ID"
@@ -802,10 +800,7 @@ def _runs(args: argparse.Namespace) -> int:
         if page.next_after is not None:
             print(f"next after: {page.next_after}")
         if page.unfinished_attempts:
-            print(
-                f"unfinished attempts: {page.unfinished_attempts}"
-                " (listed once they finish; see `ocura-oss attempts`)"
-            )
+            print(f"unfinished attempts: {page.unfinished_attempts} (see `ocura-oss attempts`)")
         print("verification: records checked; logs not checked")
     return EXIT_OK
 

@@ -251,7 +251,7 @@ ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 `compare`, `verify`, `manifest`, `attempts`, and `logs`. It reads without creating
 ledger lock files and refuses every change. Stop all writers and finalize or recover
 unfinished attempts before making the archive. The mode rejects archives containing
-attempt records, naming the first and how to recover it, and assumes the storage
+attempt records, saying how to list and recover them, and assumes the storage
 remains unchanged while reading; it does not coordinate with active writers.
 
 Normal mode takes a lock for each log it reads. When the storage is write-protected

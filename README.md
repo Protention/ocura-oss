@@ -10,9 +10,6 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-This branch contains a [draft autocompression prototype](docs/autocompression.md)
-for future discussion. Its compression features are not part of released 0.6.0.
-
 ## Why use it
 
 Ocura OSS is built to just work. It aims to be the easiest way to start recording

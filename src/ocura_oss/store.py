@@ -136,10 +136,7 @@ class RunPage:
 
 @dataclass(frozen=True)
 class RunInspection:
-    """One validated run, its pathway and chokepoint, and the branches made from it.
-
-    ``chokepoint`` is ``None`` while the run is unfinished.
-    """
+    """One validated run, its pathway and chokepoint, and the branches made from it."""
 
     atom: model.Atom
     pathway: model.Pathway
@@ -211,14 +208,11 @@ class Store:
         raise StoreError(f"{missing}; run `ocura-oss init` there to create it")
 
     def _check_archive(self) -> None:
-        if not self.archive:
-            return
-        attempts = sorted(path.stem for path in self.attempts_dir.glob("*.json"))
-        if attempts:
+        count = sum(1 for _ in self.attempts_dir.glob("*.json")) if self.archive else 0
+        if count:
             raise StoreError(
-                f"archive contains {len(attempts)} unfinished attempt(s), first {attempts[0]};"
-                " run `ocura-oss recover` on a writable copy, or read without archive mode"
-                " to list them"
+                f"archive has {count} unfinished attempt(s); list them without archive mode"
+                " and recover them on a writable copy"
             )
 
     def _require_writable(self) -> None:
@@ -546,8 +540,7 @@ class Store:
         Every chokepoint record's envelope and fields are checked, and each
         returned run's records and lineage; log contents are not. *after* is a
         page's ``next_after`` chokepoint. Runs that finish while a caller pages
-        are listed after its cursor. Each page scans the chokepoints once, so
-        ``limit=None`` returns every match from a single scan.
+        are listed after its cursor. ``limit=None`` returns every match.
         """
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
@@ -732,8 +725,7 @@ class Store:
                         except OSError as exc:
                             if not isinstance(exc, PermissionError) and exc.errno != errno.EROFS:
                                 raise
-                            # Write-protected storage, as 0.6 read it: every byte read is
-                            # still verified, so a concurrent change fails instead of lying.
+                            # Write-protected storage: read as 0.6 did; bytes are still verified.
                             self._unlocked_reads = True
                     yield path
         except logstorage.LogStorageError as exc:

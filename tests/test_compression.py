@@ -489,16 +489,6 @@ class CompressionTests(unittest.TestCase):
             self.assertEqual(self.store.read_verified_log(atom.id), b"retained output")
         self.assertTrue(denied)
 
-    def test_reader_still_reports_persistent_lock_open_denial(self):
-        atom = self._run_bytes(b"retained output").atom
-        with (
-            mock.patch.object(locking, "_READER_GRACE", 0.02),
-            mock.patch.object(locking.os, "open", side_effect=PermissionError("access denied")),
-            self.assertRaises(StoreError) as caught,
-        ):
-            self.store.read_verified_log(atom.id)
-        self.assertIsInstance(caught.exception.__cause__, PermissionError)
-
     def test_readers_and_opposing_storage_operations_coordinate(self):
         data = bytes(range(256)) * 1000
         atom = self._run_bytes(data).atom

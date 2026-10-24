@@ -20,8 +20,8 @@ This file records user-visible changes to Ocura OSS.
   only with `--command`. Neither command reads log contents.
 - Add `--archive` to the commands that only read, and `Store(root, archive=True)`,
   to read a stable copy of a ledger without creating lock files. Archive mode
-  refuses every change, and refuses a ledger with unfinished attempts, naming the
-  first and how to recover it.
+  refuses every change, and refuses a ledger with unfinished attempts, saying how
+  to list and recover them.
 
 ## 0.6.0 - 2026-10-22
 

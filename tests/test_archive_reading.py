@@ -220,7 +220,7 @@ class ArchiveReadTests(unittest.TestCase):
                 operation()
         self.assertEqual(self.inventory(), before)
         (archive.attempts_dir / f"{atom.id}.json").write_text("{}", encoding="utf-8")
-        with self.assertRaisesRegex(StoreError, f"1 unfinished attempt.*{atom.id}.*recover"):
+        with self.assertRaisesRegex(StoreError, "1 unfinished attempt.*recover"):
             archive.verify_state()
         result = self.invoke("logs", atom.id, "--archive")
         self.assertEqual(result.returncode, 2)
