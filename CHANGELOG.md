@@ -9,6 +9,8 @@ This file records user-visible changes to Ocura OSS.
   `run`, `branch`, `compare`, and `verify` take seconds after about ten generations
   and far longer after that. Each record is now validated once per operation.
 - `ocura-oss --version` prints the installed version.
+- `pathways` and `compare` read the atom records once per command, instead of
+  once for every pathway or child pathway.
 
 ## 0.6.0 - 2026-10-22
 

@@ -581,6 +581,7 @@ def _print_run(execution: runner.RunExecution) -> None:
 
 def _pathway_summaries(state: store.Store) -> list[model.PathwaySummary]:
     summaries = []
+    recorded_pathways = {atom.pathway_id for atom in state.list_atoms()}
     for pathway in state.list_pathways():
         summaries.append(
             model.PathwaySummary(
@@ -590,7 +591,7 @@ def _pathway_summaries(state: store.Store) -> list[model.PathwaySummary]:
                 created_at=pathway.created_at,
                 reason=pathway.reason,
                 parameters=pathway.parameters,
-                has_terminal_evidence=state.has_terminal_evidence(pathway.id),
+                has_terminal_evidence=pathway.id in recorded_pathways,
             )
         )
     return summaries
