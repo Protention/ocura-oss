@@ -16,13 +16,14 @@ for future consideration until the decisions below are settled.
 - **Compatibility:** unchanged JSON and retained manifests do not make gzip
   backing readable by earlier versions. Settle how storage capabilities are
   declared before promising schema compatibility or a downgrade path.
-- **Reading large logs:** the access prototype gives `logs` and
-  `open_verified_log()` bounded snapshots, retaining only requested windows.
-  Large windows need temporary disk space. Review that cost and interface;
-  `read_verified_log()` still returns a complete in-memory byte string.
-- **Read-only ledgers:** the access prototype adds explicit archive reads without
-  ledger locks. This assumes stable storage with no writers or unfinished attempts.
-  Review this contract before adopting it as the archive interface.
+- **Reading large logs:** `logs` and `open_verified_log()` use bounded snapshots,
+  retaining only requested windows. Large windows need temporary disk space. Review
+  that cost and interface; `read_verified_log()` still returns a complete in-memory
+  byte string.
+- **Read-only ledgers:** plain reads skip log locks on write-protected storage,
+  and `--archive` reads without any locks or writes. Archive mode assumes stable
+  storage with no writers or unfinished attempts. Review this contract before
+  adopting it as the archive interface.
 - **Minimal interface:** review the three added CLI commands, run flags, and
   `Store` methods. Result types remain in `ocura_oss.store`, with no new top-level
   exports. These draft names and shapes are not a release commitment.
@@ -75,18 +76,18 @@ transparently. The terminal or receiving tool decides how to display those bytes
 `Store(root).read_verified_log(atom_id, stream="stdout")` returns the same bytes
 to Python; decoding and metric interpretation remain the caller's responsibility.
 
-The complete selected stream is verified before any content is released. In the
-access prototype, `logs` and `Store.open_verified_log()` retain only the requested
-window: up to 1 MiB in memory, or a larger snapshot in OS temporary storage. One
-pass decodes and verifies the original stream. A short requested range avoids a
-complete decoded disk copy, but still scans the entire stream for verification.
-The existing `read_verified_log()` API returns the complete log in memory.
+The complete selected stream is verified before any content is released. `logs`
+and `Store.open_verified_log()` retain only the requested window: up to 1 MiB in
+memory, or a larger snapshot in OS temporary storage. One pass decodes and verifies
+the original stream. A short requested range avoids a complete decoded disk copy,
+but still scans the entire stream for verification. The existing
+`read_verified_log()` API returns the complete log in memory.
 
 `logs ID --offset N --length N` reads original byte positions regardless of raw or
 gzip backing. `--archive` reads stable storage without creating ledger locks; it
 requires no concurrent writers and rejects unfinished attempts. Large snapshots
-need writable temporary storage outside the archive. See the
-[access prototype](planning/0.7-archive-reading.md).
+need writable temporary storage outside the archive. See
+[stable archives](cli.md#stable-archives).
 
 `--info` shows storage metadata, including the run's outcome and start time,
 original and stored sizes, actual backing path, and full original SHA-256.

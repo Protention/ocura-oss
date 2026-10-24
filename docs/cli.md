@@ -2,8 +2,6 @@
 
 Version 0.6.0.
 
-This local branch adds an unreleased [archive reading prototype](planning/0.7-archive-reading.md).
-
 This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
 `decompress` commands below are proposed branch behavior, absent from the released
 package. See [open design decisions](autocompression.md#decisions-before-merge).
@@ -249,13 +247,17 @@ ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 
 ## Stable archives
 
-`--archive` is available on `pathways`, `chokepoints`, `compare`,
-`verify`, `manifest`, `attempts`, and `logs`. It reads without creating ledger
-lock files, allowing a stable archive to live on read-only storage. Stop all
-writers and finalize or recover unfinished attempts before making the archive.
-The mode rejects archives containing attempt records and assumes the storage
+`--archive` is available on `pathways`, `chokepoints`, `runs`, `show`,
+`compare`, `verify`, `manifest`, `attempts`, and `logs`. It reads without creating
+ledger lock files and refuses every change. Stop all writers and finalize or recover
+unfinished attempts before making the archive. The mode rejects archives containing
+attempt records, naming the first and how to recover it, and assumes the storage
 remains unchanged while reading; it does not coordinate with active writers.
-Normal mode retains its existing locks.
+
+Normal mode takes a lock for each log it reads. When the storage is write-protected
+it reads without one, as 0.6.0 did; every byte is still verified, so a concurrent
+change makes the read fail rather than return wrong data. Unlike archive mode, this
+also reads ledgers with unfinished attempts and lists them.
 
 Content snapshots may need writable OS temporary storage outside the archive.
 Archive mode does not introduce an export format or snapshot an active ledger.

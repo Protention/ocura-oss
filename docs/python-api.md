@@ -2,8 +2,6 @@
 
 Version 0.6.0.
 
-This local branch adds an unreleased [archive reading prototype](planning/0.7-archive-reading.md).
-
 This draft builds on 0.6.0. Compression options, storage metadata, and conversion
 methods below are proposed branch behavior, absent from the released package.
 See [open design decisions](autocompression.md#decisions-before-merge).
