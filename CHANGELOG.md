@@ -11,6 +11,13 @@ This file records user-visible changes to Ocura OSS.
 - `ocura-oss --version` prints the installed version.
 - `pathways` and `compare` read the atom records once per command, instead of
   once for every pathway or child pathway.
+- Add `ocura-oss runs` and `Store.list_runs()`: finalized runs in the order they
+  finished, including failed retries, each with the `chokepoint_id` to branch from.
+  Filter by pathway or outcome, page with `--limit` and `--after`, or list every
+  match with `--all`. Each page reports how many started runs are not listed yet.
+- Add `ocura-oss show` and `Store.inspect_run()`: one run with its pathway, terminal
+  chokepoint, and the pathways branched from it. Command arguments are included
+  only with `--command`. Neither command reads log contents.
 
 ## 0.6.0 - 2026-10-22
 

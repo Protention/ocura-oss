@@ -16,6 +16,8 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | --- | --- |
 | `init` | Create one den and its default pathway |
 | `run` | Run one command and record an atom, logs, and a chokepoint |
+| `runs` | Page recorded run metadata, including failed retries |
+| `show` | Inspect one run, its chokepoint, and its branches without reading logs |
 | `pathways` | List pathway lineage and evidence status |
 | `chokepoints` | List terminal evidence boundaries |
 | `branch` | Create a metadata-only child pathway |
@@ -217,6 +219,50 @@ Keep a token out of the records and its output off disk. Position 3 is the value
 ```console
 ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 ```
+
+## `runs` and `show`
+
+```text
+ocura-oss runs [--pathway ID] [--outcome OUTCOME] [--after ID] [--limit N | --all]
+               [--json] [--root PATH]
+ocura-oss show ID [--command] [--json] [--root PATH]
+```
+
+`runs` lists finalized runs in the order they finished, including earlier failed
+attempts on a pathway. Each entry carries the run's atom ID and the `chokepoint_id`
+to pass to `branch --from`. `--limit` defaults to 100 and accepts 1 through 1000;
+`--all` returns every match instead. `--pathway` selects one pathway; `--outcome`
+accepts the recorded outcomes listed under `run`. `--after` resumes strictly after
+a chokepoint, normally the previous page's `next_after`.
+
+JSON contains `runs` (the run summaries used by `compare`, plus `chokepoint_id`),
+`next_after` (the last returned chokepoint ID when more matches exist, otherwise
+null), `unfinished_attempts`, and `verification: {"scope": "records", "logs_checked": 0}`.
+Every chokepoint record's envelope and fields must validate, even when filters
+exclude it, and each returned run's records and lineage are checked. Log contents
+are not read. There is no persistent index: each page scans the chokepoint records
+once, so walking a long history page by page repeats that scan, and `--all` does it
+once.
+
+Ordering by finish time keeps a walk complete while other runs are recorded: a
+run that finishes after the cursor is listed after it, and passing the last listed
+`chokepoint_id` to `--after` later returns only newer runs. `unfinished_attempts`
+counts runs that have started but are not listed yet; each appears once it
+finishes or `recover` closes it. `attempts` lists them.
+
+`show` selects one atom, validates its record and lineage, and returns `atom`,
+`pathway`, `chokepoint`, `children`, and
+`verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The atom includes
+declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
+The pathway includes the reason and source relationship. `chokepoint` is the run's
+terminal chokepoint, or null while the run is unfinished, and `children` lists the
+pathways branched from it, oldest first. Finding them scans the chokepoint and
+pathway records. Command arguments and masking positions are omitted unless
+`--command` is supplied. No log contents are read.
+
+Both commands accept unique ID prefixes in their ID options. Agents should retain
+and reuse the full returned IDs. A successful view returns 0, and invalid input
+or records return 2 without a partial JSON result.
 
 ## `pathways`
 
