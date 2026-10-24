@@ -210,10 +210,14 @@ def _build_parser() -> argparse.ArgumentParser:
     runs_parser.add_argument("--pathway", metavar="ID", help="only runs on this pathway")
     runs_parser.add_argument("--outcome", choices=[item.value for item in model.Outcome])
     runs_parser.add_argument(
-        "--after", metavar="ID", help="continue after this run in start/ID order"
+        "--after", metavar="ID", help="continue after this chokepoint: a page's next_after"
     )
-    runs_parser.add_argument(
+    page_size = runs_parser.add_mutually_exclusive_group()
+    page_size.add_argument(
         "--limit", type=int, default=100, help="page size, 1 to 1000 (default: 100)"
+    )
+    page_size.add_argument(
+        "--all", action="store_true", help="list every match from one scan instead of a page"
     )
     runs_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
     runs_parser.add_argument(
@@ -679,16 +683,25 @@ def _runs(args: argparse.Namespace) -> int:
     page = state.list_runs(
         pathway_id=None if args.pathway is None else state.resolve_id(args.pathway, "pathway"),
         outcome=None if args.outcome is None else model.Outcome(args.outcome),
-        after=None if args.after is None else state.resolve_id(args.after, "atom"),
-        limit=args.limit,
+        after=None if args.after is None else state.resolve_id(args.after, "chokepoint"),
+        limit=None if args.all else args.limit,
     )
     if args.json:
         _emit_json(page.to_dict())
     else:
         for item in page.runs:
-            print(f"{item.started_at}  {item.id}  pathway={item.pathway_id}  {_run_phrase(item)}")
+            run = item.run
+            print(
+                f"{run.started_at}  {run.id}  chokepoint={item.chokepoint_id}"
+                f"  pathway={run.pathway_id}  {_run_phrase(run)}"
+            )
         if page.next_after is not None:
             print(f"next after: {page.next_after}")
+        if page.unfinished_attempts:
+            print(
+                f"unfinished attempts: {page.unfinished_attempts}"
+                " (listed once they finish; see `ocura-oss attempts`)"
+            )
         print("verification: records checked; logs not checked")
     return EXIT_OK
 
@@ -705,6 +718,10 @@ def _show(args: argparse.Namespace) -> int:
     print(f"pathway: {pathway.id}")
     print(f"reason: {pathway.reason}")
     print(f"source chokepoint: {pathway.source_chokepoint_id or '-'}")
+    chokepoint = inspected.chokepoint
+    print(f"chokepoint: {'- (unfinished)' if chokepoint is None else chokepoint.id}")
+    for child in inspected.children:
+        print(f"child pathway: {child.id}  reason: {child.reason}")
     print(f"parameters: {json.dumps(dict(atom.declared_parameters), ensure_ascii=True)}")
     for stream in ("stdout", "stderr"):
         print(f"{stream}: {getattr(atom, f'{stream}_log') or 'not captured'}")

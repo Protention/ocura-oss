@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from ocura_oss import Outcome, Store, StoreError, branch, cli, initialize, run
+from ocura_oss import Outcome, Store, StoreError, branch, cli, initialize, model, run
 
 
 class AgentAccessTests(unittest.TestCase):
@@ -41,24 +41,39 @@ class AgentAccessTests(unittest.TestCase):
             check=False,
         )
 
-    def test_discovery_retains_failed_retries_and_pages_equal_start_times(self):
+    def test_discovery_retains_failed_retries_and_pages_equal_finish_times(self):
         baseline = self.record()
         child = branch(baseline.chokepoint.id, root=self.root, reason="try a variation")
         failed = self.record(pathway=child.id, code=7)
         retry = self.record(pathway=child.id)
-        atoms = [baseline.atom, failed.atom, retry.atom]
-        for atom in atoms:
-            self.store._save_atom(replace(atom, started_at=baseline.atom.started_at))
+        points = [baseline.chokepoint, failed.chokepoint, retry.chokepoint]
+        for point in points:
+            self.store._save_chokepoint(replace(point, created_at=points[0].created_at))
         first = self.store.list_runs(limit=2)
         second = self.store.list_runs(limit=2, after=first.next_after)
-        ids = [item.id for page in (first, second) for item in page.runs]
-        self.assertEqual(ids, sorted(atom.id for atom in atoms))
+        listed = [item.chokepoint_id for page in (first, second) for item in page.runs]
+        self.assertEqual(listed, sorted(point.id for point in points))
         self.assertIsNone(second.next_after)
+        self.assertEqual(self.store.list_runs(limit=None).runs, first.runs + second.runs)
         selected = self.store.list_runs(pathway_id=child.id, outcome=Outcome.FAILED)
-        self.assertEqual([item.id for item in selected.runs], [failed.atom.id])
+        self.assertEqual(
+            selected.to_dict()["runs"],
+            [{**model.run_summary_from_atom(failed.atom).to_dict(), "chokepoint_id": points[1].id}],
+        )
         self.assertEqual(
             selected.to_dict()["verification"], {"scope": "records", "logs_checked": 0}
         )
+
+    def test_runs_that_finish_after_a_cursor_are_listed_after_it(self):
+        first = self.record()
+        page = self.store.list_runs()
+        # Started before the cursor's run but finished after it, as a long run would.
+        late = self.record()
+        self.store._save_atom(replace(late.atom, started_at=first.atom.started_at))
+        (self.store.attempts_dir / f"{model.make_id('atom')}.json").write_text("{}")
+        following = self.store.list_runs(after=page.runs[-1].chokepoint_id)
+        self.assertEqual([item.run.id for item in following.runs], [late.atom.id])
+        self.assertEqual((page.unfinished_attempts, following.unfinished_attempts), (0, 1))
 
     def test_discovery_and_inspection_do_not_read_log_contents(self):
         baseline = self.record()
@@ -70,7 +85,11 @@ class AgentAccessTests(unittest.TestCase):
         ):
             self.assertEqual(len(self.store.list_runs().runs), 2)
             inspected = self.store.inspect_run(atom.id)
+            source = self.store.inspect_run(baseline.atom.id).to_dict()
+        self.assertEqual(source["chokepoint"]["id"], baseline.chokepoint.id)
+        self.assertEqual([item["id"] for item in source["children"]], [child.id])
         payload = inspected.to_dict()
+        self.assertEqual(payload["children"], [])
         self.assertEqual(payload["pathway"]["reason"], "try a variation")
         self.assertEqual(payload["pathway"]["source_chokepoint_id"], baseline.chokepoint.id)
         self.assertEqual(payload["atom"]["stdout_sha256"], atom.stdout_sha256)
@@ -90,13 +109,13 @@ class AgentAccessTests(unittest.TestCase):
         for limit in (0, -1, 1001, True, 1.5):
             with self.subTest(limit=limit), self.assertRaisesRegex(StoreError, "page limit"):
                 self.store.list_runs(limit=limit)
-        with self.assertRaisesRegex(StoreError, "missing atom record"):
-            self.store.list_runs(after="atom-" + "0" * 32)
+        with self.assertRaisesRegex(StoreError, "missing chokepoint record"):
+            self.store.list_runs(after="chokepoint-" + "0" * 32)
 
     def test_discovery_does_not_hide_malformed_records_behind_a_filter(self):
-        atom = self.record().atom
-        (self.store.atoms_dir / f"{atom.id}.json").write_text("{}", encoding="utf-8")
-        with self.assertRaisesRegex(StoreError, "malformed atom record"):
+        point = self.record().chokepoint
+        (self.store.chokepoints_dir / f"{point.id}.json").write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(StoreError, "malformed chokepoint record"):
             self.store.list_runs(outcome=Outcome.FAILED)
 
     def test_cli_discovery_and_explicit_command_access(self):
@@ -106,8 +125,13 @@ class AgentAccessTests(unittest.TestCase):
         self.assertEqual(page.returncode, 0, page.stderr)
         payload = json.loads(page.stdout)
         self.assertEqual(payload["runs"][0]["id"], first.atom.id)
+        self.assertEqual(payload["next_after"], first.chokepoint.id)
         following = self.invoke("runs", "--json", "--after", payload["next_after"])
         self.assertEqual(json.loads(following.stdout)["runs"][0]["id"], second.atom.id)
+        everything = json.loads(self.invoke("runs", "--json", "--all").stdout)
+        self.assertEqual(
+            [item["id"] for item in everything["runs"]], [first.atom.id, second.atom.id]
+        )
         shown = self.invoke("show", second.atom.id[5:13], "--json")
         self.assertEqual(shown.returncode, 0, shown.stderr)
         self.assertNotIn("command", json.loads(shown.stdout)["atom"])

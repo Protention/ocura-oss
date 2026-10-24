@@ -2,8 +2,6 @@
 
 Version 0.6.0.
 
-This local branch adds an unreleased [agent access prototype](planning/0.7-agent-access.md).
-
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
 Names listed in `ocura_oss.__all__` form the documented top-level API. Internal record writers and implementation helpers remain package internals.
@@ -710,22 +708,27 @@ A list sorted by `started_at`, then `id`.
 ```python
 store.list_runs(
     *, pathway_id: str | None = None, outcome: Outcome | None = None,
-    after: str | None = None, limit: int = 100,
+    after: str | None = None, limit: int | None = 100,
 ) -> RunPage
 store.inspect_run(atom_id: str) -> RunInspection
 ```
 
-`RunPage` contains `runs: tuple[RunSummary, ...]` and `next_after: str | None`.
-`RunInspection` contains `atom: Atom` and `pathway: Pathway`. Both result types
-live in `ocura_oss.store`; the top-level exports are unchanged. Their `to_dict()`
-methods include verification scope. `RunInspection.to_dict(include_command=True)`
+`RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`, and
+`unfinished_attempts: int`. Each `ListedRun` holds `chokepoint_id: str` and
+`run: RunSummary`. `RunInspection` contains `atom: Atom`, `pathway: Pathway`,
+`chokepoint: Chokepoint | None`, and `children: tuple[Pathway, ...]`. These result
+types live in `ocura_oss.store`; the top-level exports are unchanged. Their
+`to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
 includes command arguments, which are omitted by default.
 
-Listing checks scanned atom envelopes and fields, retains earlier failures, and
-uses a bounded selection buffer. Inspection validates one selected run and its
-lineage. Neither reads log contents. Limits, live pagination, filters and failure
-behavior follow the [CLI contract](cli.md#runs-and-show). Python callers supply
-full IDs and `Outcome` values. Invalid limits, selectors or records raise `StoreError`.
+Listing orders runs by when they finished, checks every scanned chokepoint record,
+retains earlier failures, and keeps at most `limit + 1` candidates; `limit=None`
+returns every match from one scan. *after* is a chokepoint ID, normally a page's
+`next_after`. Inspection validates one selected run and its lineage and scans for
+its chokepoint and child pathways. Neither reads log contents. Ordering, filters
+and failure behavior follow the [CLI contract](cli.md#runs-and-show). Python callers
+supply full IDs and `Outcome` values. Invalid limits, selectors or records raise
+`StoreError`.
 
 ### `Store.list_chokepoints`
 
