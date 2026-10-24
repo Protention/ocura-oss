@@ -2,8 +2,6 @@
 
 A local execution ledger for recording, branching, and comparing command runs.
 
-This local branch isolates the unreleased [metadata scan optimization](docs/planning/0.7-metadata-scans.md).
-
 Record a baseline, explain the next variation, and keep its result connected to the
 original run. Ocura OSS stores command arguments, outcomes, timing, output logs,
 declared parameters, and branch lineage in your project. It verifies the relevant
