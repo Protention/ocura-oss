@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import errno
 import hashlib
 import subprocess
 import sys
@@ -196,7 +197,7 @@ class ArchiveReadTests(unittest.TestCase):
             self.assertEqual(archive.log_info(atom.id).encoding, "gzip")
             self.assertTrue(archive.verify_state().ok)
         self.assertEqual(self.inventory(), before)
-        for arguments in (("verify", "--json"), ("logs", atom.id)):
+        for arguments in (("verify", "--json"), ("logs", atom.id), ("runs",), ("show", atom.id)):
             result = self.invoke(*arguments, "--archive")
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.inventory(), before)
@@ -219,18 +220,22 @@ class ArchiveReadTests(unittest.TestCase):
                 operation()
         self.assertEqual(self.inventory(), before)
         (archive.attempts_dir / f"{atom.id}.json").write_text("{}", encoding="utf-8")
-        with self.assertRaisesRegex(StoreError, "unfinished attempts"):
+        with self.assertRaisesRegex(StoreError, f"1 unfinished attempt.*{atom.id}.*recover"):
             archive.verify_state()
         result = self.invoke("logs", atom.id, "--archive")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b"")
 
-    def test_normal_reads_keep_writer_coordination(self):
-        atom = self.record().atom
+    def test_normal_reads_skip_locks_only_on_write_protected_storage(self):
+        atom = self.record(b"evidence").atom
+        with patch("ocura_oss.locking.hold", side_effect=PermissionError("lock denied")) as hold:
+            self.assertEqual(self.store.read_verified_log(atom.id), b"evidence")
+            self.assertTrue(self.store.verify_state().ok)
+        self.assertEqual(hold.call_count, 1)
         with (
-            patch("ocura_oss.locking.hold", side_effect=PermissionError("lock denied")),
+            patch("ocura_oss.locking.hold", side_effect=OSError(errno.EIO, "lock failed")),
             self.assertRaisesRegex(StoreError, "log is unreadable"),
-            self.store.open_verified_log(atom.id),
+            Store(self.root).open_verified_log(atom.id),
         ):
             self.fail("normal read skipped writer coordination")
 

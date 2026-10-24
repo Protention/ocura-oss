@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import errno
 import hashlib
 import heapq
 import json
@@ -179,6 +180,7 @@ class Store:
     ) -> None:
         self.root = resolve_root(root)
         self.archive = archive
+        self._unlocked_reads = False
         self.state_dir = self.root / STATE_DIR_NAME
         self.pathways_dir = self.state_dir / "pathways"
         self.atoms_dir = self.state_dir / "atoms"
@@ -209,8 +211,15 @@ class Store:
         raise StoreError(f"{missing}; run `ocura-oss init` there to create it")
 
     def _check_archive(self) -> None:
-        if self.archive and next(self.attempts_dir.glob("*.json"), None) is not None:
-            raise StoreError("archive contains unfinished attempts; finalize them before archiving")
+        if not self.archive:
+            return
+        attempts = sorted(path.stem for path in self.attempts_dir.glob("*.json"))
+        if attempts:
+            raise StoreError(
+                f"archive contains {len(attempts)} unfinished attempt(s), first {attempts[0]};"
+                " run `ocura-oss recover` on a writable copy, or read without archive mode"
+                " to list them"
+            )
 
     def _require_writable(self) -> None:
         if self.archive:
@@ -711,11 +720,21 @@ class Store:
                 self._check_archive()
                 yield path
             else:
-                lock_dir = self.state_dir / "log-locks"
-                lock_dir.mkdir(exist_ok=True)
-                if lock_dir.resolve().parent != self.state_dir.resolve():
-                    raise StoreError("log lock directory escapes the state directory")
-                with locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None):
+                with contextlib.ExitStack() as stack:
+                    if not self._unlocked_reads:
+                        try:
+                            lock_dir = self.state_dir / "log-locks"
+                            lock_dir.mkdir(exist_ok=True)
+                            if lock_dir.resolve().parent != self.state_dir.resolve():
+                                raise StoreError("log lock directory escapes the state directory")
+                            lock = locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None)
+                            stack.enter_context(lock)
+                        except OSError as exc:
+                            if not isinstance(exc, PermissionError) and exc.errno != errno.EROFS:
+                                raise
+                            # Write-protected storage, as 0.6 read it: every byte read is
+                            # still verified, so a concurrent change fails instead of lying.
+                            self._unlocked_reads = True
                     yield path
         except logstorage.LogStorageError as exc:
             raise StoreError(f"atom {atom_id} {exc}: {relative}") from (exc.__cause__ or exc)

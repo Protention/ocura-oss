@@ -544,6 +544,8 @@ def _build_parser() -> argparse.ArgumentParser:
         manifest_parser,
         attempts_parser,
         logs_parser,
+        runs_parser,
+        show_parser,
     ):
         read_parser.add_argument(
             "--archive",
@@ -781,7 +783,7 @@ def _chokepoints(args: argparse.Namespace) -> int:
 
 
 def _runs(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     page = state.list_runs(
         pathway_id=None if args.pathway is None else state.resolve_id(args.pathway, "pathway"),
         outcome=None if args.outcome is None else model.Outcome(args.outcome),
@@ -809,7 +811,7 @@ def _runs(args: argparse.Namespace) -> int:
 
 
 def _show(args: argparse.Namespace) -> int:
-    state = _open_store(args.root)
+    state = _open_store(args.root, archive=args.archive)
     inspected = state.inspect_run(state.resolve_id(args.atom, "atom"))
     if args.json:
         _emit_json(inspected.to_dict(include_command=args.command))
