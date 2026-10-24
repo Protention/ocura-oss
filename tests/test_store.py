@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from ocura_oss import model
 from ocura_oss.store import STATE_DIR_NAME, Store, StoreError
@@ -548,6 +549,50 @@ class LineageIntegrityTests(unittest.TestCase):
         )
         with self.assertRaises(StoreError):
             self.store.load_pathway(self.pathway_id)
+
+    def test_iterated_branch_chain_validates_each_record_once(self):
+        # Each generation branches from a run on the previous one, so a pathway
+        # reaches its parent both directly and through its source chokepoint.
+        den_id = self.store.load_den().id
+        pathway_id = self.pathway_id
+        depth = 12
+        for generation in range(depth):
+            atom_id = model.make_id("atom")
+            chokepoint_id = model.make_id("chokepoint")
+            self._save_atom(atom_id, pathway_id)
+            self.store._save_chokepoint(
+                model.Chokepoint(
+                    id=chokepoint_id,
+                    pathway_id=pathway_id,
+                    atom_id=atom_id,
+                    created_at="2026-01-01T00:00:02.000000+00:00",
+                    kind="terminal",
+                    outcome=model.Outcome.PASSED,
+                    branchable=True,
+                )
+            )
+            child = model.make_id("pathway")
+            self.store._save_pathway(
+                model.Pathway(
+                    id=child,
+                    den_id=den_id,
+                    created_at="2026-01-01T00:00:03.000000+00:00",
+                    parent_pathway_id=pathway_id,
+                    source_chokepoint_id=chokepoint_id,
+                    reason=f"generation {generation}",
+                    parameters={},
+                )
+            )
+            pathway_id = child
+        with mock.patch.object(
+            self.store, "_read_envelope", wraps=self.store._read_envelope
+        ) as reads:
+            self.store.load_pathway(pathway_id)
+            loaded = reads.call_count
+            self.store.verify_state()
+        # Doubling per generation would need thousands of reads at this depth.
+        self.assertLess(loaded, 5 * depth)
+        self.assertLess(reads.call_count, 30 * depth)
 
     def test_chokepoint_atom_pathway_disagreement_is_rejected(self):
         other = model.make_id("pathway")

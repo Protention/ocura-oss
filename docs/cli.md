@@ -26,7 +26,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `recover` | Close attempts whose recording process stopped |
 | `demo` | Run the complete workflow in a new retained directory |
 
-Run `ocura-oss COMMAND --help` for command-specific help.
+Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --version` to print the installed version.
 
 ## Conventions
 

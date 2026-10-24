@@ -10,7 +10,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ocura_oss import branching, demo, model, runner, store, supervise
+from ocura_oss import __version__, branching, demo, model, runner, store, supervise
 from ocura_oss.model import ModelError
 from ocura_oss.store import StoreError
 
@@ -71,6 +71,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Commands inherit your execution environment's permissions."
         ),
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command_name", required=True)
 
     init_parser = subparsers.add_parser(

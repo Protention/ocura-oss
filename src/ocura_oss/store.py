@@ -159,9 +159,18 @@ class Store:
 
     def load_pathway(self, pathway_id: str) -> model.Pathway:
         """Load a pathway and validate its den and lineage references."""
-        return self._load_pathway(pathway_id, frozenset())
+        return self._load_pathway(pathway_id, frozenset(), {})
 
-    def _load_pathway(self, pathway_id: str, seen_ids: frozenset[str]) -> model.Pathway:
+    # Each loader below takes the records already validated during the same
+    # operation. A child pathway reaches its parent both directly and through
+    # its source chokepoint, so without them every generation doubles the work.
+
+    def _load_pathway(
+        self, pathway_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.Pathway:
+        known = validated.get(pathway_id)
+        if isinstance(known, model.Pathway):
+            return known
         pathway = self._load_structural(
             "pathways", pathway_id, "pathway", "pathway", model.pathway_from_payload
         )
@@ -176,9 +185,9 @@ class Store:
                 f"pathway {pathway_id} must set parent pathway and source chokepoint together"
             )
         if pathway.parent_pathway_id is not None:
-            self._load_pathway(pathway.parent_pathway_id, seen)
+            self._load_pathway(pathway.parent_pathway_id, seen, validated)
         if pathway.source_chokepoint_id is not None:
-            source = self._load_chokepoint(pathway.source_chokepoint_id, seen)
+            source = self._load_chokepoint(pathway.source_chokepoint_id, seen, validated)
             if (
                 pathway.parent_pathway_id is not None
                 and source.pathway_id != pathway.parent_pathway_id
@@ -186,24 +195,36 @@ class Store:
                 raise StoreError(
                     f"pathway {pathway_id} source chokepoint does not belong to its parent pathway"
                 )
+        validated[pathway_id] = pathway
         return pathway
 
     def load_atom(self, atom_id: str) -> model.Atom:
         """Load an atom and validate its pathway reference."""
-        return self._load_atom(atom_id, frozenset())
+        return self._load_atom(atom_id, frozenset(), {})
 
-    def _load_atom(self, atom_id: str, seen_ids: frozenset[str]) -> model.Atom:
+    def _load_atom(
+        self, atom_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.Atom:
+        known = validated.get(atom_id)
+        if isinstance(known, model.Atom):
+            return known
         atom = self._load_structural("atoms", atom_id, "atom", "atom", model.atom_from_payload)
         if atom_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
-        self._load_pathway(atom.pathway_id, seen_ids | {atom_id})
+        self._load_pathway(atom.pathway_id, seen_ids | {atom_id}, validated)
+        validated[atom_id] = atom
         return atom
 
     def load_chokepoint(self, chokepoint_id: str) -> model.Chokepoint:
         """Load a chokepoint and validate its atom, pathway, and outcome."""
-        return self._load_chokepoint(chokepoint_id, frozenset())
+        return self._load_chokepoint(chokepoint_id, frozenset(), {})
 
-    def _load_chokepoint(self, chokepoint_id: str, seen_ids: frozenset[str]) -> model.Chokepoint:
+    def _load_chokepoint(
+        self, chokepoint_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.Chokepoint:
+        known = validated.get(chokepoint_id)
+        if isinstance(known, model.Chokepoint):
+            return known
         chokepoint = self._load_structural(
             "chokepoints",
             chokepoint_id,
@@ -214,11 +235,12 @@ class Store:
         if chokepoint_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
         seen = seen_ids | {chokepoint_id}
-        atom = self._load_atom(chokepoint.atom_id, seen)
+        atom = self._load_atom(chokepoint.atom_id, seen, validated)
         if atom.pathway_id != chokepoint.pathway_id:
             raise StoreError(f"chokepoint {chokepoint_id} and its atom disagree on the pathway")
         if atom.outcome is not chokepoint.outcome:
             raise StoreError(f"chokepoint {chokepoint_id} outcome disagrees with its atom")
+        validated[chokepoint_id] = chokepoint
         return chokepoint
 
     def _save_den(self, den: model.Den) -> None:
@@ -503,6 +525,8 @@ class Store:
         den = self.load_den()
         problems: list[tuple[str, str]] = []
         manifest = [_manifest_line("den", den.id, self._read_envelope(self.den_path, "den"))]
+        # Shared by every lineage check below, so each record is validated once.
+        validated: dict[str, object] = {}
         # A run writes its attempt before its logs and its atom before its
         # chokepoint, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
@@ -519,7 +543,7 @@ class Store:
         )
         for pathway in pathways:
             try:
-                self.load_pathway(pathway.id)
+                self._load_pathway(pathway.id, frozenset(), validated)
             except StoreError as exc:
                 problems.append((f"{pathway.id}.json", str(exc)))
         logs_checked = 0
@@ -544,7 +568,7 @@ class Store:
                     problems.append((label, str(exc)))
         for atom in atoms:
             try:
-                self.load_atom(atom.id)
+                self._load_atom(atom.id, frozenset(), validated)
             except StoreError as exc:
                 problems.append((f"{atom.id}.json", str(exc)))
             for relative, size_field, digest_field in _recorded_logs(atom):
@@ -557,7 +581,7 @@ class Store:
         self._report_orphaned_logs(log_entries, referenced_logs, problems)
         for chokepoint in chokepoints:
             try:
-                self.load_chokepoint(chokepoint.id)
+                self._load_chokepoint(chokepoint.id, frozenset(), validated)
             except StoreError as exc:
                 problems.append((f"{chokepoint.id}.json", str(exc)))
         self._report_missing_chokepoints(
