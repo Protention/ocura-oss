@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ocura_oss import cli
+from ocura_oss import __version__, cli
 
 
 @contextlib.contextmanager
@@ -39,6 +39,12 @@ class CliTests(unittest.TestCase):
     def _run_in_root(self, *arguments):
         with contextlib.chdir(str(self.root)):
             return self._run(*arguments)
+
+    def test_version_flag_prints_package_version(self):
+        with self.assertRaises(SystemExit) as raised, captured_output() as (stdout, _stderr):
+            cli.main(["--version"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"ocura-oss {__version__}")
 
     def test_init_prints_ids_and_json_mode_parses(self):
         other = self.parent / "other"

@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
 
-from ocura_oss import branching, demo, model, runner, store, supervise
+from ocura_oss import __version__, branching, demo, model, runner, store, supervise
 from ocura_oss.model import ModelError
 from ocura_oss.store import StoreError
 
@@ -72,6 +72,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Commands inherit your execution environment's permissions."
         ),
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command_name", required=True)
 
     init_parser = subparsers.add_parser(
@@ -220,6 +221,34 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="COMMAND",
         help="command tokens after -- (required); executed verbatim",
     )
+
+    runs_parser = subparsers.add_parser("runs", help="page recorded runs without reading logs")
+    runs_parser.add_argument("--pathway", metavar="ID", help="only runs on this pathway")
+    runs_parser.add_argument("--outcome", choices=[item.value for item in model.Outcome])
+    runs_parser.add_argument(
+        "--after", metavar="ID", help="continue after this chokepoint: a page's next_after"
+    )
+    page_size = runs_parser.add_mutually_exclusive_group()
+    page_size.add_argument(
+        "--limit", type=int, default=100, help="page size, 1 to 1000 (default: 100)"
+    )
+    page_size.add_argument(
+        "--all", action="store_true", help="list every match from one scan instead of a page"
+    )
+    runs_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+    runs_parser.add_argument(
+        "--json", action="store_true", help="print a JSON page and next_after ID"
+    )
+
+    show_parser = subparsers.add_parser(
+        "show", help="inspect a run, its reason and log identities without reading logs"
+    )
+    show_parser.add_argument("atom", metavar="ID", help="atom ID or unique prefix")
+    show_parser.add_argument(
+        "--command", action="store_true", help="also include recorded arguments"
+    )
+    show_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+    show_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
 
     pathways_parser = subparsers.add_parser(
         "pathways",
@@ -531,6 +560,10 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _init(args)
     if name == "run":
         return _run(args, command_tail)
+    if name == "runs":
+        return _runs(args)
+    if name == "show":
+        return _show(args)
     if name == "pathways":
         return _pathways(args)
     if name == "chokepoints":
@@ -682,6 +715,7 @@ def _print_run(execution: runner.RunExecution) -> None:
 
 def _pathway_summaries(state: store.Store) -> list[model.PathwaySummary]:
     summaries = []
+    recorded_pathways = {atom.pathway_id for atom in state.list_atoms()}
     for pathway in state.list_pathways():
         summaries.append(
             model.PathwaySummary(
@@ -691,7 +725,7 @@ def _pathway_summaries(state: store.Store) -> list[model.PathwaySummary]:
                 created_at=pathway.created_at,
                 reason=pathway.reason,
                 parameters=pathway.parameters,
-                has_terminal_evidence=state.has_terminal_evidence(pathway.id),
+                has_terminal_evidence=pathway.id in recorded_pathways,
             )
         )
     return summaries
@@ -743,6 +777,62 @@ def _chokepoints(args: argparse.Namespace) -> int:
             f"  atom={item.atom_id}  outcome={item.outcome.value}"
             f"  branchable={branchable}"
         )
+    return EXIT_OK
+
+
+def _runs(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    page = state.list_runs(
+        pathway_id=None if args.pathway is None else state.resolve_id(args.pathway, "pathway"),
+        outcome=None if args.outcome is None else model.Outcome(args.outcome),
+        after=None if args.after is None else state.resolve_id(args.after, "chokepoint"),
+        limit=None if args.all else args.limit,
+    )
+    if args.json:
+        _emit_json(page.to_dict())
+    else:
+        for item in page.runs:
+            run = item.run
+            print(
+                f"{run.started_at}  {run.id}  chokepoint={item.chokepoint_id}"
+                f"  pathway={run.pathway_id}  {_run_phrase(run)}"
+            )
+        if page.next_after is not None:
+            print(f"next after: {page.next_after}")
+        if page.unfinished_attempts:
+            print(
+                f"unfinished attempts: {page.unfinished_attempts}"
+                " (listed once they finish; see `ocura-oss attempts`)"
+            )
+        print("verification: records checked; logs not checked")
+    return EXIT_OK
+
+
+def _show(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    inspected = state.inspect_run(state.resolve_id(args.atom, "atom"))
+    if args.json:
+        _emit_json(inspected.to_dict(include_command=args.command))
+        return EXIT_OK
+    atom, pathway = inspected.atom, inspected.pathway
+    print(f"atom: {atom.id}")
+    print(f"run: {_run_phrase(model.run_summary_from_atom(atom))}")
+    print(f"pathway: {pathway.id}")
+    print(f"reason: {pathway.reason}")
+    print(f"source chokepoint: {pathway.source_chokepoint_id or '-'}")
+    chokepoint = inspected.chokepoint
+    print(f"chokepoint: {'- (unfinished)' if chokepoint is None else chokepoint.id}")
+    for child in inspected.children:
+        print(f"child pathway: {child.id}  reason: {child.reason}")
+    print(f"parameters: {json.dumps(dict(atom.declared_parameters), ensure_ascii=True)}")
+    for stream in ("stdout", "stderr"):
+        print(f"{stream}: {getattr(atom, f'{stream}_log') or 'not captured'}")
+        if atom.output_capture is model.OutputCapture.FULL:
+            print(f"  bytes: {getattr(atom, f'{stream}_bytes')}")
+            print(f"  sha256: {getattr(atom, f'{stream}_sha256')}")
+    if args.command:
+        print(f"command: {json.dumps(list(atom.command), ensure_ascii=True)}")
+    print("verification: record and lineage checked; logs not checked")
     return EXIT_OK
 
 

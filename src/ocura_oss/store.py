@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import hashlib
+import heapq
 import json
 import os
 import tempfile
@@ -98,6 +99,65 @@ class LogInfo:
     sha256: str
     fingerprint: str
     path: str
+
+
+@dataclass(frozen=True)
+class ListedRun:
+    """One finalized run and the terminal chokepoint a branch can start from."""
+
+    chokepoint_id: str
+    run: model.RunSummary
+
+    def to_dict(self) -> dict:
+        return {**self.run.to_dict(), "chokepoint_id": self.chokepoint_id}
+
+
+@dataclass(frozen=True)
+class RunPage:
+    """Finalized runs in the order they finished; log contents are not verified.
+
+    ``unfinished_attempts`` counts runs that have started but are not listed
+    yet. Each is listed once it finishes or ``recover`` closes it.
+    """
+
+    runs: tuple[ListedRun, ...]
+    next_after: str | None
+    unfinished_attempts: int
+
+    def to_dict(self) -> dict:
+        return {
+            "runs": [item.to_dict() for item in self.runs],
+            "next_after": self.next_after,
+            "unfinished_attempts": self.unfinished_attempts,
+            "verification": {"scope": "records", "logs_checked": 0},
+        }
+
+
+@dataclass(frozen=True)
+class RunInspection:
+    """One validated run, its pathway and chokepoint, and the branches made from it.
+
+    ``chokepoint`` is ``None`` while the run is unfinished.
+    """
+
+    atom: model.Atom
+    pathway: model.Pathway
+    chokepoint: model.Chokepoint | None
+    children: tuple[model.Pathway, ...]
+
+    def to_dict(self, *, include_command: bool = False) -> dict:
+        payload = model.atom_to_payload(self.atom)
+        if not include_command:
+            payload.pop("command")
+            payload.pop("masked_arguments")
+        point = self.chokepoint
+        return {
+            "atom": payload,
+            "pathway": model.pathway_to_payload(self.pathway),
+            "chokepoint": None if point is None else model.chokepoint_to_payload(point),
+            "children": [model.pathway_to_payload(child) for child in self.children],
+            "verification": {"scope": "record_and_lineage", "logs_checked": 0},
+        }
 
 
 def resolve_root(root: os.PathLike[str] | str | None = None) -> Path:
@@ -199,9 +259,18 @@ class Store:
 
     def load_pathway(self, pathway_id: str) -> model.Pathway:
         """Load a pathway and validate its den and lineage references."""
-        return self._load_pathway(pathway_id, frozenset())
+        return self._load_pathway(pathway_id, frozenset(), {})
 
-    def _load_pathway(self, pathway_id: str, seen_ids: frozenset[str]) -> model.Pathway:
+    # Each loader below takes the records already validated during the same
+    # operation. A child pathway reaches its parent both directly and through
+    # its source chokepoint, so without them every generation doubles the work.
+
+    def _load_pathway(
+        self, pathway_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.Pathway:
+        known = validated.get(pathway_id)
+        if isinstance(known, model.Pathway):
+            return known
         pathway = self._load_structural(
             "pathways", pathway_id, "pathway", "pathway", model.pathway_from_payload
         )
@@ -216,9 +285,9 @@ class Store:
                 f"pathway {pathway_id} must set parent pathway and source chokepoint together"
             )
         if pathway.parent_pathway_id is not None:
-            self._load_pathway(pathway.parent_pathway_id, seen)
+            self._load_pathway(pathway.parent_pathway_id, seen, validated)
         if pathway.source_chokepoint_id is not None:
-            source = self._load_chokepoint(pathway.source_chokepoint_id, seen)
+            source = self._load_chokepoint(pathway.source_chokepoint_id, seen, validated)
             if (
                 pathway.parent_pathway_id is not None
                 and source.pathway_id != pathway.parent_pathway_id
@@ -226,24 +295,36 @@ class Store:
                 raise StoreError(
                     f"pathway {pathway_id} source chokepoint does not belong to its parent pathway"
                 )
+        validated[pathway_id] = pathway
         return pathway
 
     def load_atom(self, atom_id: str) -> model.Atom:
         """Load an atom and validate its pathway reference."""
-        return self._load_atom(atom_id, frozenset())
+        return self._load_atom(atom_id, frozenset(), {})
 
-    def _load_atom(self, atom_id: str, seen_ids: frozenset[str]) -> model.Atom:
+    def _load_atom(
+        self, atom_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.Atom:
+        known = validated.get(atom_id)
+        if isinstance(known, model.Atom):
+            return known
         atom = self._load_structural("atoms", atom_id, "atom", "atom", model.atom_from_payload)
         if atom_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
-        self._load_pathway(atom.pathway_id, seen_ids | {atom_id})
+        self._load_pathway(atom.pathway_id, seen_ids | {atom_id}, validated)
+        validated[atom_id] = atom
         return atom
 
     def load_chokepoint(self, chokepoint_id: str) -> model.Chokepoint:
         """Load a chokepoint and validate its atom, pathway, and outcome."""
-        return self._load_chokepoint(chokepoint_id, frozenset())
+        return self._load_chokepoint(chokepoint_id, frozenset(), {})
 
-    def _load_chokepoint(self, chokepoint_id: str, seen_ids: frozenset[str]) -> model.Chokepoint:
+    def _load_chokepoint(
+        self, chokepoint_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.Chokepoint:
+        known = validated.get(chokepoint_id)
+        if isinstance(known, model.Chokepoint):
+            return known
         chokepoint = self._load_structural(
             "chokepoints",
             chokepoint_id,
@@ -254,11 +335,12 @@ class Store:
         if chokepoint_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records")
         seen = seen_ids | {chokepoint_id}
-        atom = self._load_atom(chokepoint.atom_id, seen)
+        atom = self._load_atom(chokepoint.atom_id, seen, validated)
         if atom.pathway_id != chokepoint.pathway_id:
             raise StoreError(f"chokepoint {chokepoint_id} and its atom disagree on the pathway")
         if atom.outcome is not chokepoint.outcome:
             raise StoreError(f"chokepoint {chokepoint_id} outcome disagrees with its atom")
+        validated[chokepoint_id] = chokepoint
         return chokepoint
 
     def _save_den(self, den: model.Den) -> None:
@@ -441,6 +523,97 @@ class Store:
         records = self._list_typed(self.atoms_dir, "atom", model.atom_from_payload)
         records.sort(key=lambda item: (item.started_at, item.id))
         return records
+
+    def list_runs(
+        self,
+        *,
+        pathway_id: str | None = None,
+        outcome: model.Outcome | None = None,
+        after: str | None = None,
+        limit: int | None = 100,
+    ) -> RunPage:
+        """Page finalized runs in the order they finished, by their chokepoints.
+
+        Every chokepoint record's envelope and fields are checked, and each
+        returned run's records and lineage; log contents are not. *after* is a
+        page's ``next_after`` chokepoint. Runs that finish while a caller pages
+        are listed after its cursor. Each page scans the chokepoints once, so
+        ``limit=None`` returns every match from a single scan.
+        """
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
+        ):
+            raise StoreError("run page limit must be between 1 and 1000")
+        if outcome is not None and not isinstance(outcome, model.Outcome):
+            raise StoreError("outcome must be an Outcome value")
+        self.require()
+        self.load_den()
+        if pathway_id is not None:
+            self.load_pathway(pathway_id)
+        start = None
+        if after is not None:
+            boundary = self._load_structural(
+                "chokepoints", after, "chokepoint", "chokepoint", model.chokepoint_from_payload
+            )
+            start = (boundary.created_at, boundary.id)
+        candidates = (
+            point
+            for point in self._iter_typed(
+                self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload
+            )
+            if (pathway_id is None or point.pathway_id == pathway_id)
+            and (outcome is None or point.outcome is outcome)
+            and (start is None or (point.created_at, point.id) > start)
+        )
+        if limit is None:
+            shown, more = sorted(candidates, key=_finish_order), False
+        else:
+            selected = heapq.nsmallest(limit + 1, candidates, key=_finish_order)
+            shown, more = selected[:limit], len(selected) > limit
+        validated: dict[str, object] = {}
+        runs = []
+        for point in shown:
+            self._load_chokepoint(point.id, frozenset(), validated)
+            atom = self._load_atom(point.atom_id, frozenset(), validated)
+            runs.append(ListedRun(chokepoint_id=point.id, run=model.run_summary_from_atom(atom)))
+        return RunPage(
+            runs=tuple(runs),
+            next_after=shown[-1].id if more else None,
+            unfinished_attempts=sum(1 for _ in self.attempts_dir.glob("*.json")),
+        )
+
+    def inspect_run(self, atom_id: str) -> RunInspection:
+        """Load one run with its lineage, terminal chokepoint, and child pathways.
+
+        Scans chokepoint and pathway records to find the relationships; reads no
+        logs. The chokepoint is ``None`` while the run is unfinished.
+        """
+        self.require()
+        validated: dict[str, object] = {}
+        atom = self._load_atom(atom_id, frozenset(), validated)
+        found = next(
+            (
+                point
+                for point in self._iter_typed(
+                    self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload
+                )
+                if point.atom_id == atom_id
+            ),
+            None,
+        )
+        chokepoint = None
+        children: tuple[model.Pathway, ...] = ()
+        if found is not None:
+            chokepoint = self._load_chokepoint(found.id, frozenset(), validated)
+            children = tuple(
+                item for item in self.list_pathways() if item.source_chokepoint_id == found.id
+            )
+        return RunInspection(
+            atom=atom,
+            pathway=self._load_pathway(atom.pathway_id, frozenset(), validated),
+            chokepoint=chokepoint,
+            children=children,
+        )
 
     def list_chokepoints(self) -> list[model.Chokepoint]:
         """Return validated chokepoints in reverse creation order."""
@@ -675,6 +848,8 @@ class Store:
         den = self.load_den()
         problems: list[tuple[str, str]] = []
         manifest = [_manifest_line("den", den.id, self._read_envelope(self.den_path, "den"))]
+        # Shared by every lineage check below, so each record is validated once.
+        validated: dict[str, object] = {}
         # A run writes its attempt before its logs and its atom before its
         # chokepoint, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
@@ -691,7 +866,7 @@ class Store:
         )
         for pathway in pathways:
             try:
-                self.load_pathway(pathway.id)
+                self._load_pathway(pathway.id, frozenset(), validated)
             except StoreError as exc:
                 problems.append((f"{pathway.id}.json", str(exc)))
         logs_checked = 0
@@ -716,7 +891,7 @@ class Store:
                     problems.append((label, str(exc)))
         for atom in atoms:
             try:
-                self.load_atom(atom.id)
+                self._load_atom(atom.id, frozenset(), validated)
             except StoreError as exc:
                 problems.append((f"{atom.id}.json", str(exc)))
             for relative, size_field, digest_field in _recorded_logs(atom):
@@ -729,7 +904,7 @@ class Store:
         self._report_orphaned_logs(log_entries, referenced_logs, problems)
         for chokepoint in chokepoints:
             try:
-                self.load_chokepoint(chokepoint.id)
+                self._load_chokepoint(chokepoint.id, frozenset(), validated)
             except StoreError as exc:
                 problems.append((f"{chokepoint.id}.json", str(exc)))
         self._report_missing_chokepoints(
@@ -890,12 +1065,13 @@ class Store:
         _atomic_write_bytes(path, text.encode("utf-8"))
 
     def _list_typed(self, directory: Path, kind: str, converter: Callable[[dict], _T]) -> list[_T]:
-        records: list[_T] = []
-        if not directory.is_dir():
-            return records
-        for path in sorted(directory.glob("*.json")):
-            records.append(self._load_listed(path, kind, converter))
-        return records
+        return list(self._iter_typed(directory, kind, converter))
+
+    def _iter_typed(
+        self, directory: Path, kind: str, converter: Callable[[dict], _T]
+    ) -> Iterator[_T]:
+        for path in directory.glob("*.json"):
+            yield self._load_listed(path, kind, converter)
 
     def _load_listed(
         self,
@@ -1098,6 +1274,10 @@ def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
     if not entries:
         raise StoreError("retained manifest lists no records, so it cannot check any")
     return entries
+
+
+def _finish_order(chokepoint: model.Chokepoint) -> tuple[str, str]:
+    return chokepoint.created_at, chokepoint.id
 
 
 def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
