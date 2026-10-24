@@ -18,12 +18,28 @@ Ocura OSS stores records and command output under `.ocura-oss/` in one project d
   attempts/
     <atom-id>.json
     <atom-id>.lock
+  log-locks/
+    <atom-id>.stdout.log.lock
+    <atom-id>.stderr.log.lock
   logs/
     <atom-id>.stdout.log
     <atom-id>.stderr.log
+    <atom-id>.stdout.log.gz
+    <atom-id>.stderr.log.gz
 ```
 
 `attempts/` holds one entry for each run that has started and is not yet finalized. It is empty when nothing is running and nothing was abandoned.
+
+Each finalized captured stream normally has either its raw `.log` file or a
+losslessly compressed `.log.gz` backing file. A conversion interrupted after
+publication may leave both; readers verify both representations and prefer raw
+storage, and a later conversion can finish removing the duplicate.
+`log-locks/` holds local advisory locks that coordinate reads and conversion.
+The atom continues to record the logical
+`.log` path and the original size and SHA-256. `ocura-oss logs ID` and
+`Store.read_verified_log()` transparently return the verified original bytes.
+`logs ID --info` reports the current physical path and sizes. See
+[automatic log compression](autocompression.md) for this local branch's policy.
 
 ## Record envelope
 
@@ -56,6 +72,23 @@ Within one schema version, a record changes only by gaining optional fields:
 The repository keeps a small ledger written by 0.5.0 as a test fixture. Every later release that keeps schema 2 must verify it unchanged.
 
 This describes how the format changes. It is not a commitment that schema 2 is final: the 0.x status in the [overview](index.md#project-status) still applies.
+
+### Local compressed-storage extension
+
+The autocompression prototype keeps JSON records and schema 2 unchanged, and
+reads existing raw schema-2 ledgers. It extends physical log storage: earlier
+versions cannot read compressed `.log.gz` backing files even though they can
+parse the unchanged records. Before returning to an older version, run this
+branch's `ocura-oss decompress` and `ocura-oss verify`. Use `run --no-compress`
+when newly recorded logs must remain directly readable by those versions.
+
+Default compression considers only a run's own finalized captured logs, once,
+at 1 MiB or larger, with gzip level 6 and a minimum 10% saving. A manual
+`compress` pass handles existing finalized logs. Storage conversion preserves
+original bytes, original hashes, record checksums, and retained manifests.
+It does not compress active streams or enforce a disk quota, and needs room
+for temporary storage alongside the source file. JSON records and workload
+artifacts are not compressed by this prototype.
 
 ### Upgrading from 0.4
 
@@ -210,12 +243,15 @@ bytes it returns against the atom's recorded byte count and SHA-256 digest. Pass
 
 The complete selected log is held in memory and returned as bytes. Decoding and
 metric interpretation belong to the caller. Unlike resolving a path and reading it
-later, this method verifies the same bytes your code receives.
+later, this method verifies the same bytes your code receives. Raw and gzip
+storage both return the original bytes; `ocura-oss logs ID` exposes this read at
+the CLI, while `logs ID --info` returns verified storage metadata.
 
 The read is scoped to the selected stream: it does not verify the other stream,
 unrelated records, or the whole ledger. Continue to use `verify()` or
-`Store.verify_state()` for a complete check. It does not lock the ledger or provide
-an atomic snapshot; returned bytes remain unchanged if the file changes afterward.
+`Store.verify_state()` for a complete check. Local advisory locks coordinate
+readers with compression and decompression, without providing an atomic snapshot
+of the ledger; returned bytes remain unchanged if the file changes afterward.
 An atom recorded without output capture has no log, and the read raises `StoreError`.
 See the [Python API](python-api.md#storeread_verified_log) for usage and errors.
 

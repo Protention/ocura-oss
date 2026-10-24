@@ -2,6 +2,10 @@
 
 Version 0.6.0.
 
+This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
+`decompress` commands below are proposed branch behavior, absent from the released
+package. See [open design decisions](autocompression.md#decisions-before-merge).
+
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
 
 ```text
@@ -26,6 +30,9 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `manifest` | Print one checksum line per verified record, to keep elsewhere |
 | `attempts` | List runs that have started and are not yet finalized |
 | `recover` | Close attempts whose recording process stopped |
+| `logs` | Read verified original log bytes or inspect storage metadata |
+| `compress` | Compress eligible finalized captured logs losslessly |
+| `decompress` | Restore finalized compressed logs to their original bytes |
 | `demo` | Run the complete workflow in a new retained directory |
 
 Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --version` to print the installed version.
@@ -42,7 +49,7 @@ Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --versi
 
 Every record has an identifier made of its kind and 32 hexadecimal characters, such as `chokepoint-447ca3002f0b4d7c9a1e5b6c7d8e9f01`. Output, JSON results, and records always carry the full identifier.
 
-`branch --from`, `compare --from`, and `run --pathway` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `chokepoint-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run.
+`branch --from`, `compare --from`, `run --pathway`, `logs ID`, `compress --atom`, and `decompress --atom` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `chokepoint-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run.
 
 Prefixes are for typing by hand. A script or agent already holds the full identifier and should pass it, because a prefix that is unique today can match a second record later.
 
@@ -63,6 +70,9 @@ Every command accepts `--json`. JSON mode writes one result document to standard
 ### Summary data
 
 Default summaries and listing output omit command arguments, environment values, and log contents. `run` streams child output unless `--quiet` or `--json` is present, so streamed output is separate from the final summary.
+
+`logs ID` explicitly reads log contents as verified original bytes. Its `--info`
+and `--json` modes emit metadata only.
 
 Raw atom records retain command arguments, and log files retain command output. Keep secrets out of command arguments, declared parameters, branch reasons, and output. When a run cannot avoid one, `run --mask-arg` keeps a command token out of the records and `run --no-capture` keeps output off disk; see [keeping sensitive values out of records](state-and-verification.md#keeping-sensitive-values-out-of-records).
 
@@ -117,6 +127,7 @@ Run one trusted local command and record terminal evidence.
 ```text
 ocura-oss run [--root PATH] [--pathway ID] [--param KEY=VALUE] [--quiet] [--json]
               [--no-capture] [--mask-arg POSITION] [--substitute]
+              [--no-compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
 ```
 
@@ -132,6 +143,8 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--quiet` | flag | false | Retain output without mirroring it to the terminal |
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
+| `--no-compress` | flag | false | Keep this run's captured logs raw after finalization |
+| `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original size for automatic gzip compression; logs must also save at least 10% |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
 | `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
 | `--context` | flag | false | Record the platform and the git revision and dirty state at launch |
@@ -143,6 +156,13 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 The command runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment. Environment keys and values are not serialized.
 
 Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal.
+
+After finalization, captured logs of at least 1 MiB are considered once for
+lossless gzip compression. Each must save at least 10%; small and incompressible
+logs remain raw. No older runs are scanned. `--no-compress` disables this step for
+the run, and `--compress-min-bytes N` changes its size threshold. Compression
+errors emit storage warnings on stderr without changing the command's recorded
+outcome. See the [local prototype's policy and compatibility limits](autocompression.md).
 
 With `--no-capture`, no log files are written. Output still streams to the terminal unless `--quiet` or `--json` is present, and is otherwise discarded.
 
@@ -166,6 +186,10 @@ A passing command records `passed`. A nonzero return code records `failed`. A la
 
 The final text summary includes the atom, chokepoint, pathway, outcome, duration, log paths, and the return code or launch category when available. With `--no-capture`, it states `output: not captured` in place of the log paths. It does not repeat command arguments or parameter values; `pathways` lists a pathway's parameters and `compare` lists what each run recorded.
 
+Log paths in the run summary and atom are logical paths; compressed physical
+storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
+--info` to find its current backing path. The text summary includes a read command.
+
 #### JSON output
 
 | Field | Type | Description |
@@ -180,6 +204,7 @@ The final text summary includes the atom, chokepoint, pathway, outcome, duration
 | `output_capture` | string | `full`, or `none` when `--no-capture` was used |
 | `stdout_log` | string or null | Project-relative stdout log path; null without capture |
 | `stderr_log` | string or null | Project-relative stderr log path; null without capture |
+| `storage_warnings` | array of strings, optional | Post-finalization compression errors, present only when nonempty; also printed on stderr |
 
 Use returned IDs to continue the [automated workflow](automation.md). The [training example](../examples/autoregressive/README.md) provides an executable client.
 
@@ -219,6 +244,101 @@ Keep a token out of the records and its output off disk. Position 3 is the value
 ```console
 ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 ```
+
+## Stable archives
+
+`--archive` is available on `pathways`, `chokepoints`, `runs`, `show`,
+`compare`, `verify`, `manifest`, `attempts`, and `logs`. It reads without creating
+ledger lock files and refuses every change. Stop all writers and finalize or recover
+unfinished attempts before making the archive. The mode rejects archives containing
+attempt records, saying how to list and recover them, and assumes the storage
+remains unchanged while reading; it does not coordinate with active writers.
+
+Normal mode takes a lock for each log it reads. When the storage is write-protected
+it reads without one, as 0.6.0 did; every byte is still verified, so a concurrent
+change makes the read fail rather than return wrong data. Unlike archive mode, this
+also reads ledgers with unfinished attempts and lists them.
+
+Content snapshots may need writable OS temporary storage outside the archive.
+Archive mode does not introduce an export format or snapshot an active ledger.
+
+## `logs`
+
+Read one finalized atom's verified original log bytes or inspect its metadata.
+
+```text
+ocura-oss logs ID [--stream stdout|stderr] [--offset N] [--length N]
+                [--info] [--json] [--archive] [--root PATH]
+```
+
+| Name | Default | Description |
+| --- | --- | --- |
+| `ID` | required | Full atom ID or unique prefix |
+| `--stream` | `stdout` | Select `stdout` or `stderr` |
+| `--info` | false | Emit verified metadata instead of contents |
+| `--json` | false | Emit metadata as JSON; implies `--info` |
+| `--root PATH` | current directory | Project root containing initialized state |
+
+`--offset` starts at an original-byte position (default 0); `--length` returns at
+most that many bytes (default the remaining stream). Values must be nonnegative,
+and an offset beyond the recorded size is rejected. An offset at EOF or a zero
+length returns empty output after verification. Ranges cannot be combined with
+metadata modes. Verification still checks the complete selected stream, including
+bytes outside the range, before releasing any output.
+
+Only the returned window is retained. Windows of at most 1 MiB stay in memory;
+larger windows use OS temporary storage, removed on close. RAM stays bounded for
+large content reads, with one decoding pass. A short range still scans the entire
+original stream for SHA-256 verification.
+
+The default writes the exact original bytes, with no summary or added newline,
+only after the byte count and SHA-256 verify. Gzip storage is decoded
+transparently. A missing log, damaged evidence, or an atom recorded without
+capture returns status 2 without printing log contents. Success returns 0.
+
+Metadata fields in both `--info` and `--json` are `atom_id`, `stream`, `outcome`,
+`started_at`, `encoding` (`raw` or `gzip`), `original_bytes`, `stored_bytes`,
+`sha256`, `fingerprint`, and `path`. The path is the project-relative physical
+backing path. The fingerprint identifies the stream, short atom ID, and a prefix
+of the original digest; it is a readable reference, not a summary of the log.
+Neither metadata mode includes commands or log contents.
+
+```console
+ocura-oss logs atom-<id> --stream stderr
+ocura-oss logs atom-<id> --info
+```
+
+## `compress` and `decompress`
+
+Change finalized captured logs' physical storage while retaining original bytes,
+recorded sizes and digests, JSON records, and retained manifests.
+
+```text
+ocura-oss compress [--atom ID] [--min-bytes N] [--dry-run] [--json] [--root PATH]
+ocura-oss decompress [--atom ID] [--dry-run] [--json] [--root PATH]
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `--atom ID` | all finalized atoms | Limit the operation to one full atom ID or unique prefix |
+| `--min-bytes N` | `1048576` | `compress` only: minimum original size, as a nonnegative integer; require at least 10% savings as well |
+| `--dry-run` | false | Verify and preview prospective changes without replacing files |
+| `--json` | false | Emit `{"dry_run": false, "changes": [...]}` instead of text |
+| `--root PATH` | current directory | Project root containing initialized state |
+
+Each change entry contains `atom_id`, `stream`, `action`, `original_bytes`,
+`stored_bytes`, and project-relative physical `path`. Actions are `compressed`,
+`would-compress`, `restored`, `would-restore`, `unchanged`, `small`, or
+`no-savings`. Active attempts and atoms
+without captured output are not converted. Both commands return 0 on success and
+2 for invalid input, unverifiable evidence, or a failed storage operation. A pass
+can finish earlier conversions before a later log fails; it is not a transaction
+over the whole ledger.
+
+Use `--dry-run` to inspect older logs before an explicit pass. Conversion needs
+temporary disk headroom. Earlier readers do not support gzip backing despite
+the unchanged record schema; use this branch's `decompress` and `verify` before
+returning to one. See [automatic log compression](autocompression.md).
 
 ## `runs` and `show`
 
