@@ -700,7 +700,7 @@ def _runs(args: argparse.Namespace) -> int:
         if page.unfinished_attempts:
             print(
                 f"unfinished attempts: {page.unfinished_attempts}"
-                " (listed once they finish; see `ocura-oss attempts`)"
+                " (they can finish behind this page; list again once they finish)"
             )
         print("verification: records checked; logs not checked")
     return EXIT_OK

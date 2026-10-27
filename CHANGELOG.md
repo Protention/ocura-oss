@@ -14,7 +14,8 @@ This file records user-visible changes to Ocura OSS.
 - Add `ocura-oss runs` and `Store.list_runs()`: finalized runs in the order they
   finished, including failed retries, each with the `chokepoint_id` to branch from.
   Filter by pathway or outcome, page with `--limit` and `--after`, or list every
-  match with `--all`. Each page reports how many started runs are not listed yet.
+  match with `--all`. Each page counts the runs still unfinished, which can finish
+  behind its cursor; a walk whose pages count none lists every finished run.
 - Add `ocura-oss show` and `Store.inspect_run()`: one run with its pathway, terminal
   chokepoint, and the pathways branched from it. Command arguments are included
   only with `--command`. Neither command reads log contents.

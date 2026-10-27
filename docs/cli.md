@@ -244,11 +244,13 @@ are not read. There is no persistent index: each page scans the chokepoint recor
 once, so walking a long history page by page repeats that scan, and `--all` does it
 once.
 
-Ordering by finish time keeps a walk complete while other runs are recorded: a
-run that finishes after the cursor is listed after it, and passing the last listed
-`chokepoint_id` to `--after` later returns only newer runs. `unfinished_attempts`
-counts runs that have started but are not listed yet; each appears once it
-finishes or `recover` closes it. `attempts` lists them.
+Each page reads the clock and counts unfinished attempts before it scans, and
+lists only runs that finished by then. A run still unfinished at that moment can
+finish behind the page's cursor, where `--after` will not return it.
+`unfinished_attempts` counts those runs, and `attempts` lists them. A walk in which
+every page reports `unfinished_attempts: 0` lists every run that finished before
+its last page. Otherwise, list again once they finish or `recover` closes them.
+This relies on the system clock not stepping backward.
 
 `show` selects one atom, validates its record and lineage, and returns `atom`,
 `pathway`, `chokepoint`, `children`, and

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -64,16 +65,32 @@ class AgentAccessTests(unittest.TestCase):
             selected.to_dict()["verification"], {"scope": "records", "logs_checked": 0}
         )
 
-    def test_runs_that_finish_after_a_cursor_are_listed_after_it(self):
-        first = self.record()
-        page = self.store.list_runs()
-        # Started before the cursor's run but finished after it, as a long run would.
-        late = self.record()
-        self.store._save_atom(replace(late.atom, started_at=first.atom.started_at))
-        (self.store.attempts_dir / f"{model.make_id('atom')}.json").write_text("{}")
-        following = self.store.list_runs(after=page.runs[-1].chokepoint_id)
-        self.assertEqual([item.run.id for item in following.runs], [late.atom.id])
-        self.assertEqual((page.unfinished_attempts, following.unfinished_attempts), (0, 1))
+    def test_a_page_counts_runs_that_can_finish_behind_its_cursor(self):
+        early, later = self.record(), self.record()
+        # `early` finished first, but publishes its chokepoint while a page scans.
+        point = self.store.chokepoints_dir / f"{early.chokepoint.id}.json"
+        attempt = self.store.attempts_dir / f"{early.atom.id}.json"
+        record = point.read_bytes()
+        point.unlink()
+        attempt.write_text("{}", encoding="utf-8")
+        scan = self.store._iter_typed
+
+        def publish_after_scan(*arguments):
+            scanned = list(scan(*arguments))
+            point.write_bytes(record)
+            attempt.unlink()
+            return iter(scanned)
+
+        with patch.object(self.store, "_iter_typed", side_effect=publish_after_scan):
+            page = self.store.list_runs()
+        self.assertEqual([item.run.id for item in page.runs], [later.atom.id])
+        self.assertEqual(page.unfinished_attempts, 1)
+        behind = self.store.list_runs(after=later.chokepoint.id)
+        self.assertEqual((behind.runs, behind.unfinished_attempts), ((), 0))
+        # A run that finishes after a page begins is left for a later page.
+        began = model.parse_timestamp(later.chokepoint.created_at, "time")
+        with patch("ocura_oss.model.utc_now", return_value=began - timedelta(microseconds=1)):
+            self.assertEqual([item.run.id for item in self.store.list_runs().runs], [early.atom.id])
 
     def test_discovery_and_inspection_do_not_read_log_contents(self):
         baseline = self.record()

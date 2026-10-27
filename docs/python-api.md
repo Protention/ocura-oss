@@ -725,8 +725,8 @@ Listing orders runs by when they finished, checks every scanned chokepoint recor
 retains earlier failures, and keeps at most `limit + 1` candidates; `limit=None`
 returns every match from one scan. *after* is a chokepoint ID, normally a page's
 `next_after`. Inspection validates one selected run and its lineage and scans for
-its chokepoint and child pathways. Neither reads log contents. Ordering, filters
-and failure behavior follow the [CLI contract](cli.md#runs-and-show). Python callers
+its chokepoint and child pathways. Neither reads log contents. Ordering,
+completeness, filters and failure behavior follow the [CLI contract](cli.md#runs-and-show). Python callers
 supply full IDs and `Outcome` values. Invalid limits, selectors or records raise
 `StoreError`.
 
