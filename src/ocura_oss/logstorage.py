@@ -112,33 +112,18 @@ def _consume(
     return contents.getvalue() if contents is not None else None
 
 
-def _verify_raw(
-    path: Path, size: int, digest: str, *, collect: bool, sink: BinaryIO | None = None
-) -> bytes | None:
-    try:
-        if collect:
-            # Keep the same read-and-verify contract as the public verified
-            # read API: verify the exact bytes returned by this single read.
-            contents = path.read_bytes()
-            _check_size(len(contents), size, path)
-            _check_digest(hashlib.sha256(contents).hexdigest(), digest, path)
-            return contents
-        with path.open("rb") as source:
-            return _consume(source, size, digest, path, sink=sink)
-    except (OSError, ValueError) as exc:
-        raise LogStorageError(f"log is unreadable: {path}") from exc
-
-
-def _verify_gzip(
+def _verify(
     path: Path,
     size: int,
     digest: str,
     *,
+    gzipped: bool,
     collect: bool = False,
     sink: BinaryIO | None = None,
 ) -> bytes | None:
+    """Verify one representation; collected bytes are exactly the bytes hashed."""
     try:
-        with gzip.open(path, "rb") as source:
+        with gzip.open(path, "rb") if gzipped else path.open("rb") as source:
             return _consume(source, size, digest, path, collect=collect, sink=sink)
     except (OSError, EOFError, zlib.error, ValueError) as exc:
         raise LogStorageError(f"log is unreadable: {path}") from exc
@@ -161,12 +146,14 @@ def read_verified(
     _validate_size(size)
     raw, compressed = _paths(path)
     if raw.is_file():
-        data = _verify_raw(raw, size, digest, collect=collect, sink=sink)
+        data = _verify(raw, size, digest, collect=collect, sink=sink, gzipped=False)
         if compressed.is_file():
-            _verify_gzip(compressed, size, digest)
+            _verify(compressed, size, digest, gzipped=True)
         return raw, data
     if compressed.is_file():
-        return compressed, _verify_gzip(compressed, size, digest, collect=collect, sink=sink)
+        return compressed, _verify(
+            compressed, size, digest, collect=collect, sink=sink, gzipped=True
+        )
     raise LogStorageError(f"log is missing: {raw}")
 
 
@@ -207,12 +194,9 @@ def verified_snapshot(
         tempfile.TemporaryFile() if extent > _CHUNK else io.BytesIO(),  # noqa: SIM115
     )
     try:
-        sink = (
-            snapshot
-            if offset == 0 and extent == size
-            else cast(BinaryIO, _RangeWriter(snapshot, offset, extent))
+        read_verified(
+            path, size, digest, sink=cast(BinaryIO, _RangeWriter(snapshot, offset, extent))
         )
-        read_verified(path, size, digest, sink=sink)
         snapshot.seek(0)
         return snapshot
     except BaseException:
@@ -281,11 +265,11 @@ def compress(
         if not raw.is_file():
             if not compressed.is_file():
                 raise LogStorageError(f"log is missing: {raw}")
-            _verify_gzip(compressed, size, digest)
+            _verify(compressed, size, digest, gzipped=True)
             return StorageResult("unchanged", size, compressed.stat().st_size, compressed)
         if compressed.is_file():
-            _verify_raw(raw, size, digest, collect=False)
-            _verify_gzip(compressed, size, digest)
+            _verify(raw, size, digest, gzipped=False)
+            _verify(compressed, size, digest, gzipped=True)
             stored = compressed.stat().st_size
             if not _worth_compressing(stored, size):
                 return StorageResult("no-savings", size, size, raw)
@@ -295,7 +279,7 @@ def compress(
                 "would-compress" if dry_run else "compressed", size, stored, compressed
             )
         if size < min_bytes:
-            _verify_raw(raw, size, digest, collect=False)
+            _verify(raw, size, digest, gzipped=False)
             return StorageResult("small", size, size, raw)
         if dry_run:
             counter = _CountingWriter()
@@ -312,7 +296,7 @@ def compress(
         stored = temporary.stat().st_size
         if not _worth_compressing(stored, size):
             return StorageResult("no-savings", size, size, raw)
-        _verify_gzip(temporary, size, digest)
+        _verify(temporary, size, digest, gzipped=True)
         os.replace(temporary, compressed)
         temporary = None
         # Renaming preserves the verified file's bytes; the caller's lock
@@ -334,20 +318,20 @@ def restore(path: Path, size: int, digest: str, *, dry_run: bool = False) -> Sto
         if not compressed.is_file():
             if not raw.is_file():
                 raise LogStorageError(f"log is missing: {raw}")
-            _verify_raw(raw, size, digest, collect=False)
+            _verify(raw, size, digest, gzipped=False)
             return StorageResult("unchanged", size, size, raw)
         if raw.is_file():
-            _verify_raw(raw, size, digest, collect=False)
-            _verify_gzip(compressed, size, digest)
+            _verify(raw, size, digest, gzipped=False)
+            _verify(compressed, size, digest, gzipped=True)
         elif dry_run:
-            _verify_gzip(compressed, size, digest)
+            _verify(compressed, size, digest, gzipped=True)
         else:
             descriptor, temporary = _temporary(raw)
             with os.fdopen(descriptor, "wb") as destination:
-                _verify_gzip(compressed, size, digest, sink=destination)
+                _verify(compressed, size, digest, sink=destination, gzipped=True)
                 destination.flush()
                 os.fsync(destination.fileno())
-            _verify_raw(temporary, size, digest, collect=False)
+            _verify(temporary, size, digest, gzipped=False)
             os.replace(temporary, raw)
             temporary = None
         if dry_run:

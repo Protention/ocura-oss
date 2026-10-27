@@ -1028,8 +1028,6 @@ def _demo(args: argparse.Namespace) -> int:
 
 
 def _logs(args: argparse.Namespace) -> int:
-    if args.offset < 0 or (args.length is not None and args.length < 0):
-        raise StoreError("log offset and length must be nonnegative")
     if (args.info or args.json) and (args.offset or args.length is not None):
         raise StoreError("log byte ranges cannot be combined with --info or --json")
     state = _open_store(args.root, archive=args.archive)
