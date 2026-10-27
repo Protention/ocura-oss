@@ -245,8 +245,9 @@ once, so walking a long history page by page repeats that scan, and `--all` does
 once.
 
 Each page reads the clock and counts unfinished attempts before it scans, and
-lists only runs that finished by then. A run still unfinished at that moment can
-finish behind the page's cursor, where `--after` will not return it.
+lists only runs that finished before then; a run stamped with that same clock
+reading waits for a later page. A run still unfinished at that moment can finish
+behind the page's cursor, where `--after` will not return it.
 `unfinished_attempts` counts those runs, and `attempts` lists them. A walk in which
 every page reports `unfinished_attempts: 0` lists every run that finished before
 its last page. Otherwise, list again once they finish or `recover` closes them.
