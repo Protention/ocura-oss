@@ -117,8 +117,9 @@ class ListedRun:
 class RunPage:
     """Finalized runs in the order they finished; log contents are not verified.
 
-    ``unfinished_attempts`` counts runs that have started but are not listed
-    yet. Each is listed once it finishes or ``recover`` closes it.
+    ``unfinished_attempts`` counts runs not finished when the page was read.
+    They can finish behind its cursor, so a walk is complete only if every page
+    reported none.
     """
 
     runs: tuple[ListedRun, ...]
@@ -539,8 +540,9 @@ class Store:
 
         Every chokepoint record's envelope and fields are checked, and each
         returned run's records and lineage; log contents are not. *after* is a
-        page's ``next_after`` chokepoint. Runs that finish while a caller pages
-        are listed after its cursor. ``limit=None`` returns every match.
+        page's ``next_after`` chokepoint. A run unfinished when a page is read
+        can finish behind its cursor; that page counts it in
+        ``unfinished_attempts``. ``limit=None`` returns every match.
         """
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
@@ -558,6 +560,10 @@ class Store:
                 "chokepoints", after, "chokepoint", "chokepoint", model.chokepoint_from_payload
             )
             start = (boundary.created_at, boundary.id)
+        # Before the scan: a run this page could miss behind its cursor either
+        # still has an attempt now or finished after now, and waits for a later page.
+        now = model.format_timestamp(model.utc_now())
+        unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
         candidates = (
             point
             for point in self._iter_typed(
@@ -565,6 +571,7 @@ class Store:
             )
             if (pathway_id is None or point.pathway_id == pathway_id)
             and (outcome is None or point.outcome is outcome)
+            and point.created_at <= now
             and (start is None or (point.created_at, point.id) > start)
         )
         if limit is None:
@@ -581,7 +588,7 @@ class Store:
         return RunPage(
             runs=tuple(runs),
             next_after=shown[-1].id if more else None,
-            unfinished_attempts=sum(1 for _ in self.attempts_dir.glob("*.json")),
+            unfinished_attempts=unfinished,
         )
 
     def inspect_run(self, atom_id: str) -> RunInspection:

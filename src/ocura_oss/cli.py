@@ -800,7 +800,7 @@ def _runs(args: argparse.Namespace) -> int:
         if page.next_after is not None:
             print(f"next after: {page.next_after}")
         if page.unfinished_attempts:
-            print(f"unfinished attempts: {page.unfinished_attempts} (see `ocura-oss attempts`)")
+            print(f"unfinished attempts: {page.unfinished_attempts} (may finish behind this page)")
         print("verification: records checked; logs not checked")
     return EXIT_OK
 
