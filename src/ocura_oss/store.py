@@ -560,8 +560,8 @@ class Store:
                 "chokepoints", after, "chokepoint", "chokepoint", model.chokepoint_from_payload
             )
             start = (boundary.created_at, boundary.id)
-        # Before the scan: a run this page could miss behind its cursor either
-        # still has an attempt now or finished after now, and waits for a later page.
+        # Read before the scan. A run this page could miss either has an attempt
+        # now or is stamped at or after now, which only later pages list.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
         candidates = (
@@ -571,7 +571,7 @@ class Store:
             )
             if (pathway_id is None or point.pathway_id == pathway_id)
             and (outcome is None or point.outcome is outcome)
-            and point.created_at <= now
+            and point.created_at < now
             and (start is None or (point.created_at, point.id) > start)
         )
         if limit is None:

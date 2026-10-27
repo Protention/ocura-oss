@@ -8,7 +8,6 @@ import sys
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -87,10 +86,23 @@ class AgentAccessTests(unittest.TestCase):
         self.assertEqual(page.unfinished_attempts, 1)
         behind = self.store.list_runs(after=later.chokepoint.id)
         self.assertEqual((behind.runs, behind.unfinished_attempts), ((), 0))
-        # A run that finishes after a page begins is left for a later page.
-        began = model.parse_timestamp(later.chokepoint.created_at, "time")
-        with patch("ocura_oss.model.utc_now", return_value=began - timedelta(microseconds=1)):
-            self.assertEqual([item.run.id for item in self.store.list_runs().runs], [early.atom.id])
+
+    def test_a_run_tied_with_the_page_clock_is_not_skipped(self):
+        points = [self.record().chokepoint, self.record().chokepoint]
+        stamp = points[1].created_at
+        for point in points:
+            self.store._save_chokepoint(replace(point, created_at=stamp))
+        # The smaller ID publishes after the first page's scan, at that page's clock reading.
+        late = self.store.chokepoints_dir / f"{min(point.id for point in points)}.json"
+        record = late.read_bytes()
+        late.unlink()
+        with patch("ocura_oss.model.utc_now", return_value=model.parse_timestamp(stamp, "time")):
+            first = self.store.list_runs(limit=1)
+        late.write_bytes(record)
+        # Resume after the last chokepoint shown, as a caller polling for new runs would.
+        rest = self.store.list_runs(after=first.runs[-1].chokepoint_id if first.runs else None)
+        self.assertEqual((first.unfinished_attempts, rest.unfinished_attempts), (0, 0))
+        self.assertEqual(len(first.runs + rest.runs), 2)
 
     def test_discovery_and_inspection_do_not_read_log_contents(self):
         baseline = self.record()
