@@ -703,6 +703,33 @@ A list sorted by `started_at`, then `id`.
 
 `load_atom()` adds pathway validation. `verify_state()` adds complete relationship and log verification.
 
+### `Store.list_runs` and `Store.inspect_run`
+
+```python
+store.list_runs(
+    *, pathway_id: str | None = None, outcome: Outcome | None = None,
+    after: str | None = None, limit: int | None = 100,
+) -> RunPage
+store.inspect_run(atom_id: str) -> RunInspection
+```
+
+`RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`, and
+`unfinished_attempts: int`. Each `ListedRun` holds `chokepoint_id: str` and
+`run: RunSummary`. `RunInspection` contains `atom: Atom`, `pathway: Pathway`,
+`chokepoint: Chokepoint | None`, and `children: tuple[Pathway, ...]`. These result
+types live in `ocura_oss.store`; the top-level exports are unchanged. Their
+`to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
+includes command arguments, which are omitted by default.
+
+Listing orders runs by when they finished, checks every scanned chokepoint record,
+retains earlier failures, and keeps at most `limit + 1` candidates; `limit=None`
+returns every match from one scan. *after* is a chokepoint ID, normally a page's
+`next_after`. Inspection validates one selected run and its lineage and scans for
+its chokepoint and child pathways. Neither reads log contents. Ordering,
+completeness, filters and failure behavior follow the [CLI contract](cli.md#runs-and-show). Python callers
+supply full IDs and `Outcome` values. Invalid limits, selectors or records raise
+`StoreError`.
+
 ### `Store.list_chokepoints`
 
 ```python
