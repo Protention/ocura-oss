@@ -705,7 +705,7 @@ class Store:
         return physical
 
     @contextlib.contextmanager
-    def _log_guard(self, atom_id: str, relative: str) -> Iterator[Path]:
+    def _log_guard(self, atom_id: str, relative: str, *, change: bool = False) -> Iterator[Path]:
         """Serialize cooperating readers and storage changes of one logical log."""
         try:
             path = self._evidence_path(atom_id, relative)
@@ -714,7 +714,7 @@ class Store:
                 yield path
             else:
                 with contextlib.ExitStack() as stack:
-                    if not self._unlocked_reads:
+                    if change or not self._unlocked_reads:
                         try:
                             lock_dir = self.state_dir / "log-locks"
                             lock_dir.mkdir(exist_ok=True)
@@ -723,7 +723,8 @@ class Store:
                             lock = locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None)
                             stack.enter_context(lock)
                         except OSError as exc:
-                            if not isinstance(exc, PermissionError) and exc.errno != errno.EROFS:
+                            denied = isinstance(exc, PermissionError) or exc.errno == errno.EROFS
+                            if change or not denied:
                                 raise
                             # Write-protected storage: read as 0.6 did; bytes are still verified.
                             self._unlocked_reads = True
@@ -815,7 +816,7 @@ class Store:
             relative, size, digest = _recorded_log(atom, stream)
             if eligible_only and size < min_bytes:
                 continue
-            with self._log_guard(atom.id, relative) as path:
+            with self._log_guard(atom.id, relative, change=True) as path:
                 if restore:
                     result = logstorage.restore(path, size, digest, dry_run=dry_run)
                 else:

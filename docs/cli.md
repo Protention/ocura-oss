@@ -256,8 +256,9 @@ remains unchanged while reading; it does not coordinate with active writers.
 
 Normal mode takes a lock for each log it reads. When the storage is write-protected
 it reads without one, as 0.6.0 did; every byte is still verified, so a concurrent
-change makes the read fail rather than return wrong data. Unlike archive mode, this
-also reads ledgers with unfinished attempts and lists them.
+change makes the read fail rather than return wrong data. `compress` and
+`decompress` still require the lock. Unlike archive mode, this also reads ledgers
+with unfinished attempts and lists them.
 
 Content snapshots may need writable OS temporary storage outside the archive.
 Archive mode does not introduce an export format or snapshot an active ledger.

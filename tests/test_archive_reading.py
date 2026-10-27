@@ -227,11 +227,15 @@ class ArchiveReadTests(unittest.TestCase):
         self.assertEqual(result.stdout, b"")
 
     def test_normal_reads_skip_locks_only_on_write_protected_storage(self):
-        atom = self.record(b"evidence").atom
+        data = b"evidence " * 100
+        atom = self.record(data).atom
         with patch("ocura_oss.locking.hold", side_effect=PermissionError("lock denied")) as hold:
-            self.assertEqual(self.store.read_verified_log(atom.id), b"evidence")
+            self.assertEqual(self.store.read_verified_log(atom.id), data)
             self.assertTrue(self.store.verify_state().ok)
-        self.assertEqual(hold.call_count, 1)
+            self.assertEqual(hold.call_count, 1)
+            with self.assertRaisesRegex(StoreError, "unreadable"):
+                self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+        self.assertEqual(self.store.log_info(atom.id).encoding, "raw")
         with (
             patch("ocura_oss.locking.hold", side_effect=OSError(errno.EIO, "lock failed")),
             self.assertRaisesRegex(StoreError, "log is unreadable"),
