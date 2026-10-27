@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import io
 import sys
 import tempfile
 import unittest
@@ -81,43 +82,48 @@ class VerifiedLogReadTests(unittest.TestCase):
 
     def test_rejects_log_changed_at_read_after_earlier_verification(self):
         self.store.verify_atom_evidence(self.atom)
-        original_read = Path.read_bytes
+        original_open = Path.open
 
-        def change_at_read(path):
+        def change_at_read(path, *arguments, **options):
             if path == self.stdout_path:
-                path.write_bytes(b"X" + self.stdout[1:])
-            return original_read(path)
+                with original_open(path, "wb") as log:
+                    log.write(b"X" + self.stdout[1:])
+            return original_open(path, *arguments, **options)
 
         with (
-            patch.object(Path, "read_bytes", autospec=True, side_effect=change_at_read),
+            patch.object(Path, "open", autospec=True, side_effect=change_at_read),
             self.assertRaisesRegex(StoreError, "log checksum mismatch"),
         ):
             self.store.read_verified_log(self.atom.id)
 
     def test_returns_verified_contents_when_file_changes_after_read(self):
-        original_read = Path.read_bytes
+        original_open = Path.open
 
-        def change_after_read(path):
-            data = original_read(path)
-            if path == self.stdout_path:
-                path.write_bytes(b"X" + self.stdout[1:])
-            return data
+        def change_after_read(path, *arguments, **options):
+            source = original_open(path, *arguments, **options)
+            if path != self.stdout_path:
+                return source
+            with source:
+                data = source.read()
+            with original_open(path, "wb") as log:
+                log.write(b"X" + self.stdout[1:])
+            return io.BytesIO(data)
 
-        with patch.object(Path, "read_bytes", autospec=True, side_effect=change_after_read):
+        with patch.object(Path, "open", autospec=True, side_effect=change_after_read):
             self.assertEqual(self.store.read_verified_log(self.atom.id), self.stdout)
         with self.assertRaisesRegex(StoreError, "log checksum mismatch"):
             self.store.read_verified_log(self.atom.id)
 
     def test_wraps_log_read_errors_as_store_error(self):
-        original_read = Path.read_bytes
+        original_open = Path.open
 
-        def deny_log_read(path):
+        def deny_log_read(path, *arguments, **options):
             if path == self.stdout_path:
                 raise PermissionError("read denied")
-            return original_read(path)
+            return original_open(path, *arguments, **options)
 
         with (
-            patch.object(Path, "read_bytes", autospec=True, side_effect=deny_log_read),
+            patch.object(Path, "open", autospec=True, side_effect=deny_log_read),
             self.assertRaisesRegex(StoreError, "log is unreadable") as caught,
         ):
             self.store.read_verified_log(self.atom.id)

@@ -15,9 +15,15 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import BinaryIO
 
-from ocura_oss import model, supervise
+from ocura_oss import logstorage, model, supervise
 from ocura_oss.context import capture as capture_context
-from ocura_oss.store import STATE_DIR_NAME, Store, StoreError, size_and_sha256
+from ocura_oss.store import (
+    STATE_DIR_NAME,
+    Store,
+    StoreError,
+    _validate_compression_min_bytes,
+    size_and_sha256,
+)
 
 _PUMP_CHUNK = 65536
 _STOP_TIMEOUT = 5.0
@@ -36,6 +42,7 @@ class RunExecution:
 
     atom: model.Atom
     chokepoint: model.Chokepoint
+    storage_warnings: tuple[str, ...] = ()
 
 
 def categorize_launch_error(exc: BaseException) -> str:
@@ -53,6 +60,8 @@ def run_command(
     declared_parameters: Mapping[str, str],
     mirror: bool = False,
     capture: bool = True,
+    compress: bool = True,
+    compression_min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
     context: bool = False,
@@ -72,6 +81,11 @@ def run_command(
     positions whose values are replaced by a placeholder in every record; the
     command itself still receives them.
 
+    Completed logs at least ``compression_min_bytes`` large are compressed
+    once when this run finishes, if gzip saves at least ten percent. Pass
+    ``compress=False`` to keep raw files. Compression failures are returned in
+    ``storage_warnings`` without changing the recorded command's outcome.
+
     The run records its pathway's effective parameters as its own labels;
     ``declared_parameters`` adds to them and wins for a key both name. When
     ``substitute`` is true, ``{KEY}`` in a command token is replaced by that
@@ -88,6 +102,9 @@ def run_command(
     """
     clock = now or model.utc_now
     counter = monotonic or time.monotonic
+    _validate_compression_min_bytes(compression_min_bytes)
+    if not isinstance(compress, bool):
+        raise StoreError("compress must be a boolean")
     if isinstance(argv, (str, bytes)):
         raise StoreError("command must be a sequence of argument tokens, not a string")
     tokens = tuple(argv)
@@ -126,6 +143,7 @@ def run_command(
         masked_arguments=masked,
         context=run_context,
     )
+    storage_warnings: tuple[str, ...] = ()
     with store._recording(attempt), contextlib.ExitStack() as logs:
         stdout_handle: BinaryIO | None = None
         stderr_handle: BinaryIO | None = None
@@ -197,10 +215,20 @@ def run_command(
             branchable=True,
         )
         store._save_chokepoint(chokepoint)
+        # Only our own finalized streams are considered. The atom is already
+        # durable, so recovery never treats compressed output as an absent
+        # unfinished log. The attempt lock still excludes manual maintenance.
+        if capture and compress:
+            try:
+                store._change_atom_storage(
+                    atom, min_bytes=compression_min_bytes, eligible_only=True
+                )
+            except StoreError as exc:
+                storage_warnings = (f"automatic log compression failed: {exc}",)
         # Last, and while still holding the attempt's lock: a reader then sees
         # either a live attempt or a complete atom and chokepoint.
         store._remove_attempt(attempt.id)
-    return RunExecution(atom=atom, chokepoint=chokepoint)
+    return RunExecution(atom=atom, chokepoint=chokepoint, storage_warnings=storage_warnings)
 
 
 def _execute(

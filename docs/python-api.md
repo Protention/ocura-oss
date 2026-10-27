@@ -2,6 +2,10 @@
 
 Version 0.6.0.
 
+This draft builds on 0.6.0. Compression options, storage metadata, and conversion
+methods below are proposed branch behavior, absent from the released package.
+See [open design decisions](autocompression.md#decisions-before-merge).
+
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
 Names listed in `ocura_oss.__all__` form the documented top-level API. Internal record writers and implementation helpers remain package internals.
@@ -116,6 +120,8 @@ run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
+    compress: bool = True,
+    compression_min_bytes: int = 1_048_576,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
     context: bool = False,
@@ -135,6 +141,8 @@ Run one trusted local command and record terminal evidence.
 | `parameters` | mapping of string to string, or None | `None` | Labels stored on the atom together with the pathway's effective parameters, replacing the pathway's value for the same key; they are not passed to the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
+| `compress` | boolean | `True` | Consider only this run's finalized captured logs once for lossless gzip storage |
+| `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size for automatic compression; require at least 10% savings as well |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
 | `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with the value the run records for that key |
 | `context` | boolean | `False` | Record the platform and the git revision and dirty state at launch |
@@ -142,7 +150,9 @@ Run one trusted local command and record terminal evidence.
 
 #### Returns
 
-`RunExecution` containing the recorded `Atom` and terminal `Chokepoint`.
+`RunExecution` containing the recorded `Atom`, terminal `Chokepoint`, and
+`storage_warnings`, a tuple of post-finalization compression errors (empty on
+success). Compression warnings do not replace the command's actual outcome.
 
 #### Raises
 
@@ -170,6 +180,14 @@ Launch categories include `executable_not_found`, `permission_denied`, `not_a_di
 The child runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment, while the inherited environment remains outside recorded state.
 
 Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned atom has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
+
+By default each captured log of at least 1 MiB is considered for gzip compression
+at level 6 after this run is finalized. It must save at least 10%; smaller or
+incompressible logs remain raw. Original bytes and hashes remain unchanged, and
+no older logs are scanned. Set `compress=False` to retain raw storage or
+`compression_min_bytes=N` to change this run's threshold. See the
+[local compression prototype](autocompression.md) for storage compatibility and
+temporary disk space requirements.
 
 Each position in `masked_arguments` must index `command`; position 0 is the executable. The attempt and atom records store `<masked>` at those positions and list them. Masking does not alter output, so a command that prints a masked value still writes it to a captured log.
 
@@ -458,18 +476,21 @@ print(report.comparison.state.value)
 ```python
 Store(
     root: os.PathLike[str] | str | None = None,
+    *,
+    archive: bool = False,
 )
 ```
 
 Read and verify Ocura OSS state under one project root.
 
-The documented constructor, attributes, loading methods, listing methods, initialization method, verification methods, and recovery method form the provisional low-level API. Direct record writers are internal.
+The documented constructor, attributes, loading methods, listing methods, initialization method, verification methods, recovery method, and log storage methods form the provisional low-level API. Direct record writers are internal.
 
 #### Parameters
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | `root` | path-like, string, or None | `None` | Project root; `None` selects the current working directory |
+| `archive` | bool | `False` | Read stable archived storage without ledger locks or mutations; stop writers and finalize all attempts first |
 
 #### Attributes
 
@@ -558,7 +579,7 @@ The full identifier. A full identifier is returned as given, without checking th
 | --- | --- |
 | `StoreError` | `value` is neither a full identifier nor a valid prefix, or the prefix matches no stored record or more than one |
 
-A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, and `run --pathway`.
+A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, `run --pathway`, `logs ID`, `compress --atom`, and `decompress --atom`.
 
 ### `Store.load_den`
 
@@ -796,7 +817,10 @@ Resolve one recorded log path after containment checks.
 
 #### Returns
 
-The resolved `pathlib.Path` directly inside this store's `.ocura-oss/logs/` directory.
+The resolved physical `pathlib.Path` directly inside this store's
+`.ocura-oss/logs/` directory: raw `.log` storage if present, otherwise its `.log.gz`
+backing path when compressed. Compressed file contents are encoded; use
+`read_verified_log()` for original bytes. If both exist the raw path is preferred.
 
 #### Raises
 
@@ -838,9 +862,16 @@ The selected log as `bytes`, unchanged, after loading and validating the stored 
 
 #### Notes
 
-The complete log is read into memory. Binary output is preserved, and output from failed commands can be read. Decoding and metric interpretation belong to the caller.
+Raw and gzip backing are read transparently and verified against the original
+byte count and SHA-256. The complete original log is read into memory. Binary
+output is preserved, and output from failed commands can be read. Decoding and
+metric interpretation belong to the caller.
 
-This is a targeted check of one stream. It does not verify the other stream or the whole ledger; use `verify_state()` for the complete state check. Reading does not lock the ledger or create an atomic snapshot of records and logs. The returned bytes remain the verified contents even if the log file later changes.
+This is a targeted check of one stream. It does not verify the other stream or
+the whole ledger; use `verify_state()` for the complete state check. Local
+advisory locks coordinate reading with compression and decompression, without
+creating a snapshot of the whole ledger. The returned bytes remain the verified
+contents even if the log file later changes.
 
 #### Example
 
@@ -855,6 +886,119 @@ metrics = json.loads(raw.decode("utf-8"))  # For a workload that emits UTF-8 JSO
 
 diagnostics = store.read_verified_log("atom-<id>", stream="stderr")
 ```
+
+### `Store.open_verified_log`
+
+```python
+with store.open_verified_log(
+    atom_id, stream="stdout", offset=0, length=None,
+) as source:
+    chunk = source.read(4096)
+```
+
+This context manager returns a seekable binary snapshot after verifying the full
+selected stream. Only the requested original-byte window is retained; seeking is
+relative to that window. A window up to 1 MiB stays in memory. Larger windows use
+OS temporary storage and bounded buffers, with one source decoding pass. The
+snapshot closes on exit, including when the caller raises, and remains valid if
+backing storage changes after verification.
+
+Offsets and lengths follow [`logs`](cli.md#logs). Corruption outside a requested
+range still fails before the context yields. The other stream and the whole
+ledger are not checked. Invalid ranges or evidence raise `StoreError`.
+`read_verified_log()` retains its existing bytes-returning behavior and whole-log
+memory allocation.
+
+`Store(root, archive=True)` permits these reads and `verify_state()` on stable,
+read-only archives without creating ledger locks. It rejects unfinished attempts
+and mutation operations. This mode assumes there are no concurrent writers; see
+[stable archives](cli.md#stable-archives).
+
+### `Store.log_info`
+
+```python
+store.log_info(
+    atom_id: str,
+    *,
+    stream: Literal["stdout", "stderr"] = "stdout",
+) -> LogInfo
+```
+
+Verify one captured log and return storage metadata without returning its
+contents. `atom_id` must be a full identifier. Invalid lineage, stream, capture
+mode, or evidence raises `StoreError`, as for `read_verified_log()`.
+
+The draft defines `LogInfo` in `ocura_oss.store`, without adding it to
+`ocura_oss.__all__`. Its shape and public status remain part of the design review.
+It has these fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `atom_id` | string | Full recorded atom ID |
+| `stream` | string | `stdout` or `stderr` |
+| `outcome` | string | Recorded outcome |
+| `started_at` | string | Recorded UTC start time |
+| `encoding` | string | `raw` or `gzip` |
+| `original_bytes` | integer | Recorded original byte count |
+| `stored_bytes` | integer | Current physical byte count |
+| `sha256` | string | Full SHA-256 of the verified original bytes |
+| `fingerprint` | string | Readable stream/short atom/digest-prefix reference |
+| `path` | string | Project-relative physical backing path |
+
+The fingerprint remains stable across conversion. It identifies the log; it
+does not describe its contents, act as an ID lookup key, or replace full-digest verification. Neither
+command arguments nor log contents are included in this metadata.
+
+### `Store.compress_logs` and `Store.decompress_logs`
+
+```python
+store.compress_logs(
+    *,
+    atom_id: str | None = None,
+    min_bytes: int = 1_048_576,
+    dry_run: bool = False,
+) -> tuple[LogStorageChange, ...]
+
+store.decompress_logs(
+    *,
+    atom_id: str | None = None,
+    dry_run: bool = False,
+) -> tuple[LogStorageChange, ...]
+```
+
+Convert finalized captured logs after verifying their original bytes. `None`
+selects finalized atoms across the ledger; a supplied `atom_id` must be full.
+Active attempts and atoms without capture are not converted. `min_bytes` is a
+nonnegative original byte threshold. Compression uses gzip level 6 and requires
+at least 10% savings. `dry_run=True` calculates prospective changes without
+replacing files.
+
+Each returned `LogStorageChange` contains `atom_id`, `stream`, `action`,
+`original_bytes`, `stored_bytes`, and `path` (the project-relative backing path).
+This draft result type also lives in `ocura_oss.store`, without a top-level export.
+Actions are `compressed`, `would-compress`, `restored`, `would-restore`,
+`unchanged`, `small`, or `no-savings`.
+The records and original digests remain unchanged, as do retained manifests.
+Local advisory locks coordinate readers and storage conversion; temporary disk
+headroom is required. A pass can finish earlier conversions before a later log
+raises `StoreError` or an operating-system error; it is not a transaction over
+the whole ledger.
+
+```python
+from ocura_oss import Store
+
+store = Store("experiment")
+preview = store.compress_logs(dry_run=True)
+changes = store.compress_logs()
+info = store.log_info("atom-<id>")
+assert len(store.read_verified_log(info.atom_id)) == info.original_bytes
+store.decompress_logs()
+assert store.verify_state().ok
+```
+
+This local prototype extends physical storage compatibility despite retaining
+record schema 2. Older readers require decompressed logs. See
+[automatic log compression](autocompression.md).
 
 ### `Store.verify_atom_evidence`
 
@@ -1072,8 +1216,8 @@ One recorded command attempt and its referenced output logs.
 | `launch_error_category` | string or None | Normalized launch category, or `interrupted` |
 | `declared_parameters` | mapping of string to string | Labels recorded for this run: its pathway's effective parameters with the run's own declarations laid over them |
 | `command` | tuple of strings | Executable and argument tokens retained in the raw record, with `<masked>` at each masked position |
-| `stdout_log` | string or None | Project-relative stdout log path |
-| `stderr_log` | string or None | Project-relative stderr log path |
+| `stdout_log` | string or None | Project-relative logical stdout log path; physical gzip storage adds `.gz` |
+| `stderr_log` | string or None | Project-relative logical stderr log path; physical gzip storage adds `.gz` |
 | `stdout_bytes` | integer or None | Recorded stdout byte count |
 | `stderr_bytes` | integer or None | Recorded stderr byte count |
 | `stdout_sha256` | string or None | Lowercase SHA-256 digest of stdout bytes |
@@ -1235,6 +1379,7 @@ State created by `initialize()`.
 RunExecution(
     atom: Atom,
     chokepoint: Chokepoint,
+    storage_warnings: tuple[str, ...] = (),
 )
 ```
 
@@ -1246,6 +1391,7 @@ Records produced by one command attempt.
 | --- | --- | --- |
 | `atom` | `Atom` | Recorded attempt and log metadata |
 | `chokepoint` | `Chokepoint` | Terminal boundary created for the atom |
+| `storage_warnings` | tuple of strings | Post-finalization compression errors; actual command outcome remains recorded on the atom |
 
 ### `ocura_oss.RunSummary`
 
