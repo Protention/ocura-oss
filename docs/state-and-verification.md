@@ -1,8 +1,14 @@
 # State and verification
 
-Version 0.6.0.
+Version 0.7.0.dev0.
 
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
+
+The unreleased descriptive names are **ledger**, **run record**, and **branch point**.
+Their Python types are `Ledger`, `RunRecord`, and `BranchPoint`; `Den`, `Atom`, and
+`Chokepoint` remain aliases. The directory layout, record kinds, ID prefixes, JSON
+keys, and manifest entries below retain their original spellings. Adopting the
+new names requires no state migration. See the [naming guide](naming-migration.md).
 
 ## Directory layout
 
@@ -35,7 +41,7 @@ losslessly compressed `.log.gz` backing file. A conversion interrupted after
 publication may leave both; readers verify both representations and prefer raw
 storage, and a later conversion can finish removing the duplicate.
 `log-locks/` holds local advisory locks that coordinate reads and conversion.
-The atom continues to record the logical
+The run record continues to record the logical
 `.log` path and the original size and SHA-256. `ocura-oss logs ID` and
 `Store.read_verified_log()` transparently return the verified original bytes.
 `logs ID --info` reports the current physical path and sizes. See
@@ -107,7 +113,7 @@ The old directory is never modified. Decide per project before upgrading:
 | Start recording with a current version in the same project | Move the old directory aside, then run `ocura-oss init`. For example `mv .ocura-oss .ocura-oss-0.4`, or in PowerShell `Rename-Item .ocura-oss .ocura-oss-0.4` |
 | Look at old records after upgrading | The logs under the moved directory's `logs/` are plain files, and the records are plain JSON. To use 0.4's commands on them again, move the directory back to `.ocura-oss` in an environment that has 0.4 |
 
-A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old chokepoint as its source: record the baseline again under 0.5 before branching from it.
+A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old branch point as its source: record the baseline again under 0.5 before branching from it.
 
 A migrated copy instead retains the old identifiers and branch relationships, so
 it can use those records as branch sources. The optional script never activates
@@ -120,12 +126,12 @@ If you need comparisons or listings from the old records later, save them with 0
 
 ## Record relationships
 
-- The den identifies one default pathway.
-- Every pathway belongs to that den.
-- A child pathway identifies both its parent and the source chokepoint on that parent.
-- Every atom belongs to an existing pathway.
-- Every atom has exactly one chokepoint.
-- Every chokepoint belongs to the same pathway as its atom and has the same outcome.
+- The ledger identifies one default pathway.
+- Every pathway belongs to that ledger.
+- A child pathway identifies both its parent and the source branch point on that parent.
+- Every run record belongs to an existing pathway.
+- Every run record has exactly one branch point.
+- Every branch point belongs to the same pathway as its run record and has the same outcome.
 - Record filenames match their payload IDs.
 
 A branch records lineage metadata only. A later run must name the child pathway to attach evidence to it.
@@ -134,9 +140,9 @@ A branch records lineage metadata only. A later run must name the child pathway 
 
 A run is journaled before its command launches, so an attempt stays visible even when the process recording it never gets to finish:
 
-1. `run` takes an operating-system lock on `attempts/<atom-id>.lock`, then writes `attempts/<atom-id>.json`. That attempt record holds the pathway, the identifiers reserved for the atom and chokepoint, the start time, the recorded command, and the declared parameters.
+1. `run` takes an operating-system lock on `attempts/<atom-id>.lock`, then writes `attempts/<atom-id>.json`. That attempt record holds the pathway, the identifiers reserved for the run record and branch point, the start time, the recorded command, and the declared parameters.
 2. The command runs.
-3. `run` writes the atom, then the chokepoint, then removes the attempt record and releases the lock.
+3. `run` writes the run record, then the branch point, then removes the attempt record and releases the lock.
 
 The operating system releases the lock when the recording process exits for any reason, including a forced kill. The recorder holds the lock exclusively; anything that only asks whether a recorder is alive takes it shared, so concurrent verifiers and listings never mistake one another for a recorder. An attempt record is therefore in one of two states:
 
@@ -149,11 +155,11 @@ The operating system releases the lock when the recording process exits for any 
 
 | The recorder had written | Action | Result |
 | --- | --- | --- |
-| Only the attempt record | `abandoned` | An atom with outcome `abandoned` and its terminal chokepoint |
-| The atom | `completed` | The missing chokepoint, carrying the atom's recorded outcome |
-| The atom and chokepoint | `cleared` | Nothing new; the leftover attempt record is removed |
+| Only the attempt record | `abandoned` | An run record with outcome `abandoned` and its terminal branch point |
+| The run record | `completed` | The missing branch point, carrying the run record's recorded outcome |
+| The run record and branch point | `cleared` | Nothing new; the leftover attempt record is removed |
 
-An `abandoned` atom states what is known and nothing else. It keeps the start time, recorded command, and declared parameters, and has no finish time, duration, return code, or launch category. Whatever output had been captured is retained: recovery measures each log as it finds it and records that size and digest, so the logs verify from then on. An abandoned atom's chokepoint is branchable, like any other.
+An `abandoned` run record states what is known and nothing else. It keeps the start time, recorded command, and declared parameters, and has no finish time, duration, return code, or launch category. Whatever output had been captured is retained: recovery measures each log as it finds it and records that size and digest, so the logs verify from then on. An abandoned run record's branch point is branchable, like any other.
 
 Running attempts are never touched by recovery. Recovery needs each abandoned attempt's lock to itself, and waits about a quarter of a second for a reader that is checking the same attempt. If a reader holds on longer than that, recovery leaves that attempt for the next call; verification keeps reporting it as abandoned in the meantime.
 
@@ -190,7 +196,7 @@ Ocura OSS does not coordinate anything outside its own records:
 
 - Concurrent commands share the project root as their working directory. Keeping their workspace files apart is the workload's job.
 - Listings order records by recorded timestamp and then identifier. Runs that overlap in time have no other ordering.
-- `compare` without an explicit source selects the newest branched source at the moment it runs. Pass the source chokepoint when other work may be adding branches.
+- `compare` without an explicit source selects the newest branched source at the moment it runs. Pass the source branch point when other work may be adding branches.
 - Of several processes initializing the same root at once, exactly one succeeds.
 
 ## Verification
@@ -201,16 +207,16 @@ Ocura OSS does not coordinate anything outside its own records:
 - canonical payload checksum
 - identifier and filename agreement
 - required fields and semantic outcome invariants
-- den, pathway, atom, and chokepoint references
+- ledger, pathway, run record, and branch point references
 - lineage cycles and source-parent agreement
-- that every atom has exactly one chokepoint
+- that every run record has exactly one branch point
 - referenced log containment, existence, size, and SHA-256 digest
 - unreferenced files or unexpected directories under `logs/`
 - unfinished attempts: a running attempt is listed, and an abandoned attempt is a problem until it is recovered
 
 The report counts records that were structurally readable and logs that passed evidence verification. Problems identify the affected record or log.
 
-Automatic source selection for `compare()` requires the complete state to verify. Supplying a source chokepoint ID performs targeted verification of that source and the child evidence included in its comparison.
+Automatic source selection for `compare()` requires the complete state to verify. Supplying a source branch point ID performs targeted verification of that source and the child evidence included in its comparison.
 
 Verification establishes consistency among local records and logs. It does not capture or prove the external conditions needed to reproduce a command.
 
@@ -221,7 +227,7 @@ When the state is intact, verification also produces a manifest and a digest:
 - The manifest has one `KIND ID CHECKSUM` line for every verified record, sorted. `ocura-oss manifest` prints it, and `StateVerification.manifest` holds it.
 - The digest is the SHA-256 of those lines, each terminated by a newline. `verify` reports it, and `StateVerification.digest` holds it.
 
-An atom's checksum covers its recorded log sizes and digests, and verification has just matched the logs to them, so a manifest line for an atom also pins that run's output.
+An run record's checksum covers its recorded log sizes and digests, and verification has just matched the logs to them, so a manifest line for an run record also pins that run's output.
 
 Checksums stored inside `.ocura-oss/` cannot show that a record was rewritten by someone able to write there. A manifest kept elsewhere can. Save it where this state's writers cannot change it, such as a commit in another repository or a build artifact, then pass it back:
 
@@ -237,8 +243,8 @@ The protection is exactly as strong as the place the manifest is kept. A manifes
 ## Reading verified output
 
 `Store.read_verified_log(atom_id, stream="stdout")` loads and validates the stored
-atom and its lineage, checks the selected log's containment, and verifies the exact
-bytes it returns against the atom's recorded byte count and SHA-256 digest. Pass
+run record and its lineage, checks the selected log's containment, and verifies the exact
+bytes it returns against the run record's recorded byte count and SHA-256 digest. Pass
 `stream="stderr"` for the other stream. Both streams can be read for failed attempts.
 
 The complete selected log is held in memory and returned as bytes. Decoding and
@@ -252,18 +258,18 @@ unrelated records, or the whole ledger. Continue to use `verify()` or
 `Store.verify_state()` for a complete check. Local advisory locks coordinate
 readers with compression and decompression, without providing an atomic snapshot
 of the ledger; returned bytes remain unchanged if the file changes afterward.
-An atom recorded without output capture has no log, and the read raises `StoreError`.
+An run recorded without output capture has no log, and the read raises `StoreError`.
 See the [Python API](python-api.md#storeread_verified_log) for usage and errors.
 
 ## Stored information
 
-Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters. An unfinished attempt retains the same command arguments and declared parameters as the atom it becomes.
+Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters. An unfinished attempt retains the same command arguments and declared parameters as the run record it becomes.
 
 Environment values are inherited by the child process but are not serialized. Dependency versions, workspace contents, process memory, network activity, and external-system state are not recorded. The source revision is recorded only when [launch context](#optional-launch-context) is requested.
 
 ### Optional launch context
 
-A run records nothing about its surroundings unless asked. Two options add a `context` object to the attempt and the atom:
+A run records nothing about its surroundings unless asked. Two options add a `context` object to the attempt and the run record:
 
 | Option | Records |
 | --- | --- |
@@ -287,7 +293,7 @@ Two options limit what a run stores. Both are stated in the record, so a reader 
 | Option | Effect | Recorded as |
 | --- | --- | --- |
 | `run --no-capture`, or `capture=False` | No stdout or stderr is written to disk | `output_capture` is `none`, and the six log fields are null |
-| `run --mask-arg POSITION`, or `masked_arguments=[...]` | The command token at that zero-based position is stored as `<masked>` in the attempt and the atom; the command still receives the real value | `masked_arguments` lists the masked positions |
+| `run --mask-arg POSITION`, or `masked_arguments=[...]` | The command token at that zero-based position is stored as `<masked>` in the attempt and the run record; the command still receives the real value | `masked_arguments` lists the masked positions |
 
 `output_capture` is `full` for an ordinary run. A command token that happens to equal `<masked>` is not listed in `masked_arguments`, so it is not mistaken for a masked one.
 

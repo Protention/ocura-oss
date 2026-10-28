@@ -22,7 +22,8 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
-WHEEL_BUDGET_BYTES = 64 * 1024
+# Keep a bounded packaging guard with room for the 0.7 compatibility layer.
+WHEEL_BUDGET_BYTES = 80 * 1024
 UNRELEASED = "Unreleased"
 
 _VERSION_LINE = re.compile(r'^__version__ = "([^"]+)"$', re.MULTILINE)

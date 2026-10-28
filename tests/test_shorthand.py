@@ -134,7 +134,7 @@ class IdentifierPrefixTests(ShorthandTestCase):
     def test_text_output_shows_the_full_id(self):
         code, stdout, _stderr = self.invoke("branch", "--from", self.hex[:8], "--reason", "prefix")
         self.assertEqual(code, 0)
-        self.assertIn(f"source chokepoint: {self.chokepoint}", stdout)
+        self.assertIn(f"source branch point: {self.chokepoint}", stdout)
 
     def test_too_short_or_malformed_prefixes_are_rejected_before_any_write(self):
         other_kind = self.baseline["pathway_id"]

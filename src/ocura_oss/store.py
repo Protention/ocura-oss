@@ -19,6 +19,8 @@ from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Literal, TypeVar
 
 from ocura_oss import locking, logstorage, model
+from ocura_oss.errors import StoreError as StoreError
+from ocura_oss.errors import classify_os_error
 
 STATE_DIR_NAME = ".ocura-oss"
 
@@ -59,6 +61,14 @@ class StateVerification:
     def ok(self) -> bool:
         return not self.problems
 
+    @property
+    def run_records(self) -> int:
+        return self.atoms
+
+    @property
+    def branch_points(self) -> int:
+        return self.chokepoints
+
 
 @dataclass(frozen=True)
 class RecoveredAttempt:
@@ -69,9 +79,13 @@ class RecoveredAttempt:
     pathway_id: str
     action: model.RecoveryAction
 
+    @property
+    def run_id(self) -> str:
+        return self.atom_id
 
-class StoreError(Exception):
-    """State, schema, or integrity failure. The CLI maps this to exit code 2."""
+    @property
+    def branch_point_id(self) -> str:
+        return self.chokepoint_id
 
 
 @dataclass(frozen=True)
@@ -84,6 +98,10 @@ class LogStorageChange:
     original_bytes: int
     stored_bytes: int
     path: str
+
+    @property
+    def run_id(self) -> str:
+        return self.atom_id
 
 
 @dataclass(frozen=True)
@@ -101,6 +119,10 @@ class LogInfo:
     fingerprint: str
     path: str
 
+    @property
+    def run_id(self) -> str:
+        return self.atom_id
+
 
 @dataclass(frozen=True)
 class ListedRun:
@@ -109,17 +131,21 @@ class ListedRun:
     chokepoint_id: str
     run: model.RunSummary
 
+    @property
+    def branch_point_id(self) -> str:
+        return self.chokepoint_id
+
     def to_dict(self) -> dict:
         return {**self.run.to_dict(), "chokepoint_id": self.chokepoint_id}
 
 
 @dataclass(frozen=True)
 class RunPage:
-    """Finalized runs in the order they finished; log contents are not verified.
+    """Finalized runs ordered by terminal timestamp and ID; logs are not verified.
 
-    ``unfinished_attempts`` counts runs not finished when the page was read.
-    They can finish behind its cursor, so a walk is complete only if every page
-    reported none.
+    ``unfinished_attempts`` counts attempt files observed before the scan.
+    Live reads are not atomic: records can appear behind a cursor even when this
+    count is zero. Complete reconstruction requires settled, unchanged history.
     """
 
     runs: tuple[ListedRun, ...]
@@ -143,6 +169,14 @@ class RunInspection:
     pathway: model.Pathway
     chokepoint: model.Chokepoint | None
     children: tuple[model.Pathway, ...]
+
+    @property
+    def record(self) -> model.RunRecord:
+        return self.atom
+
+    @property
+    def branch_point(self) -> model.BranchPoint | None:
+        return self.chokepoint
 
     def to_dict(self, *, include_command: bool = False) -> dict:
         payload = model.atom_to_payload(self.atom)
@@ -198,15 +232,20 @@ class Store:
             return
         missing = f"no Ocura OSS state found under {self.root}"
         if self.state_dir.exists():
-            raise StoreError(f"{missing}: {STATE_DIR_NAME}/ exists but has no den record")
+            raise StoreError(
+                f"{missing}: {STATE_DIR_NAME}/ exists but has no den record", code="invalid_state"
+            )
         for parent in self.root.parents:
             # os.path.isfile reports an unreadable ancestor as absent on every Python.
             if os.path.isfile(parent / STATE_DIR_NAME / "den.json"):
                 raise StoreError(
                     f"{missing}; there is state under {parent}: use that as the root,"
-                    " or run `ocura-oss init` to create new state here"
+                    " or run `ocura-oss init` to create new state here",
+                    code="state_not_found",
                 )
-        raise StoreError(f"{missing}; run `ocura-oss init` there to create it")
+        raise StoreError(
+            f"{missing}; run `ocura-oss init` there to create it", code="state_not_found"
+        )
 
     def _check_archive(self) -> None:
         count = sum(1 for _ in self.attempts_dir.glob("*.json")) if self.archive else 0
@@ -220,7 +259,9 @@ class Store:
         if self.archive:
             raise StoreError("archive mode does not permit ledger changes")
 
-    def resolve_id(self, value: str, kind: Literal["pathway", "atom", "chokepoint"]) -> str:
+    def resolve_id(
+        self, value: str, kind: Literal["pathway", "atom", "chokepoint", "run", "branch_point"]
+    ) -> str:
         """Return the full identifier that *value* names.
 
         A full identifier is returned as given, whether or not its record
@@ -228,29 +269,34 @@ class Store:
         leading hexadecimal characters, with or without the kind word, and
         must match exactly one stored record of that kind.
         """
-        if model.is_valid_id(value, kind):
+        storage_kind = {"run": "atom", "branch_point": "chokepoint"}.get(kind, kind)
+        if model.is_valid_id(value, storage_kind):
             return value
-        stem = model.id_stem(value, kind)
+        stem = model.id_stem(value, storage_kind)
         if stem is None:
             raise StoreError(
-                f"malformed {kind} identifier: {value!r}; give the full id or at least"
-                f" {model.ID_PREFIX_MIN} of its leading hexadecimal characters"
+                f"malformed {storage_kind} identifier: {value!r}; give the full id or at least"
+                f" {model.ID_PREFIX_MIN} of its leading hexadecimal characters",
+                code="invalid_input",
             )
         matches = sorted(
             path.stem
-            for path in self._dir_for(f"{kind}s").glob(f"{stem}*.json")
-            if model.is_valid_id(path.stem, kind)
+            for path in self._dir_for(f"{storage_kind}s").glob(f"{stem}*.json")
+            if model.is_valid_id(path.stem, storage_kind)
         )
         if len(matches) == 1:
             return matches[0]
         if not matches:
-            raise StoreError(f"no {kind} identifier starts with {stem}")
+            raise StoreError(
+                f"no {storage_kind} identifier starts with {stem}", code="record_not_found"
+            )
         shown = ", ".join(matches[:_SHOWN_MATCHES])
         if len(matches) > _SHOWN_MATCHES:
             shown += f", and {len(matches) - _SHOWN_MATCHES} more"
         raise StoreError(
-            f"{kind} identifier prefix {stem} is ambiguous; it matches"
-            f" {len(matches)} records: {shown}"
+            f"{storage_kind} identifier prefix {stem} is ambiguous; it matches"
+            f" {len(matches)} records: {shown}",
+            code="ambiguous_id",
         )
 
     def load_den(self) -> model.Den:
@@ -259,7 +305,31 @@ class Store:
         try:
             return model.den_from_payload(payload)
         except model.ValidationError as exc:
-            raise StoreError(f"invalid den record den.json: {exc}") from exc
+            raise StoreError(f"invalid den record den.json: {exc}", code="integrity_error") from exc
+
+    def load_ledger(self) -> model.Ledger:
+        """Load the ledger identity, preserving its schema-2 representation."""
+        return self.load_den()
+
+    def load_run(self, run_id: str) -> model.RunRecord:
+        """Load a run record and validate its lineage."""
+        return self.load_atom(run_id)
+
+    def load_branch_point(self, branch_point_id: str) -> model.BranchPoint:
+        """Load a terminal evidence boundary and validate its lineage."""
+        return self.load_chokepoint(branch_point_id)
+
+    def list_run_records(self) -> list[model.RunRecord]:
+        """List run records with the same validation and order as list_atoms."""
+        return self.list_atoms()
+
+    def list_branch_points(self) -> list[model.BranchPoint]:
+        """List terminal evidence boundaries in reverse creation order."""
+        return self.list_chokepoints()
+
+    def verify_run_evidence(self, record: model.RunRecord) -> None:
+        """Verify the output streams retained by a run record."""
+        self.verify_atom_evidence(record)
 
     def load_pathway(self, pathway_id: str) -> model.Pathway:
         """Load a pathway and validate its den and lineage references."""
@@ -279,14 +349,17 @@ class Store:
             "pathways", pathway_id, "pathway", "pathway", model.pathway_from_payload
         )
         if pathway_id in seen_ids:
-            raise StoreError("cyclic lineage reference in state records")
+            raise StoreError("cyclic lineage reference in state records", code="integrity_error")
         seen = seen_ids | {pathway_id}
         den = self.load_den()
         if pathway.den_id != den.id:
-            raise StoreError(f"pathway {pathway_id} references an unknown den")
+            raise StoreError(
+                f"pathway {pathway_id} references an unknown den", code="integrity_error"
+            )
         if (pathway.parent_pathway_id is None) != (pathway.source_chokepoint_id is None):
             raise StoreError(
-                f"pathway {pathway_id} must set parent pathway and source chokepoint together"
+                f"pathway {pathway_id} must set parent pathway and source chokepoint together",
+                code="integrity_error",
             )
         if pathway.parent_pathway_id is not None:
             self._load_pathway(pathway.parent_pathway_id, seen, validated)
@@ -297,7 +370,8 @@ class Store:
                 and source.pathway_id != pathway.parent_pathway_id
             ):
                 raise StoreError(
-                    f"pathway {pathway_id} source chokepoint does not belong to its parent pathway"
+                    f"pathway {pathway_id} source chokepoint does not belong to its parent pathway",
+                    code="integrity_error",
                 )
         validated[pathway_id] = pathway
         return pathway
@@ -314,7 +388,7 @@ class Store:
             return known
         atom = self._load_structural("atoms", atom_id, "atom", "atom", model.atom_from_payload)
         if atom_id in seen_ids:
-            raise StoreError("cyclic lineage reference in state records")
+            raise StoreError("cyclic lineage reference in state records", code="integrity_error")
         self._load_pathway(atom.pathway_id, seen_ids | {atom_id}, validated)
         validated[atom_id] = atom
         return atom
@@ -337,13 +411,19 @@ class Store:
             model.chokepoint_from_payload,
         )
         if chokepoint_id in seen_ids:
-            raise StoreError("cyclic lineage reference in state records")
+            raise StoreError("cyclic lineage reference in state records", code="integrity_error")
         seen = seen_ids | {chokepoint_id}
         atom = self._load_atom(chokepoint.atom_id, seen, validated)
         if atom.pathway_id != chokepoint.pathway_id:
-            raise StoreError(f"chokepoint {chokepoint_id} and its atom disagree on the pathway")
+            raise StoreError(
+                f"chokepoint {chokepoint_id} and its atom disagree on the pathway",
+                code="integrity_error",
+            )
         if atom.outcome is not chokepoint.outcome:
-            raise StoreError(f"chokepoint {chokepoint_id} outcome disagrees with its atom")
+            raise StoreError(
+                f"chokepoint {chokepoint_id} outcome disagrees with its atom",
+                code="integrity_error",
+            )
         validated[chokepoint_id] = chokepoint
         return chokepoint
 
@@ -536,20 +616,20 @@ class Store:
         after: str | None = None,
         limit: int | None = 100,
     ) -> RunPage:
-        """Page finalized runs in the order they finished, by their chokepoints.
+        """Page finalized runs by terminal branch point timestamp and ID.
 
         Every chokepoint record's envelope and fields are checked, and each
         returned run's records and lineage; log contents are not. *after* is a
-        page's ``next_after`` chokepoint. A run unfinished when a page is read
-        can finish behind its cursor; that page counts it in
-        ``unfinished_attempts``. ``limit=None`` returns every match.
+        page's ``next_after`` branch point. ``unfinished_attempts`` is an
+        observation, not a completeness guarantee for live reads. ``limit=None``
+        returns every match from this scan, without creating an atomic snapshot.
         """
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
         ):
-            raise StoreError("run page limit must be between 1 and 1000")
+            raise StoreError("run page limit must be between 1 and 1000", code="invalid_input")
         if outcome is not None and not isinstance(outcome, model.Outcome):
-            raise StoreError("outcome must be an Outcome value")
+            raise StoreError("outcome must be an Outcome value", code="invalid_input")
         self.require()
         self.load_den()
         if pathway_id is not None:
@@ -560,8 +640,8 @@ class Store:
                 "chokepoints", after, "chokepoint", "chokepoint", model.chokepoint_from_payload
             )
             start = (boundary.created_at, boundary.id)
-        # Read before the scan. A run this page could miss either has an attempt
-        # now or is stamped at or after now, which only later pages list.
+        # Bound the scan by terminal timestamps. Neither this cutoff nor the
+        # attempt count makes record discovery atomic with concurrent writers.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
         candidates = (
@@ -591,12 +671,15 @@ class Store:
             unfinished_attempts=unfinished,
         )
 
-    def inspect_run(self, atom_id: str) -> RunInspection:
+    def inspect_run(
+        self, atom_id: str | None = None, *, run_id: str | None = None
+    ) -> RunInspection:
         """Load one run with its lineage, terminal chokepoint, and child pathways.
 
         Scans chokepoint and pathway records to find the relationships; reads no
         logs. The chokepoint is ``None`` while the run is unfinished.
         """
+        atom_id = _run_identifier(atom_id, run_id)
         self.require()
         validated: dict[str, object] = {}
         atom = self._load_atom(atom_id, frozenset(), validated)
@@ -661,7 +744,11 @@ class Store:
             return logstorage.physical_path(path)
 
     def read_verified_log(
-        self, atom_id: str, *, stream: Literal["stdout", "stderr"] = "stdout"
+        self,
+        atom_id: str | None = None,
+        *,
+        stream: Literal["stdout", "stderr"] = "stdout",
+        run_id: str | None = None,
     ) -> bytes:
         """Read one complete log and verify the exact bytes returned.
 
@@ -672,6 +759,7 @@ class Store:
         and interpretation are left to the caller. An atom recorded without
         output capture has no log to read and raises StoreError.
         """
+        atom_id = _run_identifier(atom_id, run_id)
         atom = self.load_atom(atom_id)
         relative, size, digest = _recorded_log(atom, stream)
         with self._log_guard(atom_id, relative) as path:
@@ -682,11 +770,12 @@ class Store:
     @contextlib.contextmanager
     def open_verified_log(
         self,
-        atom_id: str,
+        atom_id: str | None = None,
         *,
         stream: Literal["stdout", "stderr"] = "stdout",
         offset: int = 0,
         length: int | None = None,
+        run_id: str | None = None,
     ) -> Iterator[BinaryIO]:
         """Open an exact verified snapshot with bounded RAM for large logs.
 
@@ -695,6 +784,7 @@ class Store:
         window. Large windows use OS temporary storage, removed on close. The
         snapshot stays valid if backing storage changes.
         """
+        atom_id = _run_identifier(atom_id, run_id)
         atom = self.load_atom(atom_id)
         relative, size, digest = _recorded_log(atom, stream)
         with self._log_guard(atom_id, relative) as path:
@@ -737,12 +827,24 @@ class Store:
                             self._unlocked_reads = True
                     yield path
         except logstorage.LogStorageError as exc:
-            raise StoreError(f"atom {atom_id} {exc}: {relative}") from (exc.__cause__ or exc)
+            raise StoreError(
+                f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
+            ) from (exc.__cause__ or exc)
         except (OSError, ValueError, TimeoutError) as exc:
-            raise StoreError(f"atom {atom_id} log is unreadable: {relative}") from exc
+            code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
+            raise StoreError(
+                f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
+            ) from exc
 
-    def log_info(self, atom_id: str, *, stream: Literal["stdout", "stderr"] = "stdout") -> LogInfo:
+    def log_info(
+        self,
+        atom_id: str | None = None,
+        *,
+        stream: Literal["stdout", "stderr"] = "stdout",
+        run_id: str | None = None,
+    ) -> LogInfo:
         """Verify a stream and describe its physical storage and original identity."""
+        atom_id = _run_identifier(atom_id, run_id)
         atom = self.load_atom(atom_id)
         relative, size, digest = _recorded_log(atom, stream)
         with self._log_guard(atom_id, relative) as path:
@@ -766,6 +868,7 @@ class Store:
         atom_id: str | None = None,
         min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
         dry_run: bool = False,
+        run_id: str | None = None,
     ) -> tuple[LogStorageChange, ...]:
         """Losslessly compact finalized logs without rewriting evidence records.
 
@@ -775,14 +878,19 @@ class Store:
         """
         _validate_compression_min_bytes(min_bytes)
         return self._change_log_storage(
-            atom_id, restore=False, min_bytes=min_bytes, dry_run=dry_run
+            _optional_run_identifier(atom_id, run_id),
+            restore=False,
+            min_bytes=min_bytes,
+            dry_run=dry_run,
         )
 
     def decompress_logs(
-        self, *, atom_id: str | None = None, dry_run: bool = False
+        self, *, atom_id: str | None = None, dry_run: bool = False, run_id: str | None = None
     ) -> tuple[LogStorageChange, ...]:
         """Restore raw logs for ordinary tools and readers without gzip support."""
-        return self._change_log_storage(atom_id, restore=True, min_bytes=0, dry_run=dry_run)
+        return self._change_log_storage(
+            _optional_run_identifier(atom_id, run_id), restore=True, min_bytes=0, dry_run=dry_run
+        )
 
     def _change_log_storage(
         self, atom_id: str | None, *, restore: bool, min_bytes: int, dry_run: bool
@@ -962,7 +1070,7 @@ class Store:
         if self.exists():
             raise StoreError(f"cannot initialize: state directory already exists: {self.state_dir}")
         if not isinstance(name, str) or not name.strip():
-            raise StoreError("den name must not be blank")
+            raise StoreError("ledger name must not be blank", code="invalid_input")
         created_at = model.format_timestamp(model.utc_now())
         den = model.Den(
             id=model.make_id("den"),
@@ -1004,7 +1112,7 @@ class Store:
 
     def _record_path(self, directory: Path, record_id: str, prefix: str) -> Path:
         if not model.is_valid_id(record_id, prefix):
-            raise StoreError(f"malformed {prefix} identifier: {record_id!r}")
+            raise StoreError(f"malformed {prefix} identifier: {record_id!r}", code="invalid_input")
         return directory / f"{record_id}.json"
 
     def _load_structural(
@@ -1020,26 +1128,38 @@ class Store:
         try:
             record = converter(payload)
         except model.ValidationError as exc:
-            raise StoreError(f"invalid {kind} record {record_id}.json: {exc}") from exc
+            raise StoreError(
+                f"invalid {kind} record {record_id}.json: {exc}", code="integrity_error"
+            ) from exc
         if getattr(record, "id", None) != record_id:
             raise StoreError(
-                f"{kind} record {record_id}.json payload id does not match its filename"
+                f"{kind} record {record_id}.json payload id does not match its filename",
+                code="integrity_error",
             )
         return record
 
     def _read_envelope(self, path: Path, expected_kind: str) -> dict:
         if not path.is_file():
-            raise StoreError(f"missing {expected_kind} record: {path}")
+            raise StoreError(f"missing {expected_kind} record: {path}", code="record_not_found")
         try:
             raw = path.read_bytes()
             data = json.loads(raw.decode("utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise StoreError(f"malformed {expected_kind} record {path.name}: unreadable") from exc
+            code = classify_os_error(exc) if isinstance(exc, OSError) else "integrity_error"
+            raise StoreError(
+                f"malformed {expected_kind} record {path.name}: unreadable", code=code
+            ) from exc
         if not isinstance(data, dict) or set(data) != _ENVELOPE_KEYS:
-            raise StoreError(f"malformed {expected_kind} record {path.name}: unexpected envelope")
+            raise StoreError(
+                f"malformed {expected_kind} record {path.name}: unexpected envelope",
+                code="integrity_error",
+            )
         schema_version = data["schema_version"]
         if isinstance(schema_version, bool) or not isinstance(schema_version, int):
-            raise StoreError(f"malformed {expected_kind} record {path.name}: bad schema version")
+            raise StoreError(
+                f"malformed {expected_kind} record {path.name}: bad schema version",
+                code="integrity_error",
+            )
         if schema_version != model.SCHEMA_VERSION:
             hint = (
                 "; Ocura OSS 0.4 and earlier wrote this state, and this version cannot"
@@ -1050,11 +1170,13 @@ class Store:
             )
             raise StoreError(
                 f"unsupported schema version {schema_version} in {expected_kind} record"
-                f" {path.name}{hint}"
+                f" {path.name}{hint}",
+                code="unsupported_schema",
             )
         if data["kind"] != expected_kind:
             raise StoreError(
-                f"kind mismatch in {expected_kind} record {path.name}: {data['kind']!r}"
+                f"kind mismatch in {expected_kind} record {path.name}: {data['kind']!r}",
+                code="integrity_error",
             )
         checksum = data["checksum"]
         if (
@@ -1062,13 +1184,18 @@ class Store:
             or set(checksum) != {"algorithm", "value"}
             or checksum["algorithm"] != model.CHECKSUM_ALGORITHM
         ):
-            raise StoreError(f"malformed checksum in {expected_kind} record {path.name}")
+            raise StoreError(
+                f"malformed checksum in {expected_kind} record {path.name}", code="integrity_error"
+            )
         expected = model.checksum_for(schema_version, data["kind"], data["payload"])["value"]
         if checksum["value"] != expected:
-            raise StoreError(f"checksum mismatch in {expected_kind} record {path.name}")
+            raise StoreError(
+                f"checksum mismatch in {expected_kind} record {path.name}", code="integrity_error"
+            )
         if not isinstance(data["payload"], dict):
             raise StoreError(
-                f"malformed {expected_kind} record {path.name}: payload must be an object"
+                f"malformed {expected_kind} record {path.name}: payload must be an object",
+                code="integrity_error",
             )
         return data["payload"]
 
@@ -1102,13 +1229,24 @@ class Store:
         try:
             payload = self._read_envelope(path, kind)
         except StoreError as exc:
-            raise StoreError(f"invalid {kind} record {path.name}: {exc}") from exc
+            raise StoreError(
+                f"invalid {kind} record {path.name}: {exc}",
+                code=exc.code,
+                execution=exc.execution,
+                ids=exc.ids,
+                recovery=exc.recovery,
+            ) from exc
         try:
             record = converter(payload)
         except model.ValidationError as exc:
-            raise StoreError(f"invalid {kind} record {path.name}: {exc}") from exc
+            raise StoreError(
+                f"invalid {kind} record {path.name}: {exc}", code="integrity_error"
+            ) from exc
         if getattr(record, "id", None) != path.stem:
-            raise StoreError(f"{kind} record {path.name} payload id does not match its filename")
+            raise StoreError(
+                f"{kind} record {path.name} payload id does not match its filename",
+                code="integrity_error",
+            )
         if manifest is not None:
             manifest.append(_manifest_line(kind, path.stem, payload))
         return record
@@ -1221,26 +1359,47 @@ class Store:
     def _evidence_path(self, atom_id: str, relative: str) -> Path:
         """Resolve a recorded log path; reject paths outside the logs dir."""
         if not isinstance(relative, str) or not relative:
-            raise StoreError(f"atom {atom_id} has an empty log path")
+            raise StoreError(f"atom {atom_id} has an empty log path", code="integrity_error")
         posix = PurePosixPath(relative)
         if posix.is_absolute() or ".." in posix.parts:
-            raise StoreError(f"atom {atom_id} log path escapes the state directory: {relative}")
+            raise StoreError(
+                f"atom {atom_id} log path escapes the state directory: {relative}",
+                code="integrity_error",
+            )
         candidate = self.root / Path(*posix.parts)
         parent = candidate.parent.resolve()
         if parent != self.logs_dir.resolve():
             raise StoreError(
-                f"atom {atom_id} log path does not point inside .ocura-oss/logs/: {relative}"
+                f"atom {atom_id} log path does not point inside .ocura-oss/logs/: {relative}",
+                code="integrity_error",
             )
         if candidate.is_symlink():
-            raise StoreError(f"atom {atom_id} log path must not be a symlink: {relative}")
+            raise StoreError(
+                f"atom {atom_id} log path must not be a symlink: {relative}", code="integrity_error"
+            )
         # Never resolve the mutable final filename. Its canonical directory
         # and literal basename also give every reader/writer the same lock.
         return parent / candidate.name
 
 
+def _optional_run_identifier(atom_id: str | None, run_id: str | None) -> str | None:
+    if atom_id is not None and run_id is not None and atom_id != run_id:
+        raise StoreError("atom_id and run_id must identify the same run", code="invalid_input")
+    return run_id if run_id is not None else atom_id
+
+
+def _run_identifier(atom_id: str | None, run_id: str | None) -> str:
+    selected = _optional_run_identifier(atom_id, run_id)
+    if selected is None:
+        raise StoreError("a run_id is required", code="invalid_input")
+    return selected
+
+
 def _validate_compression_min_bytes(value: int) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise StoreError("compression minimum bytes must be a nonnegative integer")
+        raise StoreError(
+            "compression minimum bytes must be a nonnegative integer", code="invalid_input"
+        )
 
 
 def size_and_sha256(path: Path) -> tuple[int, str]:
@@ -1288,10 +1447,12 @@ def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
             or len(parts[2]) != 64
             or set(parts[2]) - set("0123456789abcdef")
         ):
-            raise StoreError(f"malformed manifest entry: {line!r}")
+            raise StoreError(f"malformed manifest entry: {line!r}", code="invalid_input")
         entries.append(line)
     if not entries:
-        raise StoreError("retained manifest lists no records, so it cannot check any")
+        raise StoreError(
+            "retained manifest lists no records, so it cannot check any", code="invalid_input"
+        )
     return entries
 
 
@@ -1313,7 +1474,7 @@ def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
 
 def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:
     if stream not in ("stdout", "stderr"):
-        raise StoreError("log stream must be 'stdout' or 'stderr'")
+        raise StoreError("log stream must be 'stdout' or 'stderr'", code="invalid_input")
     logs = _recorded_logs(atom)
     if len(logs) != 2:
         raise StoreError(f"atom {atom.id} was recorded without output capture")

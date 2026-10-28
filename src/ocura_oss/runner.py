@@ -17,6 +17,7 @@ from typing import BinaryIO
 
 from ocura_oss import logstorage, model, supervise
 from ocura_oss.context import capture as capture_context
+from ocura_oss.errors import ExecutionState, classify_os_error
 from ocura_oss.store import (
     STATE_DIR_NAME,
     Store,
@@ -43,6 +44,14 @@ class RunExecution:
     atom: model.Atom
     chokepoint: model.Chokepoint
     storage_warnings: tuple[str, ...] = ()
+
+    @property
+    def record(self) -> model.RunRecord:
+        return self.atom
+
+    @property
+    def branch_point(self) -> model.BranchPoint:
+        return self.chokepoint
 
 
 def categorize_launch_error(exc: BaseException) -> str:
@@ -100,135 +109,153 @@ def run_command(
     ``abandoned``; on Windows and Linux the command is then ended by the
     operating system, as :mod:`ocura_oss.supervise` describes.
     """
-    clock = now or model.utc_now
-    counter = monotonic or time.monotonic
-    _validate_compression_min_bytes(compression_min_bytes)
-    if not isinstance(compress, bool):
-        raise StoreError("compress must be a boolean")
-    if isinstance(argv, (str, bytes)):
-        raise StoreError("command must be a sequence of argument tokens, not a string")
-    tokens = tuple(argv)
-    if not tokens or not all(isinstance(token, str) and token for token in tokens):
-        raise StoreError("command must be a nonempty sequence of nonempty strings")
-    declared = model.validate_parameters(declared_parameters)
-    pathway = store.load_pathway(pathway_id)
-    parameters = {**pathway.parameters, **declared}
+    execution: ExecutionState = "not_started"
+    ids: dict[str, str] = {}
     try:
-        if substitute:
-            tokens, _used = model.substitute_parameters(tokens, parameters)
-        recorded_command, masked = model.mask_command(tokens, masked_arguments)
-    except model.ValidationError as exc:
-        raise StoreError(str(exc)) from exc
-    run_context = capture_context(store.root, environment=context, files=context_files)
+        clock = now or model.utc_now
+        counter = monotonic or time.monotonic
+        _validate_compression_min_bytes(compression_min_bytes)
+        if not isinstance(compress, bool):
+            raise StoreError("compress must be a boolean", code="invalid_input")
+        if isinstance(argv, (str, bytes)):
+            raise StoreError(
+                "command must be a sequence of argument tokens, not a string", code="invalid_input"
+            )
+        tokens = tuple(argv)
+        if not tokens or not all(isinstance(token, str) and token for token in tokens):
+            raise StoreError(
+                "command must be a nonempty sequence of nonempty strings", code="invalid_input"
+            )
+        declared = model.validate_parameters(declared_parameters)
+        pathway = store.load_pathway(pathway_id)
+        parameters = {**pathway.parameters, **declared}
+        try:
+            if substitute:
+                tokens, _used = model.substitute_parameters(tokens, parameters)
+            recorded_command, masked = model.mask_command(tokens, masked_arguments)
+        except model.ValidationError as exc:
+            raise StoreError(str(exc), code="invalid_input") from exc
+        run_context = capture_context(store.root, environment=context, files=context_files)
 
-    atom_id = model.make_id("atom")
-    chokepoint_id = model.make_id("chokepoint")
-    stdout_path = store.logs_dir / f"{atom_id}.stdout.log"
-    stderr_path = store.logs_dir / f"{atom_id}.stderr.log"
-    stdout_log = f"{STATE_DIR_NAME}/logs/{stdout_path.name}" if capture else None
-    stderr_log = f"{STATE_DIR_NAME}/logs/{stderr_path.name}" if capture else None
-    output_capture = model.OutputCapture.FULL if capture else model.OutputCapture.NONE
+        atom_id = model.make_id("atom")
+        chokepoint_id = model.make_id("chokepoint")
+        stdout_path = store.logs_dir / f"{atom_id}.stdout.log"
+        stderr_path = store.logs_dir / f"{atom_id}.stderr.log"
+        stdout_log = f"{STATE_DIR_NAME}/logs/{stdout_path.name}" if capture else None
+        stderr_log = f"{STATE_DIR_NAME}/logs/{stderr_path.name}" if capture else None
+        output_capture = model.OutputCapture.FULL if capture else model.OutputCapture.NONE
 
-    started_at = clock()
-    attempt = model.Attempt(
-        id=atom_id,
-        pathway_id=pathway.id,
-        chokepoint_id=chokepoint_id,
-        started_at=model.format_timestamp(started_at),
-        declared_parameters=parameters,
-        command=recorded_command,
-        stdout_log=stdout_log,
-        stderr_log=stderr_log,
-        output_capture=output_capture,
-        masked_arguments=masked,
-        context=run_context,
-    )
-    storage_warnings: tuple[str, ...] = ()
-    with store._recording(attempt), contextlib.ExitStack() as logs:
-        stdout_handle: BinaryIO | None = None
-        stderr_handle: BinaryIO | None = None
-        if capture:
-            try:
-                stdout_handle = logs.enter_context(open(stdout_path, "wb"))
-                stderr_handle = logs.enter_context(open(stderr_path, "wb"))
-            except OSError as exc:
-                # Nothing was launched, so there is no attempt to leave behind.
-                logs.close()
-                for path in (stdout_path, stderr_path):
-                    with contextlib.suppress(OSError):
-                        path.unlink(missing_ok=True)
-                store._remove_attempt(attempt.id)
-                detail = exc.strerror or exc.__class__.__name__
-                raise StoreError(
-                    f"cannot create log files under {STATE_DIR_NAME}/logs/: {detail}"
-                ) from exc
-        started_counter = counter()
-        return_code, launch_category, interrupted = _execute(
-            tokens, store, stdout_handle, stderr_handle, mirror
-        )
-        logs.close()
-        duration = max(counter() - started_counter, 0.0)
-        finished_at = clock()
-
-        if interrupted:
-            outcome = model.Outcome.INTERRUPTED
-            launch_category = "interrupted"
-            return_code = None
-        elif launch_category is not None:
-            outcome = model.Outcome.LAUNCH_FAILED
-        elif return_code == 0:
-            outcome = model.Outcome.PASSED
-        else:
-            outcome = model.Outcome.FAILED
-
-        stdout_size, stdout_digest = size_and_sha256(stdout_path) if capture else (None, None)
-        stderr_size, stderr_digest = size_and_sha256(stderr_path) if capture else (None, None)
-        atom = model.Atom(
+        started_at = clock()
+        attempt = model.Attempt(
             id=atom_id,
             pathway_id=pathway.id,
-            started_at=attempt.started_at,
-            finished_at=model.format_timestamp(finished_at),
-            duration_seconds=round(duration, 6),
-            outcome=outcome,
-            return_code=return_code,
-            launch_error_category=launch_category,
+            chokepoint_id=chokepoint_id,
+            started_at=model.format_timestamp(started_at),
             declared_parameters=parameters,
             command=recorded_command,
             stdout_log=stdout_log,
             stderr_log=stderr_log,
-            stdout_bytes=stdout_size,
-            stderr_bytes=stderr_size,
-            stdout_sha256=stdout_digest,
-            stderr_sha256=stderr_digest,
             output_capture=output_capture,
             masked_arguments=masked,
             context=run_context,
         )
-        store._save_atom(atom)
-        chokepoint = model.Chokepoint(
-            id=chokepoint_id,
-            pathway_id=pathway.id,
-            atom_id=atom.id,
-            created_at=model.format_timestamp(finished_at),
-            kind=model.TERMINAL_KIND,
-            outcome=outcome,
-            branchable=True,
-        )
-        store._save_chokepoint(chokepoint)
-        # Only our own finalized streams are considered. The atom is already
-        # durable, so recovery never treats compressed output as an absent
-        # unfinished log. The attempt lock still excludes manual maintenance.
-        if capture and compress:
-            try:
-                store._change_atom_storage(
-                    atom, min_bytes=compression_min_bytes, eligible_only=True
-                )
-            except StoreError as exc:
-                storage_warnings = (f"automatic log compression failed: {exc}",)
-        # Last, and while still holding the attempt's lock: a reader then sees
-        # either a live attempt or a complete atom and chokepoint.
-        store._remove_attempt(attempt.id)
-    return RunExecution(atom=atom, chokepoint=chokepoint, storage_warnings=storage_warnings)
+        ids = {"run_id": atom_id, "branch_point_id": chokepoint_id, "pathway_id": pathway.id}
+        storage_warnings: tuple[str, ...] = ()
+        with store._recording(attempt), contextlib.ExitStack() as logs:
+            stdout_handle: BinaryIO | None = None
+            stderr_handle: BinaryIO | None = None
+            if capture:
+                try:
+                    stdout_handle = logs.enter_context(open(stdout_path, "wb"))
+                    stderr_handle = logs.enter_context(open(stderr_path, "wb"))
+                except OSError as exc:
+                    # Nothing was launched, so there is no attempt to leave behind.
+                    logs.close()
+                    for path in (stdout_path, stderr_path):
+                        with contextlib.suppress(OSError):
+                            path.unlink(missing_ok=True)
+                    store._remove_attempt(attempt.id)
+                    detail = exc.strerror or exc.__class__.__name__
+                    raise StoreError(
+                        f"cannot create log files under {STATE_DIR_NAME}/logs/: {detail}",
+                        code=classify_os_error(exc),
+                    ) from exc
+            started_counter = counter()
+            execution = "unknown"
+            return_code, launch_category, interrupted = _execute(
+                tokens, store, stdout_handle, stderr_handle, mirror
+            )
+            logs.close()
+            duration = max(counter() - started_counter, 0.0)
+            finished_at = clock()
+
+            if interrupted:
+                outcome = model.Outcome.INTERRUPTED
+                launch_category = "interrupted"
+                return_code = None
+            elif launch_category is not None:
+                outcome = model.Outcome.LAUNCH_FAILED
+            elif return_code == 0:
+                outcome = model.Outcome.PASSED
+            else:
+                outcome = model.Outcome.FAILED
+
+            stdout_size, stdout_digest = size_and_sha256(stdout_path) if capture else (None, None)
+            stderr_size, stderr_digest = size_and_sha256(stderr_path) if capture else (None, None)
+            atom = model.Atom(
+                id=atom_id,
+                pathway_id=pathway.id,
+                started_at=attempt.started_at,
+                finished_at=model.format_timestamp(finished_at),
+                duration_seconds=round(duration, 6),
+                outcome=outcome,
+                return_code=return_code,
+                launch_error_category=launch_category,
+                declared_parameters=parameters,
+                command=recorded_command,
+                stdout_log=stdout_log,
+                stderr_log=stderr_log,
+                stdout_bytes=stdout_size,
+                stderr_bytes=stderr_size,
+                stdout_sha256=stdout_digest,
+                stderr_sha256=stderr_digest,
+                output_capture=output_capture,
+                masked_arguments=masked,
+                context=run_context,
+            )
+            store._save_atom(atom)
+            chokepoint = model.Chokepoint(
+                id=chokepoint_id,
+                pathway_id=pathway.id,
+                atom_id=atom.id,
+                created_at=model.format_timestamp(finished_at),
+                kind=model.TERMINAL_KIND,
+                outcome=outcome,
+                branchable=True,
+            )
+            store._save_chokepoint(chokepoint)
+            execution = "recorded"
+            # Only our own finalized streams are considered. The atom is already
+            # durable, so recovery never treats compressed output as an absent
+            # unfinished log. The attempt lock still excludes manual maintenance.
+            if capture and compress:
+                try:
+                    store._change_atom_storage(
+                        atom, min_bytes=compression_min_bytes, eligible_only=True
+                    )
+                except StoreError as exc:
+                    storage_warnings = (f"automatic log compression failed: {exc}",)
+            # Last, and while still holding the attempt's lock: a reader then sees
+            # either a live attempt or a complete atom and chokepoint.
+            store._remove_attempt(attempt.id)
+        return RunExecution(atom=atom, chokepoint=chokepoint, storage_warnings=storage_warnings)
+    except (StoreError, model.ValidationError, OSError) as exc:
+        if isinstance(exc, StoreError):
+            exc.execution = execution
+            exc.ids = {**ids, **exc.ids}
+            raise
+        code = classify_os_error(exc) if isinstance(exc, OSError) else "invalid_input"
+        raise StoreError(str(exc), code=code, execution=execution, ids=ids) from exc
 
 
 def _execute(

@@ -15,6 +15,9 @@ class PublicSurfaceTests(unittest.TestCase):
             set(ocura_oss.__all__),
             {
                 "Atom",
+                "Ledger",
+                "RunRecord",
+                "BranchPoint",
                 "Attempt",
                 "AttemptState",
                 "ChildComparison",
