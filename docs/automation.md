@@ -2,8 +2,8 @@
 
 Version 0.7.0.dev0.
 
-The discovery, descriptive Python names, bounded readers, and `--json-errors`
-sections describe unreleased work in this checkout. Published 0.6.0 does not
+The discovery, descriptive Python names, bounded readers, `run --from`, and
+`--json-errors` sections describe unreleased work in this checkout. Published 0.6.0 does not
 include those interfaces. See the [naming and compatibility guide](naming-migration.md).
 
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
@@ -15,13 +15,32 @@ variations, with reasons, outputs, and verification.
 1. Call `init --json` once and retain the project root and default pathway ID.
 2. Execute the baseline through `run --json`; retain its branch point ID, returned
    under the compatible JSON key `chokepoint_id`.
-3. Call `branch --json --from ID --reason TEXT` with the proposed parameter labels.
-4. Pass the returned branch `id` to the next `run --pathway ID --json`. That run
-   records the branch's labels; repeat a `--param` only to replace one.
-5. Read `verify --json` and `compare --json --from ID` before using the results.
-6. Consume output through `Store.open_verified_log()` for bounded excerpts, or
+3. Call `run --from ID --reason TEXT --json-errors` with the proposed parameter
+   labels and `-- COMMAND`. This creates a child pathway and runs there; retain
+   its `pathway_id` and the usual run result.
+4. Read `verify --json` and `compare --json --from ID` before using the results.
+5. Consume output through `Store.open_verified_log()` for bounded excerpts, or
    `Store.read_verified_log()` when the complete bytes fit in memory. Interpret
    metrics in the caller and cite the evidence used.
+
+For example, with the baseline's branch point ID:
+
+```console
+ocura-oss run --root ./experiment --from <chokepoint-id> --reason "increase batch" --param batch=4 --json-errors -- python train.py --batch 4
+```
+
+`--from` requires a nonblank `--reason` and cannot be combined with `--pathway`.
+Its `--param` values override the new child's inherited source-pathway labels;
+labels declared only on the source run are not inherited. Ordinary `run --pathway`
+overrides still apply only to that run. With neither selection option, `run` uses
+the default pathway as before. Python offers the same combined operation through
+`run(..., source_branch_point_id=ID, reason=TEXT)` and returns the usual
+`RunExecution`.
+
+To plan a variation before executing it, keep the two-step workflow: call
+`branch --json --from ID --reason TEXT --param batch=4`, then pass its returned
+`id` to `run --pathway ID --json -- COMMAND`. That run inherits the child's
+labels; repeat a `--param` only for a run-specific override.
 
 All invocations must use the intended `--root`. The returned IDs connect the steps
 without scraping text. Pass them in full: the shortened IDs the CLI accepts are for
@@ -133,6 +152,18 @@ reconcile evidence first. Retain a finalized failure as an attempt, and make any
 retry a deliberate new run. Wait for a running attempt. Recover an abandoned one
 only after its command has stopped; `recover` closes evidence and never restarts
 the workload. Ocura supplies no idempotency key or exactly-once execution guarantee.
+
+For a combined `run --from` call, creating the child happens before recording the
+command. A later validation failure can therefore leave an empty child even when
+`error.execution` is `not_started`. Structured errors preserve the known child
+`pathway_id` and `source_branch_point_id` in `error.ids`; Python exposes the same
+fields through `StoreError`. Inspect `pathways`, `runs --pathway CHILD_ID --all`,
+and `attempts` at that root, and `show RUN_ID` when a run ID is known. If the
+evidence supports a deliberate continuation on that child, use
+`run --pathway CHILD_ID -- COMMAND` (Python: `run(..., pathway_id=child_id)`).
+Repeating `run --from` creates a new child; it does not resume the prior child or
+automatically retry its workload. A known child ID alone does not prove that the
+command never ran.
 
 Several processes may record runs under one root at the same time, and `verify` and
 `compare --from ID` work while they do. Ocura OSS keeps its own records apart; the

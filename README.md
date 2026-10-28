@@ -14,7 +14,8 @@ provides JSON output throughout the workflow; the Python API returns typed resul
 
 This checkout adds descriptive Python names, `runs` and `show` for history
 discovery, bounded verified log reads, and opt-in `--json-errors` for structured
-failures. These interfaces are absent from published 0.6.0. The
+failures. It also adds `run --from ID --reason TEXT` to create and execute a
+variation in one call. These interfaces are absent from published 0.6.0. The
 [history example](examples/history/README.md) starts with only a project root, retains failed
 retries and empty variations, and returns verified excerpts with stable references.
 The [naming guide](docs/naming-migration.md) maps descriptive names to compatible legacy names
@@ -67,6 +68,20 @@ ocura-oss compare --json
 Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
 child run. When typing an ID by hand, its first four or more hexadecimal characters
 are enough if they match one record.
+
+In this unreleased checkout, replace the separate `branch` and child `run` calls
+with one command:
+
+```console
+ocura-oss run --json-errors --from <chokepoint-id> --reason "try count 2" --param count=2 -- python -c "print(2)"
+```
+
+This creates a child pathway and runs there, returning the usual run result and
+its `pathway_id`. Its parameters override the source pathway's labels; labels
+declared only on the source run are not inherited. A later preparation failure can
+leave an empty child. Inspect the error's known IDs and execution state before
+continuing explicitly with `run --pathway CHILD_ID`; repeating `run --from`
+creates another child. See [recovery guidance](docs/automation.md#handle-uncertain-execution-without-duplicate-work).
 
 Without `--json`, `compare` prints:
 
@@ -161,6 +176,21 @@ run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id)
 assert verify(root).ok
 comparison = compare(source_branch_point_id=baseline.branch_point.id, root=root)
 ```
+
+The unreleased Python API can also replace the separate `branch()` and child
+`run()` calls:
+
+```python
+variation = run(
+    [sys.executable, "-c", "print(2)"],
+    root=root,
+    source_branch_point_id=baseline.branch_point.id,
+    reason="try count 2",
+    parameters={"count": "2"},
+)
+```
+
+It returns the same `RunExecution`; the child's ID is `variation.record.pathway_id`.
 
 Use `Store(root).read_verified_log(run_id=baseline.record.id, stream="stdout")` to consume recorded
 output as bytes checked against the stored run record's byte count and SHA-256 digest.

@@ -6,8 +6,8 @@ This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
 `decompress` commands below are proposed branch behavior, absent from the released
 package. See [open design decisions](autocompression.md#decisions-before-merge).
 
-Discovery commands, `branch-points`, descriptive Python names, and `--json-errors`
-are also unreleased. A ledger contains run records and pathways; a branch point
+Discovery commands, `branch-points`, descriptive Python names, `run --from`, and
+`--json-errors` are also unreleased. A ledger contains run records and pathways; a branch point
 identifies terminal evidence for a variation. Existing JSON keys and stored IDs
 retain their legacy spellings. See the [naming guide](naming-migration.md).
 
@@ -54,7 +54,7 @@ Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --versi
 
 Every record has an identifier made of its kind and 32 hexadecimal characters, such as `chokepoint-447ca3002f0b4d7c9a1e5b6c7d8e9f01`. Output, JSON results, and records always carry the full identifier.
 
-`branch --from`, `compare --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `chokepoint-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run. The compatible `compress --atom` and `decompress --atom` selectors use the same resolution.
+`branch --from`, `compare --from`, `run --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `chokepoint-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run. The compatible `compress --atom` and `decompress --atom` selectors use the same resolution.
 
 Prefixes are for typing by hand. A script or agent already holds the full identifier and should pass it, because a prefix that is unique today can match a second record later.
 
@@ -63,6 +63,10 @@ Prefixes are for typing by hand. A script or agent already holds the full identi
 `--param KEY=VALUE` records a string label. The option is repeatable. Keys must begin with a letter or underscore and may then contain letters, digits, underscores, periods, or hyphens. Keys and values must not be empty. A key may appear only once in one invocation.
 
 A run records its pathway's effective parameters together with its own declarations. A run on a branch therefore carries the branch's parameters without repeating them; a `--param` on the run replaces the pathway's value for the same key in that run's record and adds any other key. A pathway's parameters are fixed when it is created.
+
+With `run --from`, `--param` instead supplies overrides for the new child pathway,
+which the run then inherits. The child inherits the source pathway's parameters;
+labels declared only on the source run are not inherited.
 
 Declared parameters do not configure the child process. Pass process arguments after `--` in `run`. To declare a value once and also pass it, use `run --substitute` and write `{KEY}` in the command, quoted in PowerShell.
 
@@ -175,7 +179,8 @@ ocura-oss init --root ./experiment --name "batch study"
 Run one trusted local command and record terminal evidence.
 
 ```text
-ocura-oss run [--root PATH] [--pathway ID] [--param KEY=VALUE] [--quiet] [--json]
+ocura-oss run [--root PATH] [--pathway ID | --from BRANCH_POINT_ID --reason TEXT]
+              [--param KEY=VALUE] [--quiet] [--json] [--json-errors]
               [--no-capture] [--mask-arg POSITION] [--substitute]
               [--no-compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
@@ -188,10 +193,13 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
 | `--root PATH` | path | current directory | Project root containing initialized state |
-| `--pathway ID` | pathway ID or unique prefix | ledger default | Pathway that receives the recorded run record |
-| `--param KEY=VALUE` | string pair | none | Declared run parameter, recorded with the pathway's parameters and replacing the pathway's value for the same key; repeatable |
+| `--pathway ID` | pathway ID or unique prefix | ledger default when `--from` is absent | Existing pathway that receives the run; mutually exclusive with `--from` |
+| `--from BRANCH_POINT_ID` | branch point ID or unique prefix | none | Create a child from this verified source and run there; requires `--reason` |
+| `--reason TEXT` | string | none | Nonblank explanation stored on the new child pathway; requires `--from` |
+| `--param KEY=VALUE` | string pair | none | Override or add a label for this run; with `--from`, set the new child pathway's labels instead; repeatable |
 | `--quiet` | flag | false | Retain output without mirroring it to the terminal |
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
+| `--json-errors` | flag | false | Emit JSON results and structured errors with execution state and known IDs |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
 | `--no-compress` | flag | false | Keep this run's captured logs raw after finalization |
 | `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original size for automatic gzip compression; logs must also save at least 10% |
@@ -200,6 +208,39 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--context` | flag | false | Record the platform and the git revision and dirty state at launch |
 | `--context-file PATH` | path | none | Record the size and SHA-256 of this file at launch; repeatable |
 | `COMMAND...` | argument tokens | required | Executable and arguments placed after `--` |
+
+#### Create and run a variation
+
+Use an explicit source branch point and reason to create a child pathway and
+record its first command in one call:
+
+```console
+ocura-oss run --from chokepoint-<id> --reason "increase batch" --param batch=4 --json-errors -- python train.py --batch 4
+```
+
+This verifies the source using the same checks as `branch`, creates the child,
+and runs the command there. It returns the usual run result, with `pathway_id`
+identifying the new child; there is no additional result type or JSON field.
+`--from` and `--pathway` cannot be combined. A source and a nonblank reason must
+be supplied together. Without either option, `run` still uses the default pathway.
+
+The child's parameters inherit from the source pathway and apply this call's
+`--param` overrides. Labels declared only on the source run are not copied. These
+parameters persist on the new pathway and are recorded by its runs; ordinary `run --pathway`
+parameters still affect only that individual run. Actual command inputs remain
+explicit unless `--substitute` is used.
+
+The operation is sequential. Later run validation or execution failure can leave
+the child in place, including an empty child if no run began. With `--json-errors`,
+known `pathway_id` and `source_branch_point_id` are included in `error.ids`;
+`error.execution` describes the workload, so `not_started` does not mean that no
+pathway was created. Inspect the retained attempts and runs before continuing
+explicitly with `run --pathway CHILD_ID`. Repeating `run --from` creates another
+child; it never resumes or retries the previous operation automatically. See
+[uncertain-execution recovery](automation.md#handle-uncertain-execution-without-duplicate-work).
+
+The separate `branch` followed by `run --pathway` remains available when planning
+a variation before executing it.
 
 #### Execution
 
@@ -557,6 +598,9 @@ Before writing, `branch` validates the branch point, its run record, its pathway
 The child inherits the parent's effective parameters and applies the supplied overrides. The operation records the parent pathway, source branch point, reason, creation time, and effective parameters.
 
 It does not copy a workspace, process, memory image, checkpoint, artifact, source run record, or external state. It does not run a command. Use `run --pathway CHILD_ID` to attach later evidence; that run records the child's effective parameters.
+
+To create the child and immediately run its first command, use
+[`run --from CHOKEPOINT_ID --reason TEXT`](#create-and-run-a-variation).
 
 #### JSON output
 

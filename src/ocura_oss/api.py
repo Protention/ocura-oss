@@ -9,7 +9,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ocura_oss import branching, logstorage, runner
+from ocura_oss import branching, logstorage, model, runner
 from ocura_oss.demo import DemoReport
 from ocura_oss.demo import run_demo as _run_demo
 from ocura_oss.errors import classify_os_error
@@ -49,6 +49,8 @@ def run(
     *,
     root: _Root = None,
     pathway_id: str | None = None,
+    source_branch_point_id: str | None = None,
+    reason: str | None = None,
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
@@ -82,29 +84,96 @@ def run(
     key. ``context=True`` records the
     platform and git state at launch; *context_files* names files whose size
     and digest are recorded. Neither is captured unless requested.
+
+    With ``source_branch_point_id`` and a nonblank ``reason``, create a child
+    pathway from that verified source, then run the command there. This conflicts
+    with ``pathway_id``. *parameters* supplies the child's overrides of the source
+    pathway's parameters; source-run-only labels are not inherited. The result is
+    the same ``RunExecution`` as an ordinary run. A later preparation or execution
+    failure can leave the child pathway in place. Its identity is retained in
+    ``StoreError.ids``; inspect it before deciding whether to continue explicitly
+    with ``pathway_id``. Repeating the combined call creates another child.
     """
+    known_ids: dict[str, str] = {}
     try:
+        if source_branch_point_id is None and reason is not None:
+            raise StoreError("reason requires source_branch_point_id", code="invalid_input")
+        if source_branch_point_id is not None:
+            if pathway_id is not None:
+                raise StoreError(
+                    "source_branch_point_id cannot be combined with pathway_id",
+                    code="invalid_input",
+                )
+            if not model.is_valid_id(source_branch_point_id, "chokepoint"):
+                raise StoreError(
+                    "source_branch_point_id must be a full branch point id", code="invalid_input"
+                )
+            if not isinstance(reason, str) or not reason.strip():
+                raise StoreError(
+                    "source_branch_point_id requires a nonblank reason", code="invalid_input"
+                )
+            if isinstance(command, (str, bytes)):
+                raise StoreError(
+                    "command must be a sequence of argument tokens, not a string",
+                    code="invalid_input",
+                )
+            try:
+                command = tuple(command)
+            except TypeError as exc:
+                raise StoreError(
+                    "command must be a sequence of argument tokens", code="invalid_input"
+                ) from exc
+            if not command or not all(isinstance(token, str) and token for token in command):
+                raise StoreError(
+                    "command must be a nonempty sequence of nonempty strings", code="invalid_input"
+                )
+            if parameters is not None:
+                if not isinstance(parameters, Mapping):
+                    raise StoreError("parameters must be a mapping", code="invalid_input")
+                parameters = model.validate_parameters(dict(parameters))
+            known_ids["source_branch_point_id"] = source_branch_point_id
         store = _required_store(root)
-        selected_pathway = pathway_id or store.load_den().default_pathway_id
+        if source_branch_point_id is None:
+            selected_pathway = pathway_id or store.load_den().default_pathway_id
+        else:
+            source, _source_run, parent = branching.load_verified_source(
+                store, source_branch_point_id
+            )
+            assert isinstance(reason, str)
+            child = branching.create_child_pathway(
+                store,
+                source_chokepoint=source,
+                source_pathway=parent,
+                reason=reason,
+                overrides={} if parameters is None else parameters,
+            )
+            selected_pathway = child.id
+            known_ids["pathway_id"] = child.id
     except StoreError as exc:
         exc.execution = "not_started"
+        exc.ids = {**known_ids, **exc.ids}
         raise
-    except OSError as exc:
-        raise StoreError(str(exc), code=classify_os_error(exc), execution="not_started") from exc
-    return runner.run_command(
-        store,
-        pathway_id=selected_pathway,
-        argv=command,
-        declared_parameters={} if parameters is None else parameters,
-        mirror=mirror,
-        capture=capture,
-        compress=compress,
-        compression_min_bytes=compression_min_bytes,
-        masked_arguments=masked_arguments,
-        substitute=substitute,
-        context=context,
-        context_files=context_files,
-    )
+    except (OSError, model.ValidationError) as exc:
+        code = classify_os_error(exc) if isinstance(exc, OSError) else "invalid_input"
+        raise StoreError(str(exc), code=code, execution="not_started", ids=known_ids) from exc
+    try:
+        return runner.run_command(
+            store,
+            pathway_id=selected_pathway,
+            argv=command,
+            declared_parameters={} if parameters is None else parameters,
+            mirror=mirror,
+            capture=capture,
+            compress=compress,
+            compression_min_bytes=compression_min_bytes,
+            masked_arguments=masked_arguments,
+            substitute=substitute,
+            context=context,
+            context_files=context_files,
+        )
+    except StoreError as exc:
+        exc.ids = {**known_ids, **exc.ids}
+        raise
 
 
 def branch(

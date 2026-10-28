@@ -4,6 +4,13 @@ This file records user-visible changes to Ocura OSS.
 
 ## 0.7.0.dev0 - Unreleased
 
+- Add `run --from BRANCH_POINT_ID --reason TEXT -- COMMAND` and Python
+  `run(..., source_branch_point_id=ID, reason=TEXT)` to create and execute a
+  variation in one call. Parameters override the new child pathway's inherited
+  labels; labels declared only on the source run are not copied. Existing run
+  results, defaults, and the separate `branch`/`run --pathway` workflow remain unchanged. A later
+  failure can leave the child in place; structured errors retain known child and
+  source IDs for inspection and explicit continuation without automatic retries.
 - Record a stop request arriving between process-polling timeouts as an interrupted
   run, stopping the command and retaining its evidence through the existing result
   interface.

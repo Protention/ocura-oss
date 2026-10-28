@@ -6,7 +6,8 @@ This draft builds on 0.6.0. Compression options, storage metadata, and conversio
 methods below are proposed branch behavior, absent from the released package.
 See [open design decisions](autocompression.md#decisions-before-merge).
 
-Descriptive names, discovery, and structured diagnostics are also unreleased.
+Descriptive names, discovery, structured diagnostics, and creating and running a
+variation in one call are also unreleased.
 New code uses `Ledger`, `RunRecord`, and `BranchPoint`, with `Pathway` unchanged.
 `Den`, `Atom`, and `Chokepoint` remain class aliases. Constructor field names and
 JSON serialization retain their existing spellings; descriptive properties are
@@ -72,6 +73,23 @@ assert comparison.state is ComparisonState.READY
 assert verify(root).ok
 ```
 
+To create and execute the variation in one call, replace the `branch()` and child
+`run()` calls above with:
+
+```python
+variation = run(
+    [sys.executable, "-c", "print('child')"],
+    root=root,
+    source_branch_point_id=baseline.branch_point.id,
+    reason="increase batch",
+    parameters={"batch": "4"},
+)
+```
+
+This returns the same `RunExecution`, with the new child ID in
+`variation.record.pathway_id`. Keep the two-step form when planning a variation
+before its command is ready. Neither form copies workspace files or process state.
+
 ## Workflow functions
 
 ### `ocura_oss.initialize`
@@ -125,6 +143,8 @@ run(
     *,
     root: os.PathLike[str] | str | None = None,
     pathway_id: str | None = None,
+    source_branch_point_id: str | None = None,
+    reason: str | None = None,
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
@@ -145,8 +165,10 @@ Run one trusted local command and record terminal evidence.
 | --- | --- | --- | --- |
 | `command` | sequence of strings | required | Executable followed by its argument tokens; a plain string or bytes object is rejected |
 | `root` | path-like, string, or None | `None` | Project root containing initialized state |
-| `pathway_id` | string or None | `None` | Pathway that receives the run record; `None` selects the ledger's default pathway |
-| `parameters` | mapping of string to string, or None | `None` | Labels stored on the run record together with the pathway's effective parameters, replacing the pathway's value for the same key; they are not passed to the child process |
+| `pathway_id` | string or None | `None` | Existing pathway that receives the run; cannot be combined with `source_branch_point_id`. When both are `None`, use the ledger's default pathway |
+| `source_branch_point_id` | string or None | `None` | Full ID of a source to verify, create a child pathway from, and run on; requires `reason` |
+| `reason` | string or None | `None` | Nonblank explanation stored on the new child pathway; requires `source_branch_point_id` |
+| `parameters` | mapping of string to string, or None | `None` | Add or replace labels for this run; with `source_branch_point_id`, set the new child's parameter overrides instead. Labels do not configure the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
 | `compress` | boolean | `True` | Consider only this run's finalized captured logs once for lossless gzip storage |
@@ -167,7 +189,7 @@ success). Compression warnings do not replace the command's actual outcome.
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | Command tokens, masked positions, placeholders, parameter data, state, pathway, or evidence persistence is invalid, or a context file cannot be read |
+| `StoreError` | Command tokens, source/reason selection, masked positions, placeholders, parameter data, state, pathway, source evidence, or evidence persistence is invalid, or a context file cannot be read |
 
 Child command failures and launch failures are returned as run record outcomes rather than raised as exceptions.
 
@@ -185,6 +207,22 @@ Launch categories include `executable_not_found`, `permission_denied`, `not_a_di
 `run()` never returns `Outcome.ABANDONED`. That outcome is written by [`recover()`](#ocura_ossrecover) for an attempt whose recording process stopped first.
 
 #### Notes
+
+With `source_branch_point_id`, a nonblank `reason` is required and `pathway_id`
+must be omitted. The source is verified with the same checks as `branch()` before
+creating the child. `parameters` overrides the source pathway's effective
+parameters on that new child; labels declared only on the source run are not
+inherited. The child's labels persist for later runs. Without `source_branch_point_id`,
+`parameters` continues to affect only this run's record.
+
+Creating the child and recording its command are sequential operations. Later run
+validation or execution failure can leave the child pathway in place, even with
+no run recorded. `StoreError.ids` retains the known child `pathway_id` and
+`source_branch_point_id`, alongside any known attempt or run IDs. Inspect
+`execution` and the retained evidence before deciding whether to continue with
+`run(..., pathway_id=child_id)`. `not_started` describes the workload and does not
+imply that no child was created. Repeating the combined call creates another
+child; no automatic retry occurs. See [recovery guidance](automation.md#handle-uncertain-execution-without-duplicate-work).
 
 The child runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment, while the inherited environment remains outside recorded state.
 
@@ -623,7 +661,7 @@ The full identifier. A full identifier is returned as given, without checking th
 | --- | --- |
 | `StoreError` | `value` is neither a full identifier nor a valid prefix, or the prefix matches no stored record or more than one |
 
-A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run`. The legacy `--atom` storage selector also remains supported.
+A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, `run --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run`. The legacy `--atom` storage selector also remains supported.
 
 ### `Store.load_den`
 

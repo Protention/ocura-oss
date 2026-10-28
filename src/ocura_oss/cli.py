@@ -12,7 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import NoReturn
 
-from ocura_oss import __version__, branching, demo, model, runner, store, supervise
+from ocura_oss import __version__, api, branching, demo, model, runner, store, supervise
 from ocura_oss.errors import ExecutionState, StoreError, classify_os_error, recovery_action
 from ocura_oss.model import ModelError
 
@@ -161,6 +161,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
             " directory, and captured stdout/stderr logs. Everything after -- is"
             " the command; put run's own options before it.\n"
             "Example: ocura-oss run --pathway ID --param batch=2 -- python script.py --batch 2\n"
+            "To create and run a variation in one step, use --from BRANCH_POINT_ID"
+            " --reason TEXT instead of --pathway. --param then sets the new"
+            " pathway's labels, inherited by its run.\n"
             "Parameters are recorded labels; pass actual inputs to COMMAND. A run"
             " also records its pathway's parameters, so a run on a branch does"
             " not repeat them.\n"
@@ -200,13 +203,27 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
+        "--from",
+        dest="source_branch_point",
+        default=None,
+        metavar="ID",
+        help="create a child from this verified branch point (full ID or unique prefix)",
+    )
+    run_parser.add_argument(
+        "--reason",
+        default=None,
+        metavar="TEXT",
+        help="reason for the new variation; required with --from",
+    )
+    run_parser.add_argument(
         "--param",
         action="append",
         default=[],
         metavar="KEY=VALUE",
         help=(
             "record a parameter label (not passed to COMMAND); replaces the"
-            " pathway's value for the same key; repeatable"
+            " pathway's value for the same key; with --from, sets the new"
+            " pathway's labels; repeatable"
         ),
     )
     run_parser.add_argument(
@@ -735,11 +752,22 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             raise model.ValidationError("unexpected tokens before --; put the command after --")
         state = _open_store(args.root)
         declared = _collect_parameters(args.param)
-        if args.pathway:
+        source_id = None
+        if args.source_branch_point is not None:
+            if args.pathway is not None:
+                raise model.ValidationError("--from conflicts with --pathway")
+            if args.reason is None or not args.reason.strip():
+                raise model.ValidationError("--from requires a nonempty --reason")
+            source_id = state.resolve_id(args.source_branch_point, "chokepoint")
+            pathway_id = None
+        elif args.reason is not None:
+            raise model.ValidationError("--reason requires --from")
+        elif args.pathway:
             pathway_id = state.resolve_id(args.pathway, "pathway")
         else:
             pathway_id = state.load_den().default_pathway_id
-        state.load_pathway(pathway_id)
+        if pathway_id is not None:
+            state.load_pathway(pathway_id)
     except StoreError as exc:
         exc.execution = "not_started"
         raise
@@ -751,11 +779,13 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
     if not args.json:
         print(f"recording under {state.state_dir}")
     with supervise.stop_requests_interrupt():
-        execution = runner.run_command(
-            state,
+        execution = api.run(
+            list(command_tail),
+            root=state.root,
             pathway_id=pathway_id,
-            argv=list(command_tail),
-            declared_parameters=declared,
+            source_branch_point_id=source_id,
+            reason=args.reason,
+            parameters=declared,
             mirror=mirror,
             capture=not args.no_capture,
             compress=not args.no_compress,
