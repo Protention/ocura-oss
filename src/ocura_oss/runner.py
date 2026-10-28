@@ -308,18 +308,19 @@ def _execute(
             thread.start()
 
     try:
-        while True:
+        while not finished:
             try:
                 return_code = process.wait(timeout=0.05)
                 finished = True
-                break
             except subprocess.TimeoutExpired:
                 continue
-            except KeyboardInterrupt:
-                interrupted = True
-                _stop_process(process)
-                return_code = None
-                break
+    except KeyboardInterrupt:
+        # Stop requests can arrive between wait calls or inside the timeout
+        # handler, not only while wait() itself is running.
+        interrupted = True
+        finished = False
+        _stop_process(process)
+        return_code = None
     finally:
         # First, so that nothing the command started still holds the output pipes.
         tether.release(command_finished=finished)

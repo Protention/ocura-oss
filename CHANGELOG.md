@@ -4,6 +4,9 @@ This file records user-visible changes to Ocura OSS.
 
 ## 0.7.0.dev0 - Unreleased
 
+- Record a stop request arriving between process-polling timeouts as an interrupted
+  run, stopping the command and retaining its evidence through the existing result
+  interface.
 - Add canonical public names `Ledger`, `RunRecord`, and `BranchPoint`; retain
   `Pathway` and the legacy `Den`, `Atom`, and `Chokepoint` class aliases. Add
   descriptive result properties, Store readers, source keywords, and the
