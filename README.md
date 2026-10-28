@@ -78,7 +78,7 @@ ocura-oss run --json-errors --from <chokepoint-id> --reason "try count 2" --para
 
 This creates a child pathway and runs there, returning the usual run result and
 its `pathway_id`. Its parameters override the source pathway's labels; labels
-declared only on the source run are not inherited. A later preparation failure can
+declared only on the source run are not inherited. A later storage failure can
 leave an empty child. Inspect the error's known IDs and execution state before
 continuing explicitly with `run --pathway CHILD_ID`; repeating `run --from`
 creates another child. See [recovery guidance](docs/automation.md#handle-uncertain-execution-without-duplicate-work).

@@ -17,7 +17,7 @@ from typing import BinaryIO
 
 from ocura_oss import logstorage, model, supervise
 from ocura_oss.context import capture as capture_context
-from ocura_oss.errors import ExecutionState, classify_os_error
+from ocura_oss.errors import ExecutionState, classify_os_error, with_execution
 from ocura_oss.store import (
     STATE_DIR_NAME,
     Store,
@@ -75,6 +75,7 @@ def run_command(
     substitute: bool = False,
     context: bool = False,
     context_files: Iterable[os.PathLike[str] | str] = (),
+    create_pathway: Callable[[], model.Pathway] | None = None,
     now: Callable[[], datetime.datetime] | None = None,
     monotonic: Callable[[], float] | None = None,
 ) -> RunExecution:
@@ -101,6 +102,8 @@ def run_command(
     label's value.
     ``context`` records the platform and git state at launch, and
     ``context_files`` records the size and digest of each named file.
+    ``create_pathway`` is called once these inputs are prepared, and the run is
+    recorded on the pathway it returns; ``pathway_id`` then supplies the labels.
 
     The attempt is journaled before the command launches. A Ctrl+C
     interruption stops the command and is recorded as an ``interrupted``
@@ -136,6 +139,9 @@ def run_command(
         except model.ValidationError as exc:
             raise StoreError(str(exc), code="invalid_input") from exc
         run_context = capture_context(store.root, environment=context, files=context_files)
+        if create_pathway is not None:
+            pathway = create_pathway()
+            ids["pathway_id"] = pathway.id
 
         atom_id = model.make_id("atom")
         chokepoint_id = model.make_id("chokepoint")
@@ -250,12 +256,7 @@ def run_command(
             store._remove_attempt(attempt.id)
         return RunExecution(atom=atom, chokepoint=chokepoint, storage_warnings=storage_warnings)
     except (StoreError, model.ValidationError, OSError) as exc:
-        if isinstance(exc, StoreError):
-            exc.execution = execution
-            exc.ids = {**ids, **exc.ids}
-            raise
-        code = classify_os_error(exc) if isinstance(exc, OSError) else "invalid_input"
-        raise StoreError(str(exc), code=code, execution=execution, ids=ids) from exc
+        raise with_execution(exc, execution, ids)  # noqa: B904 - it sets the cause
 
 
 def _execute(

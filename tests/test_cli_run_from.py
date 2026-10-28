@@ -117,32 +117,6 @@ class RunFromCliTests(unittest.TestCase):
                     (self.store.list_pathways(), self.store.list_runs(limit=None).runs), before
                 )
 
-    def test_late_validation_returns_child_for_deliberate_continuation(self):
-        code, text, _ = self.invoke(
-            "--from",
-            self.baseline.branch_point.id,
-            "--reason",
-            "x",
-            "--substitute",
-            "--json-errors",
-            "--",
-            sys.executable,
-            "-c",
-            "print('{missing}')",
-        )
-        self.assertEqual(code, 2)
-        error = json.loads(text)["error"]
-        self.assertEqual(error["execution"], "not_started")
-        self.assertEqual(error["ids"]["source_branch_point_id"], self.baseline.branch_point.id)
-        child_id = error["ids"]["pathway_id"]
-        self.assertEqual(len(self.store.list_runs(limit=None).runs), 1)
-        code, text, _ = self.invoke(
-            "--pathway", child_id, "--json", "--", sys.executable, "-c", "pass"
-        )
-        self.assertEqual(code, 0)
-        self.assertEqual(json.loads(text)["pathway_id"], child_id)
-        self.assertEqual(len(self.store.list_pathways()), 2)
-
     def test_recorded_failures_and_interruptions_keep_existing_exit_contract(self):
         cases = (
             ([sys.executable, "-c", "import sys; sys.exit(7)"], 1, "failed", False),
@@ -208,7 +182,6 @@ class RunFromCliTests(unittest.TestCase):
             self.assertEqual(error["ids"]["run_id"], "known-run")
             self.assertEqual(error["ids"]["branch_point_id"], "terminal-point")
             self.assertEqual(error["ids"]["source_branch_point_id"], source)
-            self.store.load_pathway(error["ids"]["pathway_id"])
 
     def test_combined_cli_appends_to_frozen_ledger_without_rewriting_old_evidence(self):
         fixture = Path(__file__).parent / "fixtures" / "ledger-0.5.0" / "state"

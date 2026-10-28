@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from pathlib import Path
 from ocura_oss import branching, logstorage, model, runner
 from ocura_oss.demo import DemoReport
 from ocura_oss.demo import run_demo as _run_demo
-from ocura_oss.errors import classify_os_error
+from ocura_oss.errors import with_execution
 from ocura_oss.model import ComparisonResult, Ledger, Pathway
 from ocura_oss.runner import RunExecution
 from ocura_oss.store import RecoveredAttempt, StateVerification, Store, StoreError
@@ -89,10 +90,11 @@ def run(
     pathway from that verified source, then run the command there. This conflicts
     with ``pathway_id``. *parameters* supplies the child's overrides of the source
     pathway's parameters; source-run-only labels are not inherited. The result is
-    the same ``RunExecution`` as an ordinary run. A later preparation or execution
-    failure can leave the child pathway in place. Its identity is retained in
-    ``StoreError.ids``; inspect it before deciding whether to continue explicitly
-    with ``pathway_id``. Repeating the combined call creates another child.
+    the same ``RunExecution`` as an ordinary run. The child is created only after
+    the run's inputs are checked. A later storage or execution failure can leave it
+    in place. Its identity is retained in ``StoreError.ids``; inspect it before
+    deciding whether to continue explicitly with ``pathway_id``. Repeating the
+    combined call creates another child.
     """
     known_ids: dict[str, str] = {}
     try:
@@ -133,29 +135,25 @@ def run(
                 parameters = model.validate_parameters(dict(parameters))
             known_ids["source_branch_point_id"] = source_branch_point_id
         store = _required_store(root)
+        create_child = None
         if source_branch_point_id is None:
             selected_pathway = pathway_id or store.load_den().default_pathway_id
         else:
             source, _source_run, parent = branching.load_verified_source(
                 store, source_branch_point_id
             )
+            selected_pathway = parent.id
             assert isinstance(reason, str)
-            child = branching.create_child_pathway(
+            create_child = functools.partial(
+                branching.create_child_pathway,
                 store,
                 source_chokepoint=source,
                 source_pathway=parent,
                 reason=reason,
                 overrides={} if parameters is None else parameters,
             )
-            selected_pathway = child.id
-            known_ids["pathway_id"] = child.id
-    except StoreError as exc:
-        exc.execution = "not_started"
-        exc.ids = {**known_ids, **exc.ids}
-        raise
-    except (OSError, model.ValidationError) as exc:
-        code = classify_os_error(exc) if isinstance(exc, OSError) else "invalid_input"
-        raise StoreError(str(exc), code=code, execution="not_started", ids=known_ids) from exc
+    except (StoreError, OSError, model.ValidationError) as exc:
+        raise with_execution(exc, "not_started", known_ids)  # noqa: B904 - it sets the cause
     try:
         return runner.run_command(
             store,
@@ -170,6 +168,7 @@ def run(
             substitute=substitute,
             context=context,
             context_files=context_files,
+            create_pathway=create_child,
         )
     except StoreError as exc:
         exc.ids = {**known_ids, **exc.ids}

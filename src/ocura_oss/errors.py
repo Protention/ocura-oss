@@ -8,6 +8,8 @@ import errno
 from collections.abc import Mapping
 from typing import Literal
 
+from ocura_oss.model import ValidationError
+
 ExecutionState = Literal["not_started", "recorded", "unknown", "not_applicable"]
 
 
@@ -31,6 +33,35 @@ class StoreError(Exception):
         self.execution = execution
         self.ids = dict(ids or {})
         self.recovery = recovery
+
+
+class _InvalidInput(StoreError, ValidationError):
+    """Invalid input that callers can still catch as ``ValidationError``."""
+
+
+class _StorageFailure(StoreError, OSError):
+    """An operating-system failure that callers can still catch as ``OSError``."""
+
+
+def with_execution(
+    error: StoreError | ValidationError | OSError,
+    execution: ExecutionState,
+    ids: Mapping[str, str],
+) -> StoreError:
+    """Add execution context; other errors are wrapped but keep their base type."""
+    if isinstance(error, StoreError):
+        wrapped = error
+    elif isinstance(error, OSError):
+        wrapped = _StorageFailure(*error.args, code=classify_os_error(error))
+        if error.filename is not None:
+            wrapped.filename = error.filename
+    else:
+        wrapped = _InvalidInput(*error.args, code="invalid_input")
+    if wrapped is not error:
+        wrapped.__cause__ = error
+    wrapped.execution = execution
+    wrapped.ids = {**ids, **wrapped.ids}
+    return wrapped
 
 
 def classify_os_error(error: OSError) -> str:

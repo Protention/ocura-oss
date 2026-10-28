@@ -77,7 +77,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return EXIT_INVALID
     json_errors = json_errors or args.json_errors
-    if json_errors:
+    # For logs, --json selects metadata instead of the log bytes.
+    if json_errors and args.command_name != "logs":
         args.json = True
     try:
         return _dispatch(args, command_tail)

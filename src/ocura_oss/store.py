@@ -143,9 +143,9 @@ class ListedRun:
 class RunPage:
     """Finalized runs ordered by terminal timestamp and ID; logs are not verified.
 
-    ``unfinished_attempts`` counts attempt files observed before the scan.
-    Live reads are not atomic: records can appear behind a cursor even when this
-    count is zero. Complete reconstruction requires settled, unchanged history.
+    ``unfinished_attempts`` counts runs not finished when the page was read.
+    They can finish behind its cursor, so a walk is complete only if every page
+    reported none.
     """
 
     runs: tuple[ListedRun, ...]
@@ -620,9 +620,9 @@ class Store:
 
         Every chokepoint record's envelope and fields are checked, and each
         returned run's records and lineage; log contents are not. *after* is a
-        page's ``next_after`` branch point. ``unfinished_attempts`` is an
-        observation, not a completeness guarantee for live reads. ``limit=None``
-        returns every match from this scan, without creating an atomic snapshot.
+        page's ``next_after`` branch point. A run unfinished when a page is read
+        can finish behind its cursor; that page counts it in
+        ``unfinished_attempts``. ``limit=None`` returns every match.
         """
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
@@ -640,8 +640,8 @@ class Store:
                 "chokepoints", after, "chokepoint", "chokepoint", model.chokepoint_from_payload
             )
             start = (boundary.created_at, boundary.id)
-        # Bound the scan by terminal timestamps. Neither this cutoff nor the
-        # attempt count makes record discovery atomic with concurrent writers.
+        # Read before the scan. A run this page could miss either has an attempt
+        # now or is stamped at or after now, which only later pages list.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
         candidates = (

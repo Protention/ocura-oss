@@ -12,8 +12,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ocura_oss import Store, cli, initialize
+from ocura_oss import Store, api, cli, initialize
 from ocura_oss.errors import StoreError, classify_os_error
+from ocura_oss.model import ValidationError
 
 
 class StructuredErrorTests(unittest.TestCase):
@@ -155,6 +156,21 @@ class StructuredErrorTests(unittest.TestCase):
         code, stdout, stderr = self.invoke("--json-errors", "runs", "--root", str(self.root))
         self.assertEqual((code, stderr), (0, ""))
         self.assertEqual(json.loads(stdout)["runs"], [])
+
+    def test_logs_still_print_bytes_with_the_opt_in(self):
+        run = api.run([sys.executable, "-c", "print('evidence')"], root=self.root)
+        stdout = io.TextIOWrapper(io.BytesIO())
+        arguments = ["--json-errors", "logs", run.record.id, "--offset", "1", "--length", "3"]
+        with contextlib.redirect_stdout(stdout):
+            code = cli.main([*arguments, "--root", str(self.root)])
+        stdout.flush()
+        self.assertEqual((code, stdout.buffer.getvalue()), (0, b"vid"))
+
+    def test_wrapped_run_errors_keep_their_earlier_type(self):
+        with self.assertRaises(ValidationError) as failure:
+            api.run([sys.executable, "-c", "pass"], root=self.root, parameters={"bad key": "x"})
+        self.assertIsInstance(failure.exception, StoreError)
+        self.assertEqual(failure.exception.execution, "not_started")
 
     def test_child_option_does_not_enable_recorder_json(self):
         code, stdout, stderr = self.invoke(

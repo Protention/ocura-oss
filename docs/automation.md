@@ -124,10 +124,9 @@ reports the newest run for each child pathway; use `runs` to retain earlier retr
 in an account of the experiment.
 
 For a large history, `runs --limit N --after ID` pages by branch point timestamp
-and ID. Live reads are observational: zero unfinished attempts on every page does
-not establish completeness. Stop writers and resolve unfinished attempts, then
-restart discovery without a cursor when complete reconstruction is required.
-A series of reads is not a transaction or a frozen snapshot.
+and ID. A walk in which every page reports `unfinished_attempts: 0` lists every
+run that finished before its last page; otherwise list again once those runs
+finish or `recover` closes them. A series of reads is not a transaction or a frozen snapshot.
 For a stable copy with no writers or unfinished attempts, pass `--archive` to read
 without creating ledger locks.
 
@@ -153,8 +152,8 @@ retry a deliberate new run. Wait for a running attempt. Recover an abandoned one
 only after its command has stopped; `recover` closes evidence and never restarts
 the workload. Ocura supplies no idempotency key or exactly-once execution guarantee.
 
-For a combined `run --from` call, creating the child happens before recording the
-command. A later validation failure can therefore leave an empty child even when
+A combined `run --from` call checks its input, creates the child, then records the
+command. A later storage failure can therefore leave an empty child even when
 `error.execution` is `not_started`. Structured errors preserve the known child
 `pathway_id` and `source_branch_point_id` in `error.ids`; Python exposes the same
 fields through `StoreError`. Inspect `pathways`, `runs --pathway CHILD_ID --all`,

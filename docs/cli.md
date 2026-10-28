@@ -80,7 +80,8 @@ Every command accepts `--json`. JSON mode writes one result document to standard
 
 Pass `--json-errors` before the command or among its options to opt into structured
 failures. This flag also enables normal JSON results, so it replaces `--json` for
-callers adopting this contract. Existing `--json` output and error behavior are
+callers adopting this contract. `logs` still prints log bytes; add `--json` there
+for metadata. Existing `--json` output and error behavior are
 unchanged. A failed workload that was successfully recorded still returns its
 normal run result and nonzero exit status; it is not a recorder error.
 
@@ -230,8 +231,9 @@ parameters persist on the new pathway and are recorded by its runs; ordinary `ru
 parameters still affect only that individual run. Actual command inputs remain
 explicit unless `--substitute` is used.
 
-The operation is sequential. Later run validation or execution failure can leave
-the child in place, including an empty child if no run began. With `--json-errors`,
+The run's input is checked before the child is created. A later storage or
+execution failure can leave the child in place, including an empty child if no run
+began. With `--json-errors`,
 known `pathway_id` and `source_branch_point_id` are included in `error.ids`;
 `error.execution` describes the workload, so `not_started` does not mean that no
 pathway was created. Inspect the retained attempts and runs before continuing
@@ -462,18 +464,13 @@ once, so walking a long history page by page repeats that scan, and `--all` does
 once.
 
 Each page reads the clock and counts unfinished attempts before it scans, and
-includes only terminal records timestamped before that reading. These reads are
-not an atomic snapshot: a record can become visible behind the cursor, where
-`--after` will not return it. `unfinished_attempts` is an observation of attempt
-files, not a completeness certificate; even zero on every page does not prove
-that a live walk found every run. Clock changes can also affect which records
-are visible to a page.
-
-For complete reconstruction, stop writers and resolve unfinished attempts, then
-restart discovery without `--after`; `--all` returns the matches from one scan.
-A page walk over unchanged, settled history is also stable. Use `--archive` for
-a stable copy with no writers or unfinished attempts. The caller is responsible
-for that stability; archive mode does not freeze a live ledger.
+lists only runs that finished before then; a run stamped with that same clock
+reading waits for a later page. A run still unfinished at that moment can finish
+behind the page's cursor, where `--after` will not return it.
+`unfinished_attempts` counts those runs, and `attempts` lists them. A walk in which
+every page reports `unfinished_attempts: 0` lists every run that finished before
+its last page. Otherwise, list again once they finish or `recover` closes them.
+This relies on the system clock not stepping backward.
 
 `show` selects one run record, validates its record and lineage, and returns `atom`,
 `pathway`, `chokepoint`, `children`, and

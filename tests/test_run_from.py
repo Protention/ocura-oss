@@ -203,32 +203,20 @@ class RunFromTests(unittest.TestCase):
         self.assertEqual(failed.exception.execution, "not_started")
         self.assertEqual(self.inventory(), before)
 
-    def test_later_preparation_failure_retains_child_for_explicit_continuation(self):
-        before = len(self.store.list_pathways())
-        records_before = len(self.store.list_atoms())
+    def test_invalid_run_input_does_not_create_a_child(self):
         command = [sys.executable, "-c", "import sys; print(sys.argv[1])", "{missing}"]
-        with self.assertRaises(StoreError) as failure:
-            self.run_from(command, parameters={"candidate": "yes"}, substitute=True)
-        error = failure.exception
-        self.assertEqual((error.code, error.execution), ("invalid_input", "not_started"))
-        self.assertEqual(set(error.ids), {"source_branch_point_id", "pathway_id"})
-        child = self.store.load_pathway(error.ids["pathway_id"])
-        self.assertEqual(child.source_branch_point_id, self.source_id)
-        self.assertEqual(len(self.store.list_pathways()), before + 1)
-        self.assertEqual(len(self.store.list_atoms()), records_before)
-        self.assertEqual(api.compare(self.source_id, root=self.root).state.value, "partial")
-        continued = api.run(
-            command,
-            root=self.root,
-            pathway_id=child.id,
-            parameters={"missing": "supplied"},
-            substitute=True,
-        )
-        self.assertEqual(continued.record.pathway_id, child.id)
-        self.assertEqual(self.store.read_verified_log(continued.record.id).strip(), b"supplied")
-        self.assertEqual(len(self.store.list_pathways()), before + 1)
-        self.assertEqual(len(self.store.list_atoms()), records_before + 1)
-        self.assertNotIn("missing", self.store.load_pathway(child.id).parameters)
+        before = self.inventory()
+        for options in (
+            {"substitute": True},
+            {"masked_arguments": [9]},
+            {"compression_min_bytes": -1},
+            {"context_files": ["absent.json"]},
+        ):
+            with self.subTest(options=options), self.assertRaises(StoreError) as failure:
+                self.run_from(command, parameters={"candidate": "yes"}, **options)
+            self.assertEqual(failure.exception.execution, "not_started")
+            self.assertEqual(set(failure.exception.ids), {"source_branch_point_id"})
+            self.assertEqual(self.inventory(), before)
 
     def test_failed_and_unlaunched_commands_return_normal_results(self):
         for command, outcome in (
@@ -276,6 +264,7 @@ class RunFromTests(unittest.TestCase):
                 error = failure.exception
                 self.assertEqual((error.code, error.execution), ("io_error", execution))
                 self.assertIsInstance(error.__cause__, OSError)
+                self.assertIsInstance(error, OSError)
                 self.assertEqual(
                     set(error.ids),
                     {"source_branch_point_id", "pathway_id", "run_id", "branch_point_id"},
@@ -312,7 +301,8 @@ class RunFromTests(unittest.TestCase):
         for key, value in options.items():
             if key != "parameters":
                 self.assertEqual(arguments[key], value)
-        child = self.store.load_pathway(arguments["pathway_id"])
+        self.assertEqual(arguments["pathway_id"], self.parent.id)
+        child = arguments["create_pathway"]()
         self.assertEqual(child.parameters["candidate"], "yes")
         self.assertEqual(child.source_branch_point_id, self.source_id)
 

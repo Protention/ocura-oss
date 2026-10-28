@@ -191,6 +191,9 @@ success). Compression warnings do not replace the command's actual outcome.
 | --- | --- |
 | `StoreError` | Command tokens, source/reason selection, masked positions, placeholders, parameter data, state, pathway, source evidence, or evidence persistence is invalid, or a context file cannot be read |
 
+A `StoreError` for invalid parameter data or an operating-system failure is also a
+`ValidationError` or `OSError`, the type `run()` raised for it before.
+
 Child command failures and launch failures are returned as run record outcomes rather than raised as exceptions.
 
 #### Outcome mapping
@@ -215,9 +218,8 @@ parameters on that new child; labels declared only on the source run are not
 inherited. The child's labels persist for later runs. Without `source_branch_point_id`,
 `parameters` continues to affect only this run's record.
 
-Creating the child and recording its command are sequential operations. Later run
-validation or execution failure can leave the child pathway in place, even with
-no run recorded. `StoreError.ids` retains the known child `pathway_id` and
+The child is created only after the run's input is checked. A later storage or
+execution failure can leave the child pathway in place, even with no run recorded. `StoreError.ids` retains the known child `pathway_id` and
 `source_branch_point_id`, alongside any known attempt or run IDs. Inspect
 `execution` and the retained evidence before deciding whether to continue with
 `run(..., pathway_id=child_id)`. `not_started` describes the workload and does not

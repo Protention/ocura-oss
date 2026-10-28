@@ -8,9 +8,10 @@ This file records user-visible changes to Ocura OSS.
   `run(..., source_branch_point_id=ID, reason=TEXT)` to create and execute a
   variation in one call. Parameters override the new child pathway's inherited
   labels; labels declared only on the source run are not copied. Existing run
-  results, defaults, and the separate `branch`/`run --pathway` workflow remain unchanged. A later
-  failure can leave the child in place; structured errors retain known child and
-  source IDs for inspection and explicit continuation without automatic retries.
+  results, defaults, and the separate `branch`/`run --pathway` workflow remain unchanged. Input
+  is checked before the child is created. A later storage or execution failure can
+  leave the child in place; structured errors retain known child and source IDs for
+  inspection and explicit continuation without automatic retries.
 - Record a stop request arriving between process-polling timeouts as an interrupted
   run, stopping the command and retaining its evidence through the existing result
   interface.
@@ -23,7 +24,8 @@ This file records user-visible changes to Ocura OSS.
 - Add opt-in `--json-errors` for JSON results and structured failures, including
   argument errors, stable error categories, known run IDs, execution state, and
   recovery guidance. Existing `--json` behavior and exit statuses remain unchanged.
-  Python `StoreError` exposes diagnostic fields too. A failure after launch directs
+  `logs` still prints log bytes. Python `StoreError` exposes diagnostic fields too;
+  `run()` errors that were `ValidationError` or `OSError` still are. A failure after launch directs
   callers to inspect retained attempts and runs before considering resubmission.
 - Add an executable history inspection example for a fresh caller with only a
   ledger root. It includes failed retries, empty variations, unfinished attempts,
@@ -40,9 +42,8 @@ This file records user-visible changes to Ocura OSS.
   record timestamp and ID, including failed retries, each with the `chokepoint_id`
   to branch from.
   Filter by pathway or outcome, page with `--limit` and `--after`, or list every
-  match with `--all`. Live pagination is observational: records can appear behind
-  a cursor even when no unfinished attempts are observed. Read settled history or
-  a stable archive when completeness is required.
+  match with `--all`. Each page counts the runs still unfinished, which can finish
+  behind its cursor; a walk whose pages count none lists every finished run.
 - Add `ocura-oss show` and `Store.inspect_run()`: one run with its pathway, terminal
   chokepoint, and the pathways branched from it. Command arguments are included
   only with `--command`. Neither command reads log contents.
