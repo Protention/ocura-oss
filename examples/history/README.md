@@ -25,6 +25,20 @@ The report states its verification scope. It does not perform whole-ledger verif
 or interpret workload metrics. Missing or inconsistent streams remain visible and
 make the command exit 2; they are never replaced with a successful result.
 
+Failures keep the existing `error` string and add an `error_details` object with
+`code`, `message`, `execution`, `ids`, and `recovery`. This applies both to an
+unavailable stream within a report and to a failure that prevents the report.
+Use these fields with the [CLI error contract](../../docs/cli.md#structured-errors-unreleased)
+instead of parsing English messages. Known ledger, run, branch point, and pathway
+IDs are retained when available; source error diagnostics take precedence.
+Raw operating-system errors are classified by type and error number. Invalid
+excerpt bounds produce `invalid_input`; parser errors retain normal argparse behavior.
+
+The report requests no workload execution, so ordinary read failures have
+`execution: "not_applicable"`. Source error execution states and explicit recovery
+hints remain intact. A recovery hint is guidance for the caller, not an action
+the example performs. Success reports and exit statuses are unchanged.
+
 Live reads are observations, not an atomic snapshot. Unfinished attempts stay
 visible, with guidance to inspect them and wait or recover as appropriate. An
 attempt seen before discovery may have finalized by the end of the report. The

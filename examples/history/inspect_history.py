@@ -6,10 +6,68 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import errno
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 from ocura_oss import OutputCapture, Store, StoreError
+
+
+def _error_details(
+    error: StoreError | OSError | ValueError, ids: dict[str, str] | None = None
+) -> dict:
+    """Use public diagnostics; keep the example independent of CLI internals."""
+    known_ids = dict(ids or {})
+    execution, recovery = "not_applicable", None
+    if isinstance(error, StoreError):
+        code, execution, recovery = error.code, error.execution, error.recovery
+        known_ids.update(error.ids)
+    elif isinstance(error, OSError):
+        denied = isinstance(error, PermissionError) or error.errno in (errno.EACCES, errno.EPERM)
+        code = "permission_denied" if denied else "io_error"
+    else:
+        code = "invalid_input"
+    if not recovery:
+        if execution == "unknown":
+            recovery = "inspect_attempts_and_runs"
+        elif execution == "recorded":
+            recovery = "inspect_recorded_run"
+        else:
+            # These defaults follow the documented CLI error contract. They are
+            # suggestions to a caller; this example performs none of the actions.
+            recovery = {
+                "invalid_input": "correct_input",
+                "state_not_found": "initialize_state",
+                "record_not_found": "select_record",
+                "ambiguous_id": "select_record",
+                "unsupported_schema": "use_supported_reader",
+                "integrity_error": "verify_state",
+                "permission_denied": "check_permissions",
+                "io_error": "check_storage",
+                "invalid_state": "verify_state",
+            }.get(code, "inspect_state")
+    return {
+        "code": code,
+        "message": str(error),
+        "execution": execution,
+        "ids": known_ids,
+        "recovery": recovery,
+    }
+
+
+@contextlib.contextmanager
+def _read_context(ids: dict[str, str]) -> Iterator[None]:
+    """Retain identities already obtained through public readers if a read fails."""
+    try:
+        yield
+    except StoreError as exc:
+        exc.ids = {**ids, **exc.ids}
+        raise
+    except OSError as exc:
+        details = _error_details(exc, ids)
+        raise StoreError(str(exc), code=details["code"], ids=details["ids"]) from exc
 
 
 def report(root: Path, *, archive: bool = False, snippet_bytes: int = 256) -> dict:
@@ -18,15 +76,24 @@ def report(root: Path, *, archive: bool = False, snippet_bytes: int = 256) -> di
         raise ValueError("snippet_bytes must be between 0 and 65536")
     store = Store(root, archive=archive)
     ledger = store.load_ledger()
-    before = store.list_attempts()
-    page = store.list_runs(limit=None)
-    pathways = store.list_pathways()
+    ledger_ids = {"ledger_id": ledger.id}
+    with _read_context(ledger_ids):
+        before = store.list_attempts()
+        page = store.list_runs(limit=None)
+        pathways = store.list_pathways()
     runs = []
     runs_by_pathway: dict[str, list[str]] = {}
     read_errors = 0
     checked_streams = 0
     for listed in page.runs:
-        record = store.load_run(listed.run.id)
+        record_ids = {
+            **ledger_ids,
+            "run_id": listed.run.id,
+            "branch_point_id": listed.branch_point_id,
+            "pathway_id": listed.run.pathway_id,
+        }
+        with _read_context(record_ids):
+            record = store.load_run(listed.run.id)
         runs_by_pathway.setdefault(record.pathway_id, []).append(record.id)
         evidence = []
         if record.output_capture is OutputCapture.FULL:
@@ -45,10 +112,15 @@ def report(root: Path, *, archive: bool = False, snippet_bytes: int = 256) -> di
                         run_id=record.id, stream=stream, offset=0, length=snippet_bytes
                     ) as source:
                         data = source.read()
-                except StoreError as exc:
+                except (StoreError, OSError) as exc:
                     read_errors += 1
                     evidence.append(
-                        {"reference": reference, "status": "unavailable", "error": str(exc)}
+                        {
+                            "reference": reference,
+                            "status": "unavailable",
+                            "error": str(exc),
+                            "error_details": _error_details(exc, record_ids),
+                        }
                     )
                     continue
                 checked_streams += 1
@@ -77,7 +149,8 @@ def report(root: Path, *, archive: bool = False, snippet_bytes: int = 256) -> di
                 "evidence": evidence,
             }
         )
-    after = store.list_attempts()
+    with _read_context(ledger_ids):
+        after = store.list_attempts()
     attempts = {
         attempt.id: {
             "run_id": attempt.id,
@@ -145,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = report(args.root, archive=args.archive, snippet_bytes=args.snippet_bytes)
     except (StoreError, OSError, ValueError) as exc:
-        print(json.dumps({"error": str(exc)}))
+        print(json.dumps({"error": str(exc), "error_details": _error_details(exc)}))
         return 2
     print(json.dumps(result, indent=2))
     return 2 if result["verification"]["stream_errors"] else 0
