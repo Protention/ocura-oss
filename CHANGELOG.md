@@ -4,6 +4,8 @@ This file records user-visible changes to Ocura OSS.
 
 ## 0.7.0.dev0 - Unreleased
 
+- Preserve both filenames and Windows error details when wrapping operating-system
+  failures, and accept indexing-only command sequences supported by earlier callers.
 - Add `run --from BRANCH_POINT_ID --reason TEXT -- COMMAND` and Python
   `run(..., source_branch_point_id=ID, reason=TEXT)` to create and execute a
   variation in one call. Parameters override the new child pathway's inherited

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import errno
+import sys
 from collections.abc import Mapping
 from typing import Literal
 
@@ -55,6 +56,10 @@ def with_execution(
         wrapped = _StorageFailure(*error.args, code=classify_os_error(error))
         if error.filename is not None:
             wrapped.filename = error.filename
+        if error.filename2 is not None:
+            wrapped.filename2 = error.filename2
+        if sys.platform == "win32" and error.winerror is not None:
+            wrapped.winerror = error.winerror
     else:
         wrapped = _InvalidInput(*error.args, code="invalid_input")
     if wrapped is not error:

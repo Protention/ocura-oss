@@ -227,6 +227,72 @@ class StructuredErrorTests(unittest.TestCase):
                 self.assertEqual((code, result["code"]), (2, expected))
                 self.assertEqual(result["execution"], "unknown")
 
+    def test_wrapped_os_failure_preserves_message_and_os_details(self):
+        originals = [
+            OSError(errno.EIO, "cannot write"),
+            OSError(errno.EIO, "cannot read", "only.log"),
+            OSError(
+                errno.EXDEV,
+                "cannot replace",
+                "source.tmp",
+                17 if sys.platform == "win32" else None,
+                "record.json",
+            ),
+        ]
+        if sys.platform == "win32":
+            originals.append(
+                OSError(errno.EACCES, "file is in use", "source.tmp", 32, "record.json")
+            )
+        for original in originals:
+            with self.subTest(original=original):
+                with (
+                    patch.object(Store, "_save_atom", side_effect=original),
+                    self.assertRaises(StoreError) as failure,
+                ):
+                    api.run([sys.executable, "-c", "pass"], root=self.root)
+                error = failure.exception
+                self.assertIsInstance(error, StoreError)
+                self.assertIsInstance(error, OSError)
+                self.assertIs(error.__cause__, original)
+                self.assertEqual(error.args, original.args)
+                self.assertEqual(str(error), str(original))
+                self.assertEqual(error.errno, original.errno)
+                self.assertEqual(error.strerror, original.strerror)
+                self.assertEqual(error.filename, original.filename)
+                self.assertEqual(error.filename2, original.filename2)
+                if sys.platform == "win32" and hasattr(original, "winerror"):
+                    self.assertEqual(error.winerror, original.winerror)
+                self.assertEqual(error.code, classify_os_error(original))
+                self.assertEqual(error.execution, "unknown")
+                self.assertEqual(set(error.ids), {"run_id", "branch_point_id", "pathway_id"})
+
+    def test_run_error_json_keeps_the_original_two_path_os_message(self):
+        original = OSError(
+            errno.EXDEV,
+            "cannot replace",
+            "source.tmp",
+            17 if sys.platform == "win32" else None,
+            "record.json",
+        )
+        with patch.object(Store, "_save_atom", side_effect=original):
+            code, stdout, stderr = self.invoke(
+                "run",
+                "--root",
+                str(self.root),
+                "--json-errors",
+                "--",
+                sys.executable,
+                "-c",
+                "pass",
+            )
+        error = json.loads(stdout)["error"]
+        self.assertEqual((code, error["code"]), (2, "io_error"))
+        self.assertEqual(error["message"], str(original))
+        self.assertEqual(stderr, f"error: {original}\n")
+        self.assertEqual(error["execution"], "unknown")
+        self.assertEqual(error["recovery"], "inspect_attempts_and_runs")
+        self.assertEqual(set(error["ids"]), {"run_id", "branch_point_id", "pathway_id"})
+
     def test_finalization_failure_reports_known_ids_without_inviting_rerun(self):
         for method, execution, recovery in (
             ("_save_chokepoint", "unknown", "inspect_attempts_and_runs"),
