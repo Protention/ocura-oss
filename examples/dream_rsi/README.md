@@ -132,8 +132,9 @@ recovers a run. If a storage exception leaves uncertain execution, inspect the
 exception's known IDs and retained state rather than blindly repeating the
 combined call. The example has no automatic retry or resume.
 
-For a settled copy with no writers or unfinished attempts, use
-`report --root COPY --archive` to avoid temporary log locks as well. Archive mode
+For a settled root with no writers or unfinished attempts, add `--archive` to
+avoid temporary log locks. If the root moved, also provide `--original-root` as
+described below. Archive mode
 does not create a snapshot or repair unfinished work. When a storage error can
 be retained in the completion record, the report preserves its `error_details`
 (code, execution state, known IDs, and recovery hint) alongside the existing text.
@@ -147,7 +148,7 @@ alongside that converted ledger before reconstructing an RSI report. Do not
 replace historical source/checkpoint digests with today's values. The curated
 `evidence-summary.json` is not a ledger and cannot be migrated into one.
 
-Historical checkpoint results contain absolute paths. If the complete experiment
+Checkpoint results contain absolute paths. If the complete experiment
 has moved, supply its exact former project root explicitly when reporting:
 
 ```console
@@ -160,6 +161,8 @@ guess filenames, or rewrite recorded JSON. Destination containment and checkpoin
 digests are still checked. Omit it when the experiment remains in its original
 location; the retained manifest does not record an original root that can be
 used to infer this mapping safely.
+Use the resolved root spelling in the recorded checkpoint paths, not a symlink
+alias for that directory. The reader does not consult the original filesystem.
 
 ## Resource limits
 

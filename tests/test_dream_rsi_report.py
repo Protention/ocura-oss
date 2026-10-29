@@ -117,7 +117,9 @@ class ReportIntegrityTests(unittest.TestCase):
             }
             with self.assertRaisesRegex(ValueError, "escapes"):
                 rsi_report.build_report(copied, archive=True)
-            restored = rsi_report.build_report(copied, archive=True, original_root=self.root)
+            # The controller records resolved paths (macOS /var may alias /private/var).
+            original_root = self.root.resolve()
+            restored = rsi_report.build_report(copied, archive=True, original_root=original_root)
             self.assertEqual(restored, {**self.baseline, "root": str(copied.resolve())})
             self.assertEqual(
                 {p.relative_to(copied): p.read_bytes() for p in copied.rglob("*") if p.is_file()},
@@ -126,7 +128,7 @@ class ReportIntegrityTests(unittest.TestCase):
             checkpoint = next((copied / "checkpoints").iterdir())
             checkpoint.write_bytes(checkpoint.read_bytes() + b"changed")
             with self.assertRaisesRegex(ValueError, "checkpoint digest mismatch"):
-                rsi_report.build_report(copied, archive=True, original_root=self.root)
+                rsi_report.build_report(copied, archive=True, original_root=original_root)
 
     def test_frozen_agent_request_and_result_are_checked(self):
         with self.assertRaisesRegex(ValueError, "agent request.*frozen"):
