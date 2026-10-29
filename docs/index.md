@@ -157,6 +157,22 @@ intact. It stops there on purpose:
 Ocura OSS sits between these: more structure than loose log files, and far less to
 adopt than a tracking platform.
 
+## Development example: explain a fix
+
+The [CI-report example](../examples/ci_report/README.md) records a failing baseline,
+the reason for a correction, and the passing result. Its report reconstructs the
+history from verified logs without running tests again. It needs only Python and
+this unreleased 0.7 checkout:
+
+```console
+python examples/ci_report/workflow.py run --root ./ci-report-demo
+python examples/ci_report/workflow.py report --root ./ci-report-demo
+```
+
+The example owns the retained source versions and fixture. Ocura records execution
+and lineage; it does not snapshot the workspace or infer the developer's reasoning.
+See [use cases](use-cases.md) for development, training, and experimental replay.
+
 ## Autoregressive example: PyTorch, JAX, and Ray
 
 The [autoregressive example](../examples/autoregressive/README.md) trains a small

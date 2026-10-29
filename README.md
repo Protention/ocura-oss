@@ -143,9 +143,26 @@ intact. It stops there on purpose:
 Ocura OSS sits between these: more structure than loose log files, and far less to
 adopt than a tracking platform.
 
+## Development example: explain a fix
+
+The [CI-report example](examples/ci_report/README.md) turns a failing JSONL job
+reporter into a working one. It records both test runs and the reason for the
+change, then reconstructs the result from verified evidence without running the
+tests again. It uses only Python and this unreleased 0.7 checkout.
+
+```console
+python examples/ci_report/workflow.py run --root ./ci-report-demo
+python examples/ci_report/workflow.py report --root ./ci-report-demo
+```
+
+The example retains its own source versions and input fixture; Ocura supplies the
+run records, lineage, reasons, and verified logs. This is a reproducible development
+walkthrough that a person or an agent can follow. See the [use cases](docs/use-cases.md)
+for the development, training, and experimental replay workflows.
+
 ## Autoregressive example: PyTorch, JAX, and Ray
 
-The [autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md) trains a small
+The [autoregressive example](examples/autoregressive/README.md) trains a small
 character-level next-token model on an included text corpus. Choose PyTorch or
 JAX, run a baseline and a longer-training variant, then reconstruct the comparison
 from saved evidence. An optional Ray Core executor runs either backend as a local
