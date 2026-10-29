@@ -8,7 +8,7 @@ import errno
 from collections.abc import Mapping
 from typing import Literal
 
-from ocura_oss.model import ValidationError
+from ocura_oss.model import ModelError, ValidationError
 
 ExecutionState = Literal["not_started", "recorded", "unknown", "not_applicable"]
 
@@ -44,7 +44,7 @@ class _StorageFailure(StoreError, OSError):
 
 
 def with_execution(
-    error: StoreError | ValidationError | OSError,
+    error: StoreError | ModelError | OSError,
     execution: ExecutionState,
     ids: Mapping[str, str],
 ) -> StoreError:

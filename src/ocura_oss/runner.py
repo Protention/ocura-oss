@@ -124,7 +124,7 @@ def run_command(
             raise StoreError(
                 "command must be a sequence of argument tokens, not a string", code="invalid_input"
             )
-        tokens = tuple(argv)
+        tokens = tuple(argv) if isinstance(argv, Iterable) else ()
         if not tokens or not all(isinstance(token, str) and token for token in tokens):
             raise StoreError(
                 "command must be a nonempty sequence of nonempty strings", code="invalid_input"

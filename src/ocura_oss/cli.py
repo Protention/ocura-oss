@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from ocura_oss import __version__, api, branching, demo, model, runner, store, supervise
-from ocura_oss.errors import ExecutionState, StoreError, classify_os_error, recovery_action
+from ocura_oss.errors import ExecutionState, StoreError, recovery_action, with_execution
 from ocura_oss.model import ModelError
 
 EXIT_OK = 0
@@ -80,38 +80,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     # For logs, --json selects metadata instead of the log bytes.
     if json_errors and args.command_name != "logs":
         args.json = True
+    retained = False
     try:
         return _dispatch(args, command_tail)
-    except StoreError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        if json_errors:
-            _emit_error(exc, command=args.command_name)
-        return EXIT_INVALID
-    except ModelError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        if json_errors:
-            _emit_error(StoreError(str(exc), code="invalid_input"), command=args.command_name)
-        return EXIT_INVALID
+    except (StoreError, ModelError, OSError) as exc:
+        error = exc if isinstance(exc, StoreError) else with_execution(exc, "not_applicable", {})
     except RecursionError:
         message = "state lineage is too deeply nested to verify; the state directory may be corrupt"
-        print(f"error: {message}", file=sys.stderr)
-        if json_errors:
-            _emit_error(StoreError(message, code="integrity_error"), command=args.command_name)
-        return EXIT_INVALID
+        error = StoreError(message, code="integrity_error")
     except demo.DemoError as exc:
-        message = f"demo step '{exc.step}' failed: {exc.message}"
-        print(f"error: {message}", file=sys.stderr)
+        error = StoreError(f"demo step '{exc.step}' failed: {exc.message}", execution="unknown")
+        retained = True
+    print(f"error: {error}", file=sys.stderr)
+    if retained:
         print("the demo directory was retained", file=sys.stderr)
-        if json_errors:
-            _emit_error(StoreError(message, execution="unknown"))
-        return EXIT_INVALID
-    except OSError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        if json_errors:
-            _emit_error(
-                StoreError(str(exc), code=classify_os_error(exc)), command=args.command_name
-            )
-        return EXIT_INVALID
+    if json_errors:
+        _emit_error(error, command=args.command_name)
+    return EXIT_INVALID
 
 
 def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
@@ -769,13 +754,8 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             pathway_id = state.load_den().default_pathway_id
         if pathway_id is not None:
             state.load_pathway(pathway_id)
-    except StoreError as exc:
-        exc.execution = "not_started"
-        raise
-    except ModelError as exc:
-        raise StoreError(str(exc), code="invalid_input", execution="not_started") from exc
-    except OSError as exc:
-        raise StoreError(str(exc), code=classify_os_error(exc), execution="not_started") from exc
+    except (StoreError, ModelError, OSError) as exc:
+        raise with_execution(exc, "not_started", {})  # noqa: B904 - it sets the cause
     mirror = not (args.quiet or args.json)
     if not args.json:
         print(f"recording under {state.state_dir}")
@@ -903,9 +883,9 @@ def _chokepoints(args: argparse.Namespace) -> int:
     if args.json:
         _emit_json({"chokepoints": [item.to_dict() for item in summaries]})
         return EXIT_OK
+    run_label = "atom" if args.command_name == "chokepoints" else "run"
     for item in summaries:
         branchable = "yes" if item.branchable else "no"
-        run_label = "atom" if args.command_name == "chokepoints" else "run"
         print(
             f"{item.created_at}  {item.id}  pathway={item.pathway_id}"
             f"  {run_label}={item.atom_id}  outcome={item.outcome.value}"

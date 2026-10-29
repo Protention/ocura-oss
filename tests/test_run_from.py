@@ -127,16 +127,14 @@ class RunFromTests(unittest.TestCase):
         for command, arguments in cases:
             with (
                 self.subTest(command=command, arguments=arguments),
-                patch("ocura_oss.api.runner.run_command") as execute,
+                self.assertRaises(StoreError) as failed,
             ):
-                with self.assertRaises(StoreError) as failed:
-                    api.run(command, root=self.root, **arguments)
-                self.assertEqual(
-                    (failed.exception.code, failed.exception.execution),
-                    ("invalid_input", "not_started"),
-                )
-                execute.assert_not_called()
-                self.assertEqual(self.inventory(), before)
+                api.run(command, root=self.root, **arguments)
+            self.assertEqual(
+                (failed.exception.code, failed.exception.execution),
+                ("invalid_input", "not_started"),
+            )
+            self.assertEqual(self.inventory(), before)
 
     def test_custom_parameter_mapping_is_used_by_child_and_run(self):
         parameters = UserDict({"changed": "custom mapping", "added": "yes"})
@@ -296,7 +294,7 @@ class RunFromTests(unittest.TestCase):
         self.assertIs(result, sentinel.execution)
         execute.assert_called_once()
         arguments = execute.call_args.kwargs
-        self.assertEqual(arguments["argv"], tuple(command))
+        self.assertEqual(arguments["argv"], command)
         self.assertEqual(arguments["declared_parameters"], options["parameters"])
         for key, value in options.items():
             if key != "parameters":

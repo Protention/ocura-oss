@@ -97,6 +97,8 @@ def run(
     combined call creates another child.
     """
     known_ids: dict[str, str] = {}
+    if isinstance(parameters, Mapping):
+        parameters = dict(parameters)
     try:
         if source_branch_point_id is None and reason is not None:
             raise StoreError("reason requires source_branch_point_id", code="invalid_input")
@@ -114,25 +116,6 @@ def run(
                 raise StoreError(
                     "source_branch_point_id requires a nonblank reason", code="invalid_input"
                 )
-            if isinstance(command, (str, bytes)):
-                raise StoreError(
-                    "command must be a sequence of argument tokens, not a string",
-                    code="invalid_input",
-                )
-            try:
-                command = tuple(command)
-            except TypeError as exc:
-                raise StoreError(
-                    "command must be a sequence of argument tokens", code="invalid_input"
-                ) from exc
-            if not command or not all(isinstance(token, str) and token for token in command):
-                raise StoreError(
-                    "command must be a nonempty sequence of nonempty strings", code="invalid_input"
-                )
-            if parameters is not None:
-                if not isinstance(parameters, Mapping):
-                    raise StoreError("parameters must be a mapping", code="invalid_input")
-                parameters = model.validate_parameters(dict(parameters))
             known_ids["source_branch_point_id"] = source_branch_point_id
         store = _required_store(root)
         create_child = None
