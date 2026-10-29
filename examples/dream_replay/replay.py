@@ -17,12 +17,12 @@ class CoverageError(ValueError):
     """A requested historical continuation was never recorded."""
 
 
-def load_history(root: Path) -> dict:
-    store = Store(root)
+def load_history(root: Path, *, archive: bool = False) -> dict:
+    store = Store(root, archive=archive)
     checked = store.verify_state()
     if not checked.ok:
         raise StoreError(f"verification failed: {checked.problems}")
-    atoms = store.list_atoms()
+    atoms = store.list_run_records()
     roots = [a for a in atoms if a.declared_parameters.get("kind") == "manifest"]
     if len(roots) != 1:
         raise ValueError("expected exactly one experiment manifest")
@@ -57,9 +57,9 @@ def load_history(root: Path) -> dict:
         if key in nodes:
             raise ValueError("duplicate recipe/quantum")
         pathway = store.load_pathway(atom.pathway_id)
-        if not pathway.source_chokepoint_id:
+        if not pathway.source_branch_point_id:
             raise ValueError("segment has no explicit parent")
-        parent = store.load_chokepoint(pathway.source_chokepoint_id).atom_id
+        parent = store.load_branch_point(pathway.source_branch_point_id).run_id
         result = None
         if atom.outcome.value == "passed":
             result = json.loads(store.read_verified_log(atom.id))
@@ -122,7 +122,7 @@ def load_history(root: Path) -> dict:
     tests = []
     for atom in final_tests:
         pathway = store.load_pathway(atom.pathway_id)
-        parent = store.load_chokepoint(pathway.source_chokepoint_id).atom_id
+        parent = store.load_branch_point(pathway.source_branch_point_id).run_id
         if parent not in by_atom or not by_atom[parent]["result"]:
             raise ValueError("final test has no successful training parent")
         if parent != winner["atom_id"]:

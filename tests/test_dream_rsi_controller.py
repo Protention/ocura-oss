@@ -13,6 +13,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from ocura_oss import StoreError
+
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "dream_rsi"
 sys.path.insert(0, str(EXAMPLE))
 spec = importlib.util.spec_from_file_location(
@@ -313,6 +315,32 @@ class ControllerIntegrationTests(unittest.TestCase):
         self.assertEqual(controller.calls, [])
         self.assertEqual(controller.agent_calls, 0)
         self.assertEqual(controller.store.verify_state().problems, ())
+
+    def test_storage_failure_preserves_execution_uncertainty_without_retry(self):
+        controller = FixtureController(arguments(self.root))
+        failure = StoreError(
+            "recording interrupted",
+            code="io_error",
+            execution="unknown",
+            ids={"source_branch_point_id": controller.anchor.branch_point.id},
+            recovery="inspect_attempts_and_runs",
+        )
+        with patch.object(controller, "collect", side_effect=failure) as collect:
+            report = controller.execute()
+        collect.assert_called_once()
+        self.assertEqual(controller.calls, [])
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["reason"], "recording interrupted")
+        self.assertEqual(
+            report["error_details"],
+            {
+                "code": "io_error",
+                "execution": "unknown",
+                "ids": failure.ids,
+                "recovery": "inspect_attempts_and_runs",
+            },
+        )
+        self.assertTrue(controller.store.verify_state().ok)
 
     def test_invalid_schedule_is_retained_and_repaired_from_last_checkpoint(self):
         controller = FixtureController(arguments(self.root), first_failure="source")

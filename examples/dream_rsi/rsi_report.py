@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from rsi_core import choose_policy, evaluate_policy, observation, validate_world
 from rsi_io import checked_json, digest
@@ -13,27 +13,41 @@ from rsi_io import checked_json, digest
 from ocura_oss import Store
 
 
-def contained(root, path):
+def contained(root, path, original_root=None):
+    if original_root is not None:
+        path_type = (
+            PureWindowsPath if PureWindowsPath(str(original_root)).is_absolute() else PurePosixPath
+        )
+        original = path_type(original_root)
+        if not original.is_absolute():
+            raise ValueError("original root must be an absolute recorded project path")
+        recorded = path_type(path)
+        if recorded.is_absolute():
+            try:
+                path = Path(*recorded.relative_to(original).parts)
+            except ValueError as exc:
+                raise ValueError("artifact path is outside the specified original root") from exc
     result = (root / path).resolve()
     if not result.is_relative_to(root):
         raise ValueError("artifact path escapes the experiment root")
     return result
 
 
-def build_report(root):
+def build_report(root, *, archive=False, original_root=None):
     root = Path(root).resolve()
-    store = Store(root)
+    store = Store(root, archive=archive)
     verification = store.verify_state()
     if not verification.ok:
         raise ValueError(f"Ocura verification failed: {verification.problems}")
-    atoms = {a.id: a for a in store.list_atoms()}
+    atoms = {a.id: a for a in store.list_run_records()}
     records, requests = {}, {}
     for identity, atom in atoms.items():
         labels = atom.declared_parameters
         for prefix in ("job", "artifact"):
             if f"{prefix}_file" in labels:
                 value = checked_json(
-                    contained(root, labels[f"{prefix}_file"]), labels[f"{prefix}_sha256"]
+                    contained(root, labels[f"{prefix}_file"], original_root),
+                    labels[f"{prefix}_sha256"],
                 )
                 if prefix == "artifact":
                     requests[identity] = value
@@ -116,7 +130,7 @@ def build_report(root):
         contracts[name] = contract
 
     def checkpoint(result):
-        path = contained(root, result["checkpoint"])
+        path = contained(root, result["checkpoint"], original_root)
         if path not in checked_checkpoints:
             checked_checkpoints[path] = digest(path.read_bytes())
         if checked_checkpoints[path] != result["checkpoint_sha256"]:
@@ -131,8 +145,8 @@ def build_report(root):
     def source_parent(identity):
         pathway = store.load_pathway(atoms[identity].pathway_id)
         return (
-            store.load_chokepoint(pathway.source_chokepoint_id).atom_id
-            if pathway.source_chokepoint_id
+            store.load_branch_point(pathway.source_branch_point_id).run_id
+            if pathway.source_branch_point_id
             else None
         )
 
@@ -370,6 +384,7 @@ def build_report(root):
     return {
         "status": completion["status"],
         "reason": completion.get("reason"),
+        **({"error_details": completion["error_details"]} if "error_details" in completion else {}),
         "root": str(root),
         "model": manifest["model"],
         "profile": manifest["profile"],

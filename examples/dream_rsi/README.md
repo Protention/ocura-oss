@@ -1,5 +1,11 @@
 # Dream-RSI training adaptation with Ocura OSS
 
+Version 0.7.0.dev0.
+
+This experimental branch targets the unreleased 0.7 package. The pilot and its
+published evidence summary remain historical 0.4.0 results; updating the adapter
+does not revalidate those results or establish a policy benefit.
+
 This example studies implementation support: how Ocura OSS helps developers build
 and inspect a Dream-RSI workflow. A small, bounded CPU training experiment exercises
 the integration; it does not establish better performance or resource savings.
@@ -24,13 +30,13 @@ Both agent requests and training jobs pass through `record_command()` in
 | Operation | Package support |
 | --- | --- |
 | Record a command and its outcome | `run()` retains arguments, status, timing, stdout, and stderr. |
-| Link an attempt to its predecessor | `branch()` records the parent execution. |
+| Link and execute an attempt | `run(..., source_branch_point_id=..., reason=...)` creates the child and records its command. |
 | Read recorded output | `Store.read_verified_log()` checks byte counts and SHA-256 before parsing. |
 | Reconstruct a report | `Store.verify_state()` and verified logs supply checked inputs to [rsi_report.py](rsi_report.py). |
 
 The example owns agent access, checkpoints, artifact digests, resource limits,
 replay, scoring, and policy selection. Ocura lineage identifies execution
-relationships; it does not restore model state. The example uses Ocura OSS 0.4.0
+relationships; it does not restore model state. The example uses Ocura OSS 0.7.0.dev0
 and stays outside the package distributions and runtime dependencies.
 
 ## Setup
@@ -39,15 +45,19 @@ Use a repository checkout and an activated Python 3.12 virtual environment.
 The live runner supports Windows and Linux host-capacity checks. Other operating
 systems defer when that check is unavailable. Docker and a GPU are not required.
 
-Install the released package from the repository root:
+Install this development checkout from the repository root:
 
 ```console
-python -m pip install ocura-oss==0.4.0
+python -m pip install .
 python -m unittest discover -s tests -p "test_dream_rsi_*.py" -v
 ```
 
 These default tests use synthetic agents and evaluators: no remote calls, dataset
 downloads, or training. The optional real training check is skipped by default.
+For a built wheel, install `PATH_TO_WHEEL` instead and separately copy both
+`examples/dream_rsi` and `examples/dream_replay` from this revision. The scripts
+are repository-only; the wheel contains the package, not these examples. Published
+0.6 does not provide the combined call used by the updated adapter.
 Reports and replay need only Ocura; training additionally needs CPU PyTorch:
 
 ```console
@@ -59,7 +69,7 @@ Preparation explicitly downloads and verifies the pinned nanoGPT model definitio
 its MIT license, and about 1.1 MB of Tiny Shakespeare text. Reuse an existing
 prepared directory instead of preparing it again. The [source revisions and
 existing-file option](../dream_replay/README.md#setup) are shared with the fixed-recipe
-example. The example's own code is covered by the repository's [MPL-2.0 license](../../LICENSE);
+example. The example's own code retains its [MPL-2.0 license](../dream_replay/LICENSE);
 downloaded inputs retain their upstream provenance and are not redistributed here.
 
 ## Run
@@ -100,6 +110,56 @@ directory for inspection and use another directory for the next run. Commands em
 JSON. Reporting reconstructs the retained work without invoking an agent or
 importing PyTorch; keep the complete run directory, including requests and
 checkpoints. Training also needs the prepared inputs.
+
+## Inspect intention and failures
+
+The controller uses the 0.7 `record` and `branch_point` properties and public
+`Store.load_run()`, `Store.list_run_records()`, and `Store.load_branch_point()`
+readers. Existing report keys such as `root_atom`, `agent_atom`, `terminal_atom`,
+and `atom_id` keep their names and values for callers and saved reports. Those
+values are run IDs; a branch source uses a branch-point ID (`chokepoint-...`).
+
+```console
+ocura-oss runs --root .tmp-tests/dream-rsi-smoke --all --json
+ocura-oss show RUN_ID --root .tmp-tests/dream-rsi-smoke --command --json
+ocura-oss logs RUN_ID --root .tmp-tests/dream-rsi-smoke --stream stderr
+```
+
+`show` connects a recorded command to its pathway reason and source. Read verified
+stdout for the result and stderr for diagnostics; an emitted JSON result alone
+does not mean the command succeeded. Reporting never invokes an agent, trains, or
+recovers a run. If a storage exception leaves uncertain execution, inspect the
+exception's known IDs and retained state rather than blindly repeating the
+combined call. The example has no automatic retry or resume.
+
+For a settled copy with no writers or unfinished attempts, use
+`report --root COPY --archive` to avoid temporary log locks as well. Archive mode
+does not create a snapshot or repair unfinished work. When a storage error can
+be retained in the completion record, the report preserves its `error_details`
+(code, execution state, known IDs, and recovery hint) alongside the existing text.
+
+Schema-2 ledgers remain readable. Original 0.4 experiments used schema 1 and need
+the separate [ledger migration tool](../../tools/migrations/README.md); they are
+not directly compatible with 0.7. Stop writers and retain the original complete
+experiment. Migration creates a new project containing ledger evidence only:
+copy the original `requests/`, `checkpoints/`, and other example-owned artifacts
+alongside that converted ledger before reconstructing an RSI report. Do not
+replace historical source/checkpoint digests with today's values. The curated
+`evidence-summary.json` is not a ledger and cannot be migrated into one.
+
+Historical checkpoint results contain absolute paths. If the complete experiment
+has moved, supply its exact former project root explicitly when reporting:
+
+```console
+python examples/dream_rsi/experiment.py report --root NEW_PROJECT --archive --original-root OLD_ABSOLUTE_PROJECT_PATH
+```
+
+This report-only option maps paths beneath that original root to the same relative
+locations in the copied project. It does not read artifacts at the old location,
+guess filenames, or rewrite recorded JSON. Destination containment and checkpoint
+digests are still checked. Omit it when the experiment remains in its original
+location; the retained manifest does not record an original root that can be
+used to infer this mapping safely.
 
 ## Resource limits
 

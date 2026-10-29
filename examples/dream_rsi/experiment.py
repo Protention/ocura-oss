@@ -27,7 +27,7 @@ from rsi_core import (
 )
 from rsi_io import checked_json, digest, write_json
 
-from ocura_oss import Store, branch, initialize, run
+from ocura_oss import Store, StoreError, initialize, run
 
 HERE = Path(__file__).resolve().parent
 INITIAL_SCHEDULE = "def learning_rate(step, total_steps):\n    return 0.002\n"
@@ -259,11 +259,6 @@ class Controller:
             "job_sha256": job_hash,
             **{key: str(value) for key, value in labels.items()},
         }
-        pathway = None
-        if parent is not None:
-            pathway = branch(
-                parent.chokepoint.id, root=self.root, reason=kind, parameters=labels
-            ).id
         execution = run(
             [
                 sys.executable,
@@ -274,11 +269,12 @@ class Controller:
                 job_hash,
             ],
             root=self.root,
-            pathway_id=pathway,
+            source_branch_point_id=parent.branch_point.id if parent is not None else None,
+            reason=kind if parent is not None else None,
             parameters=labels,
         )
-        raw = self.store.read_verified_log(execution.atom.id)
-        self.store.read_verified_log(execution.atom.id, stream="stderr")
+        raw = self.store.read_verified_log(execution.record.id)
+        self.store.read_verified_log(execution.record.id, stream="stderr")
         result = None
         if raw.strip():
             with contextlib.suppress(ValueError):
@@ -304,8 +300,12 @@ class Controller:
             artifact_file=str(path.relative_to(self.root)),
             artifact_sha256=sha,
         )
-        if execution.atom.return_code != 0 or recorded != value:
-            raise ValueError(f"could not retain {kind} evidence")
+        if execution.record.return_code != 0 or recorded != value:
+            raise ValueError(
+                f"could not retain {kind} evidence in run {execution.record.id}; "
+                f"retained stdout: {execution.record.stdout_log}; "
+                f"stderr: {execution.record.stderr_log}"
+            )
         return execution, recorded
 
     def agent(self, role, prompt, parent):
@@ -387,8 +387,11 @@ class Controller:
         initial_execution, initial = self.evaluate(
             name, seed, "initialize", candidate, None, self.anchor, "root"
         )
-        if initial_execution.atom.return_code != 0 or not initial:
-            raise RuntimeError("initial evaluator failed; inspect retained stderr")
+        if initial_execution.record.return_code != 0 or not initial:
+            raise RuntimeError(
+                f"initial evaluator failed in run {initial_execution.record.id}; "
+                f"retained stderr: {initial_execution.record.stderr_log}"
+            )
         world = {
             "schema": SCHEMA,
             "name": name,
@@ -396,7 +399,7 @@ class Controller:
             "seed": seed,
             "root_score": initial["score"],
             "root_result": initial,
-            "root_atom": initial_execution.atom.id,
+            "root_atom": initial_execution.record.id,
             "policy_source": policy,
             "nodes": [],
             "trace": [],
@@ -459,7 +462,7 @@ class Controller:
             new_candidate = candidates[parent_id]
             diagnostic = "agent invocation failed"
             try:
-                if agent_execution.atom.return_code != 0 or not proposal or not proposal["ok"]:
+                if agent_execution.record.return_code != 0 or not proposal or not proposal["ok"]:
                     raise ValueError(proposal.get("error", diagnostic) if proposal else diagnostic)
                 new_candidate = proposal["response"]
                 validate_source(new_candidate["schedule_source"], "learning_rate")
@@ -472,10 +475,10 @@ class Controller:
                     agent_execution,
                     node_id,
                 )
-                if terminal.atom.return_code != 0 or result is None:
-                    error = self.store.read_verified_log(terminal.atom.id, stream="stderr").decode(
-                        errors="replace"
-                    )
+                if terminal.record.return_code != 0 or result is None:
+                    error = self.store.read_verified_log(
+                        terminal.record.id, stream="stderr"
+                    ).decode(errors="replace")
                     raise ValueError("evaluator failed: " + error[-1200:])
                 diagnostic = (
                     f"validation_loss={result['validation_loss']:.8f}; step={result['step']}"
@@ -491,9 +494,9 @@ class Controller:
                 "status": "ok" if result else "failed",
                 "candidate": new_candidate,
                 "diagnostic": diagnostic,
-                "agent_atom": agent_execution.atom.id,
-                "terminal_atom": terminal.atom.id,
-                "decision_atom": action_execution.atom.id,
+                "agent_atom": agent_execution.record.id,
+                "terminal_atom": terminal.record.id,
+                "decision_atom": action_execution.record.id,
                 "result": result,
                 "input_checkpoint_sha256": checkpoints[parent_id]["checkpoint_sha256"],
             }
@@ -539,11 +542,11 @@ class Controller:
             execution, proposal = self.agent("policy", prompt, self.anchor)
             entry = {
                 "name": f"phase-{phase}-revision-{revision + 1}",
-                "agent_atom": execution.atom.id,
+                "agent_atom": execution.record.id,
                 "accepted": False,
             }
             try:
-                if execution.atom.return_code != 0 or not proposal or not proposal["ok"]:
+                if execution.record.return_code != 0 or not proposal or not proposal["ok"]:
                     raise ValueError("policy agent failed")
                 entry["source"] = proposal["response"]["policy_source"]
                 entry["rationale"] = proposal["response"]["rationale"]
@@ -591,8 +594,8 @@ class Controller:
                 if n["status"] == "ok"
             )
             _, node_id, checkpoint, atom_id, candidate = max(choices, key=lambda x: x[0])
-            atom = self.store.load_atom(atom_id)
-            chokepoint = next(c for c in self.store.list_chokepoints() if c.atom_id == atom_id)
+            atom = self.store.load_run(atom_id)
+            chokepoint = next(c for c in self.store.list_branch_points() if c.run_id == atom_id)
             from ocura_oss import RunExecution
 
             execution, result = self.evaluate(
@@ -604,20 +607,24 @@ class Controller:
                 RunExecution(atom, chokepoint),
                 node_id,
             )
-            if execution.atom.return_code != 0 or not result:
-                raise RuntimeError("final test failed; inspect retained evidence")
+            if execution.record.return_code != 0 or not result:
+                raise RuntimeError(
+                    f"final test failed in run {execution.record.id}; "
+                    f"retained stderr: {execution.record.stderr_log}"
+                )
             self.tests.append(
                 {
                     "world": world["name"],
                     "selected_node": node_id,
                     "selection_metric": "validation_loss",
                     "result": result,
-                    "atom_id": execution.atom.id,
+                    "atom_id": execution.record.id,
                 }
             )
 
     def execute(self):
         status, reason = "complete", None
+        error_details = None
         try:
             self.guard()
             first = self.collect("bootstrap", self.args.seed, FIXED_POLICY, [], "bootstrap")
@@ -636,6 +643,14 @@ class Controller:
             status, reason = "deferred", str(exc)
         except KeyboardInterrupt:
             status, reason = "interrupted", "user interrupted the experiment"
+        except StoreError as exc:
+            status, reason = "failed", str(exc)
+            error_details = {
+                "code": exc.code,
+                "execution": exc.execution,
+                "ids": exc.ids,
+                "recovery": exc.recovery,
+            }
         except Exception as exc:
             status, reason = "failed", str(exc)
         finally:
@@ -647,6 +662,7 @@ class Controller:
                     "wall_seconds": time.monotonic() - self.started,
                     "agent_calls": self.agent_calls,
                     "tests": self.tests,
+                    **({"error_details": error_details} if error_details is not None else {}),
                 },
                 self.anchor,
             )
@@ -684,6 +700,11 @@ def arguments():
     live.add_argument("--beta-parallel", type=float, default=0)
     report = subs.add_parser("report")
     report.add_argument("--root", required=True, type=Path)
+    report.add_argument("--archive", action="store_true", help="read a settled copy without locks")
+    report.add_argument(
+        "--original-root",
+        help="map recorded absolute artifact paths from this original project into the report root",
+    )
     emit = subs.add_parser("emit")
     emit.add_argument("--path", type=Path, required=True)
     emit.add_argument("--sha256", required=True)
@@ -727,7 +748,7 @@ def main():
     if args.action == "report":
         from rsi_report import build_report
 
-        result = build_report(args.root)
+        result = build_report(args.root, archive=args.archive, original_root=args.original_root)
     else:
         result = Controller(args).execute()
     print(json.dumps(result, indent=2, allow_nan=False))

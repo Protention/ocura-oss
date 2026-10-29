@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from ocura_oss import Store, branch, run
+from ocura_oss import Store, StoreError, branch, run
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "dream_replay"
 sys.path.insert(0, str(EXAMPLE))
@@ -183,6 +183,9 @@ class ReplayEvidenceTests(unittest.TestCase):
 
     def test_report_and_replay_do_not_need_artifacts_or_torch(self):
         self.segment()
+        before = {
+            p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()
+        }
         # Fail immediately if a framework import or external command is attempted by report.
         code = (
             "import builtins, sys; original = builtins.__import__; "
@@ -191,7 +194,8 @@ class ReplayEvidenceTests(unittest.TestCase):
             ' return original(name, *a, **kw)"); '
             "builtins.__import__ = guarded; "
             f"sys.path.insert(0, {str(EXAMPLE)!r}); import experiment; "
-            f"raise SystemExit(experiment.main(['report', '--root', {str(self.root)!r}]))"
+            "raise SystemExit(experiment.main(['report', '--root', "
+            f"{str(self.root)!r}, '--archive']))"
         )
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, timeout=20
@@ -199,8 +203,12 @@ class ReplayEvidenceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["segments"], 1)
         self.assertFalse((self.root / "checkpoints").exists())
-        history = replay.load_history(self.root)
+        history = replay.load_history(self.root, archive=True)
         self.assertEqual(replay.simulate(history, {"mode": "uniform"}, 1)["consumed_quanta"], 1)
+        self.assertEqual(
+            {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()},
+            before,
+        )
 
     def test_changed_log_fails_before_policy_execution(self):
         execution = self.segment()
@@ -237,6 +245,38 @@ class ReplayEvidenceTests(unittest.TestCase):
         history = replay.load_history(self.root)
         self.assertIsNone(history["nodes"][("constant", 1)]["result"])
         self.assertEqual(history["reserved_training_tokens"], 64)
+
+    def test_combined_segment_retains_failed_workload_and_parent(self):
+        # A missing worker is a real failed Python command, without importing Torch.
+        with patch.object(experiment, "HERE", self.root / "missing-example"):
+            execution, result = experiment.run_segment(
+                self.root, self.manifest, self.manifest_hash, self.parent, "constant", 1, 10
+            )
+        self.assertIsNone(result)
+        self.assertEqual(execution.record.outcome.value, "failed")
+        store = Store(self.root)
+        pathway = store.load_pathway(execution.record.pathway_id)
+        self.assertEqual(pathway.source_branch_point_id, self.parent.branch_point.id)
+        self.assertEqual(pathway.reason, "segment")
+        self.assertEqual(execution.record.declared_parameters["end"], "2")
+        self.assertTrue(store.read_verified_log(run_id=execution.record.id, stream="stderr"))
+        history = replay.load_history(self.root)
+        self.assertEqual(history["nodes"][("constant", 1)]["atom_id"], execution.record.id)
+        self.assertEqual(history["reserved_training_tokens"], 64)
+
+    def test_invalid_segment_command_does_not_create_empty_child(self):
+        store = Store(self.root)
+        before = [p.id for p in store.list_pathways()]
+        with (
+            patch.object(experiment.sys, "executable", ""),
+            self.assertRaises(StoreError) as caught,
+        ):
+            experiment.run_segment(
+                self.root, self.manifest, self.manifest_hash, self.parent, "constant", 1, 10
+            )
+        self.assertEqual([p.id for p in store.list_pathways()], before)
+        self.assertEqual(len(store.list_run_records()), 1)
+        self.assertEqual(caught.exception.execution, "not_started")
 
     def test_existing_destinations_and_escaping_artifacts_rejected(self):
         before = (self.root / "manifest.json").read_bytes()

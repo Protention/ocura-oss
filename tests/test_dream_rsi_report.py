@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,6 +21,24 @@ from test_dream_rsi_controller import FixtureController, arguments, controller_m
 
 import rsi_report
 from rsi_io import encoded
+
+
+class RelocatedArtifactTests(unittest.TestCase):
+    def test_explicit_windows_root_is_portable_and_uses_exact_ancestry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            self.assertEqual(
+                rsi_report.contained(root, r"C:\old\pilot\checkpoints\one.pt", r"C:\old\pilot"),
+                root / "checkpoints" / "one.pt",
+            )
+            for path in (
+                r"C:\old\pilot-other\checkpoints\one.pt",
+                r"C:\old\pilot\..\outside.pt",
+            ):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, "outside|escapes"):
+                    rsi_report.contained(root, path, r"C:\old\pilot")
+            with self.assertRaisesRegex(ValueError, "absolute"):
+                rsi_report.contained(root, "requests/one.json", "relative-root")
 
 
 class ReportIntegrityTests(unittest.TestCase):
@@ -70,6 +89,40 @@ class ReportIntegrityTests(unittest.TestCase):
         self.assertTrue(self.baseline["verification"]["replay_reconstructed"])
         self.assertTrue(self.baseline["costs"]["measured_training_complete"])
         self.assertEqual(self.baseline["costs"]["training_evaluations_without_metrics"], 0)
+
+    def test_archive_report_matches_saved_result_without_mutating_files(self):
+        before = {
+            p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()
+        }
+        with patch(
+            "ocura_oss.locking.hold", side_effect=AssertionError("archive took a write lock")
+        ):
+            restored = rsi_report.build_report(self.root, archive=True)
+        self.assertEqual(restored, self.baseline)
+        self.assertEqual(
+            {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()},
+            before,
+        )
+
+    def test_copied_archive_requires_explicit_root_and_checks_copied_checkpoints(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            copied = Path(temporary) / "copied"
+            shutil.copytree(self.root, copied)
+            before = {
+                p.relative_to(copied): p.read_bytes() for p in copied.rglob("*") if p.is_file()
+            }
+            with self.assertRaisesRegex(ValueError, "escapes"):
+                rsi_report.build_report(copied, archive=True)
+            restored = rsi_report.build_report(copied, archive=True, original_root=self.root)
+            self.assertEqual(restored, {**self.baseline, "root": str(copied.resolve())})
+            self.assertEqual(
+                {p.relative_to(copied): p.read_bytes() for p in copied.rglob("*") if p.is_file()},
+                before,
+            )
+            checkpoint = next((copied / "checkpoints").iterdir())
+            checkpoint.write_bytes(checkpoint.read_bytes() + b"changed")
+            with self.assertRaisesRegex(ValueError, "checkpoint digest mismatch"):
+                rsi_report.build_report(copied, archive=True, original_root=self.root)
 
     def test_frozen_agent_request_and_result_are_checked(self):
         with self.assertRaisesRegex(ValueError, "agent request.*frozen"):

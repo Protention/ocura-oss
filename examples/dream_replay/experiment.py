@@ -28,7 +28,7 @@ from common import (
 from policies import Observation, choose, legal_actions
 from replay import load_history, select
 
-from ocura_oss import RunExecution, Store, StoreError, branch, initialize, run
+from ocura_oss import RunExecution, Store, StoreError, initialize, run
 
 
 def prepare(root: Path, download: bool, upstream: Path | None, data: Path | None) -> dict:
@@ -104,8 +104,11 @@ def start_world(root: Path, manifest: dict):
         root=root,
         parameters={"kind": "manifest"},
     )
-    if execution.atom.outcome.value != "passed":
-        raise ValueError("manifest command failed; see retained stderr")
+    if execution.record.outcome.value != "passed":
+        raise ValueError(
+            f"manifest command failed in run {execution.record.id}; "
+            f"retained stderr: {execution.record.stderr_log}"
+        )
     return execution, manifest_hash
 
 
@@ -123,7 +126,6 @@ def run_segment(
         "end": str(end),
         "manifest_sha256": manifest_hash,
     }
-    child = branch(parent.chokepoint.id, root=root, reason=labels["kind"], parameters=labels)
     command = [
         sys.executable,
         str(HERE / "train_segment.py"),
@@ -151,10 +153,16 @@ def run_segment(
         ]
     if test_only:
         command += ["--test-only"]
-    execution = run(command, root=root, pathway_id=child.id, parameters=labels)
+    execution = run(
+        command,
+        root=root,
+        source_branch_point_id=parent.branch_point.id,
+        reason=labels["kind"],
+        parameters=labels,
+    )
     result = None
-    if execution.atom.outcome.value == "passed":
-        result = json.loads(Store(root).read_verified_log(execution.atom.id))
+    if execution.record.outcome.value == "passed":
+        result = json.loads(Store(root).read_verified_log(execution.record.id))
     return execution, result
 
 
@@ -208,9 +216,9 @@ def execute_world(
         if remaining < 1:
             raise TimeoutError("allowance exhausted before final test; training history retained")
         store = Store(root)
-        # Recover the exact selected atom's terminal boundary, including earlier segments.
-        point = next(c for c in store.list_chokepoints() if c.atom_id == winner["atom_id"])
-        parent = RunExecution(store.load_atom(winner["atom_id"]), point)
+        # Locate the selected run's terminal boundary, including earlier segments.
+        point = next(c for c in store.list_branch_points() if c.run_id == winner["atom_id"])
+        parent = RunExecution(store.load_run(winner["atom_id"]), point)
         run_segment(
             root,
             manifest,
@@ -225,8 +233,8 @@ def execute_world(
     return report(root)
 
 
-def report(root: Path) -> dict:
-    history = load_history(root)
+def report(root: Path, *, archive: bool = False) -> dict:
+    history = load_history(root, archive=archive)
     nodes = sorted(history["nodes"].values(), key=lambda n: (n["recipe"], n["quantum"]))
     successes = [n for n in nodes if n["result"]]
     return {
@@ -324,6 +332,7 @@ def main(argv=None) -> int:
     replay = subs.add_parser("replay")
     replay.add_argument("--root", type=Path, required=True)
     replay.add_argument("--budget-quanta", type=int, default=8)
+    replay.add_argument("--archive", action="store_true", help="read a settled copy without locks")
     fresh = subs.add_parser("evaluate")
     fresh.add_argument("--history", type=Path, required=True)
     fresh.add_argument("--root", type=Path, required=True)
@@ -333,6 +342,7 @@ def main(argv=None) -> int:
     fresh.add_argument("--max-seconds", type=float, default=300)
     saved = subs.add_parser("report")
     saved.add_argument("--root", type=Path, required=True)
+    saved.add_argument("--archive", action="store_true", help="read a settled copy without locks")
     emit = subs.add_parser("emit", help="emit a checked manifest (used internally)")
     emit.add_argument("--path", type=Path, required=True)
     emit.add_argument("--sha256", required=True)
@@ -357,12 +367,12 @@ def main(argv=None) -> int:
             )
         elif args.action == "replay":
             started = time.monotonic()
-            result = select(load_history(args.root), args.budget_quanta)
+            result = select(load_history(args.root, archive=args.archive), args.budget_quanta)
             result["replay_seconds"] = time.monotonic() - started
         elif args.action == "evaluate":
             result = evaluate(args)
         elif args.action == "report":
-            result = report(args.root)
+            result = report(args.root, archive=args.archive)
         else:
             sys.stdout.buffer.write(checked_bytes(args.path, args.sha256))
             return 0

@@ -1,5 +1,11 @@
 # Replay a training search with Ocura OSS
 
+Version 0.7.0.dev0.
+
+This experimental branch targets the unreleased 0.7 interfaces. Install this
+checkout or its built wheel; the published 0.6 package does not provide the new
+combined branch-to-run call used below.
+
 Which training run should get the next block of CPU time? This example records
 small GPT training segments, replays allocation policies against their saved
 results, then executes the selected policy on a fresh seed alongside a simple
@@ -24,7 +30,7 @@ CPU PyTorch.
 From the repository root, in an activated virtual environment:
 
 ```console
-python -m pip install ocura-oss==0.4.0
+python -m pip install .
 python -m pip install -r examples/dream_replay/requirements.txt --index-url https://download.pytorch.org/whl/cpu
 python examples/dream_replay/experiment.py prepare --root .tmp-tests/dream-inputs --download
 ```
@@ -48,9 +54,16 @@ We use nanoGPT's small standalone model with an example-owned training loop. Thi
 an adaptation, including the optimizer configuration and 80/10/10 contiguous
 train/validation/test split. Vocabulary comes from training characters, with ID
 zero for unknown characters. Evaluation uses fixed windows within each split.
-The example's own code uses the repository's [MPL-2.0 license](../../LICENSE).
+The example's own code retains its [MPL-2.0 license](LICENSE).
 Prepared third-party files retain their upstream provenance and are not bundled
 with this repository or the package distributions.
+
+For a built wheel, replace the first install command with
+`python -m pip install PATH_TO_WHEEL`. Copy both `examples/dream_replay` and
+`examples/dream_rsi` from the same reviewed revision when using the two examples
+outside a checkout. Their scripts and training dependencies are not bundled in
+the wheel. Reporting and replay need only the installed package and standard
+library; training remains optional.
 
 ## First run: smoke profile
 
@@ -65,6 +78,10 @@ Each command emits JSON to stdout; progress and diagnostics go to stderr. New
 destinations must not exist. Keep the prepared inputs and checkpoints for actual
 training continuation. The ledger alone supports score replay and reporting,
 without importing PyTorch or reading model/checkpoint files.
+
+For a settled copy with no writers or unfinished attempts, add `--archive` to
+`report` or `replay` to avoid even temporary log locks. This mode does not make
+a live directory into a snapshot and never recovers unfinished work.
 
 `evaluate` freezes the selected policy and baseline in each fresh run's manifest.
 The baseline is the best development result among uniform allocation, fixed recipe
@@ -116,16 +133,52 @@ The result records the checkpoint path and digest, input digest, update range,
 token counts, loss, runtime versions, and timings. The next command:
 
 1. Reads its parent's result with `Store.read_verified_log()`.
-2. Branches from that parent's terminal evidence with `branch()`.
+2. Uses `run(..., source_branch_point_id=parent.branch_point.id, reason=...)`
+   to create and execute the next variation in one call.
 3. Reads the checkpoint, checks its digest, and deserializes those same bytes using
    PyTorch's `weights_only=True` loader.
 4. Restores state and trains the next segment through Ocura's `run()`.
 
-An Ocura chokepoint is a terminal evidence boundary. The example adapter owns the
+An Ocura branch point is a terminal evidence boundary. The example adapter owns the
 model checkpoint. Ocura verifies records/logs; the adapter checks checkpoint bytes.
 These are local consistency checks, not signatures or a sandbox. Use trusted local
 inputs. The continuation test targets one fixed CPU/runtime configuration;
 cross-version or cross-hardware bitwise reproducibility is not promised.
+
+The example uses `RunExecution.record`, `RunExecution.branch_point`,
+`Store.load_run()`, and `Store.list_run_records()`. Existing result and ledger
+fields such as `atom_id`, `parent_atom`, and `chokepoint_id` remain unchanged.
+For example, a reported node's `atom_id` is the run ID accepted by the log reader:
+
+```console
+ocura-oss show RUN_ID --root .tmp-tests/dream-history --command --json
+ocura-oss logs RUN_ID --root .tmp-tests/dream-history --stream stderr
+```
+
+Use `execution.branch_point.id` as the source of a new variation and
+`execution.record.id` to read its output. A workload failure is still a recorded
+run. A recording/storage exception may leave partial evidence; inspect its
+execution state and known IDs before deciding what to do. Repeating a combined
+run creates another child and is not a resume operation.
+
+## Reading an older experiment
+
+Existing schema-2 ledgers keep their IDs and JSON fields. The original 0.4 example
+created schema-1 ledgers, which 0.7 does not open directly. With all writers
+stopped, use the separate [0.4 migration tool](../../tools/migrations/README.md)
+to validate and copy a complete ledger into a new project directory:
+
+```console
+python tools/migrations/migrate_0_4.py --source OLD_PROJECT --destination NEW_PROJECT --dry-run --json
+python tools/migrations/migrate_0_4.py --source OLD_PROJECT --destination NEW_PROJECT --json
+python examples/dream_replay/experiment.py report --root NEW_PROJECT
+```
+
+Keep the original and migration receipt. Migration copies ledger records and
+logs only; prepared inputs, checkpoints and other workload files remain separately
+owned by the example. Read-only reporting/replay can use the converted ledger.
+New evaluation intentionally rejects a changed adapter fingerprint, so use a fresh
+0.7 collection rather than extending a historical study with changed example code.
 
 ## Replay and costs
 
@@ -157,7 +210,8 @@ saved. Compare all costs before claiming a benefit.
 
 ## Tests
 
-Validation on 2026-09-17: the standard-library evidence/policy checks and both real
+Historical validation on 2026-09-17, using Ocura 0.4.0: the standard-library
+evidence/policy checks and both real
 PyTorch integration tests pass on Windows 11, Python 3.12.6, and PyTorch 2.6.0+cpu.
 The continuation test took 42.4 seconds and the complete smoke-workflow test took
 131.8 seconds on the development machine. These include fresh-process startup;
