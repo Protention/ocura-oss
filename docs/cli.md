@@ -299,7 +299,7 @@ storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
 | `stderr_log` | string or null | Project-relative stderr log path; null without capture |
 | `storage_warnings` | array of strings, optional | Post-finalization compression errors, present only when nonempty; also printed on stderr |
 
-Use returned IDs to continue the [automated workflow](automation.md). The [training example](../examples/autoregressive/README.md) provides an executable client.
+Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.7` branch.
 
 #### Exit status
 

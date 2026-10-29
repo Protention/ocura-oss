@@ -157,41 +157,24 @@ intact. It stops there on purpose:
 Ocura OSS sits between these: more structure than loose log files, and far less to
 adopt than a tracking platform.
 
-## Development example: explain a fix
+## Primary example: record and inspect
 
-The [CI-report example](../examples/ci_report/README.md) records a failing baseline,
-the reason for a correction, and the passing result. Its report reconstructs the
-history from verified logs without running tests again. It needs only Python and
-this unreleased 0.7 checkout:
+From this checkout, after `python -m pip install .`, create a small demonstration
+and inspect its retained history:
 
 ```console
-python examples/ci_report/workflow.py run --root ./ci-report-demo
-python examples/ci_report/workflow.py report --root ./ci-report-demo
+ocura-oss demo --root ./ocura-oss-demo
+python examples/history/inspect_history.py --root ./ocura-oss-demo --archive
 ```
 
-The example owns the retained source versions and fixture. Ocura records execution
-and lineage; it does not snapshot the workspace or infer the developer's reasoning.
-See [use cases](use-cases.md) for development, training, and experimental replay.
+Use a new destination for the demo; if it already exists from an earlier run,
+run only the inspection command. The [history guide](../examples/history/README.md)
+explains the JSON report and how to inspect your own ledger. No optional dependencies
+are needed.
 
-## Autoregressive example: PyTorch, JAX, and Ray
-
-The [autoregressive example](../examples/autoregressive/README.md) trains a small
-character-level next-token model on an included text corpus. Choose PyTorch or
-JAX, run a baseline and a longer-training variant, then reconstruct the comparison
-from saved evidence. An optional Ray Core executor runs either backend as a local
-task. The example stays in the source repository; neither the wheel nor the source
-distribution includes its scripts or framework dependencies. Install only what you use.
-
-From a repository checkout, after installing Ocura:
-
-```console
-python -m pip install -r examples/autoregressive/requirements-pytorch.txt
-python examples/autoregressive/experiment.py run --backend pytorch --root ./ar-pytorch
-python examples/autoregressive/experiment.py report --root ./ar-pytorch
-```
-
-The guide includes JAX and Ray commands. The script supplies metric reading and
-interpretation; the package supplies recording, lineage, and verification.
+The fuller CI-report, autoregressive, and Dream demonstrations live on the
+semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7).
+See [use cases](use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
 
@@ -221,7 +204,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [CLI reference](cli.md): every command, JSON fields, and exit codes
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
-- [Autoregressive example](../examples/autoregressive/README.md): PyTorch, JAX, and Ray
+- [Examples](use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 Repository references describe this checkout and remain readable directly on GitHub.
