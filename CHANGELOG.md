@@ -4,6 +4,10 @@ This file records user-visible changes to Ocura OSS.
 
 ## 0.7.0.dev0 - Unreleased
 
+- Add a repository-only CI-report walkthrough: retain a failing baseline, explain
+  and run the correction, and inspect verified evidence without repeating work.
+  Refresh the autoregressive example for the combined 0.7 operation and retained
+  failure diagnostics, preserving its existing invocation and report fields.
 - Preserve both filenames and Windows error details when wrapping operating-system
   failures, and accept indexing-only command sequences supported by earlier callers.
 - Add `run --from BRANCH_POINT_ID --reason TEXT -- COMMAND` and Python

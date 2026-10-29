@@ -10,6 +10,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+from ocura_oss import Store, branch, initialize, run
 
 EXAMPLE_DIR = Path(__file__).resolve().parents[1] / "examples" / "autoregressive"
 
@@ -53,6 +56,124 @@ class AutoregressiveContractTests(unittest.TestCase):
         for steps, rate in ((0, 0.5), (-1, 0.5), (1, float("nan")), (1, -0.5)):
             with self.subTest(steps=steps, rate=rate), self.assertRaises(ValueError):
                 model.train("pytorch", steps, rate, 7)
+
+    def test_combined_driver_retains_two_runs_and_matching_settings(self):
+        driver = load_example("experiment")
+        # Exercise the real recorder/CLI using a cheap stand-in workload; the
+        # opt-in integration tests below separately validate actual training.
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            (work / "train.py").write_text(
+                "import argparse, json\n"
+                "p = argparse.ArgumentParser()\n"
+                "p.add_argument('--backend')\n"
+                "p.add_argument('--steps', type=int)\n"
+                "p.add_argument('--learning-rate', type=float)\n"
+                "p.add_argument('--seed', type=int)\n"
+                "a = vars(p.parse_args())\n"
+                "print(json.dumps(dict(a, executor='local', "
+                "example='autoregressive-character-v1', validation_loss=1/a['steps'])))\n",
+                encoding="utf-8",
+            )
+            args = driver.argparse.Namespace(
+                root=work / "experiment",
+                backend="pytorch",
+                executor="local",
+                baseline_steps=2,
+                variant_steps=4,
+                learning_rate=0.5,
+                seed=7,
+            )
+            with (
+                mock.patch.object(driver, "__file__", str(work / "experiment.py")),
+                mock.patch.object(driver.importlib.util, "find_spec", return_value=object()),
+            ):
+                result = driver.run_experiment(args)
+            self.assertEqual(result["verification"], {"ok": True, "atoms": 2, "logs": 4})
+            self.assertEqual(result["validation_loss_delta"], -0.25)
+            child = result["comparison"]["children"][0]
+            self.assertEqual(child["reason"], "test 4 training steps against 2")
+            self.assertEqual(child["source_chokepoint_id"], result["source_chokepoint_id"])
+            store = Store(args.root)
+            self.assertEqual(len(store.list_pathways()), 2)
+            for role in ("baseline", "variant"):
+                record = store.load_run(result[role]["atom_id"])
+                self.assertEqual(record.declared_parameters["steps"], str(result[role]["steps"]))
+                self.assertIn("--steps", record.command)
+
+    def test_failed_workload_retains_run_identity_and_verified_stderr(self):
+        driver = load_example("experiment")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = initialize(Path(temporary) / "project").root
+            with self.assertRaises(RuntimeError) as raised:
+                driver.cli(
+                    "run",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "import sys; print('training diagnostic', file=sys.stderr); sys.exit(7)",
+                    root=root,
+                )
+            record = Store(root).list_run_records()[0]
+            message = str(raised.exception)
+            for detail in (
+                record.id,
+                record.stdout_log,
+                record.stderr_log,
+                '"outcome": "failed"',
+                '"return_code": 7',
+                "verified stderr tail:",
+                "training diagnostic",
+            ):
+                self.assertIn(detail, message)
+            self.assertEqual(len(Store(root).list_run_records()), 1)
+
+    def test_cli_preflight_failure_retains_structured_execution_state(self):
+        driver = load_example("experiment")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = initialize(Path(temporary) / "project").root
+            with self.assertRaises(RuntimeError) as raised:
+                driver.cli("run", "--", root=root)
+            message = str(raised.exception)
+            self.assertIn('"code": "invalid_input"', message)
+            self.assertIn('"execution": "not_started"', message)
+            self.assertEqual(Store(root).list_run_records(), [])
+
+    def test_explicit_report_reads_legacy_pair_after_newer_work_without_changes(self):
+        driver = load_example("experiment")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = initialize(Path(temporary) / "project").root
+
+            def recorded_pair(steps):
+                parameters = {
+                    "backend": "pytorch",
+                    "executor": "local",
+                    "steps": str(steps),
+                    "learning_rate": "0.5",
+                    "seed": "7",
+                }
+                metrics = {
+                    **parameters,
+                    "example": "autoregressive-character-v1",
+                    "validation_loss": 0.5,
+                }
+                command = [sys.executable, "-c", f"print({json.dumps(metrics)!r})"]
+                baseline = run(command, root=root, parameters=parameters)
+                # Earlier callers use these names and create the child separately.
+                child = branch(baseline.chokepoint.id, root=root, reason="legacy two-step")
+                run(command, root=root, pathway_id=child.id, parameters=parameters)
+                return baseline
+
+            earlier = recorded_pair(2)
+            later = recorded_pair(4)
+            before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+            selected = driver.report(root, source_branch_point_id=earlier.chokepoint.id)
+            automatic = driver.report(root)
+            self.assertEqual(selected["source_chokepoint_id"], earlier.chokepoint.id)
+            self.assertEqual(selected["baseline"]["atom_id"], earlier.atom.id)
+            self.assertEqual(automatic["source_chokepoint_id"], later.chokepoint.id)
+            self.assertEqual(selected["verification"], {"ok": True, "atoms": 4, "logs": 8})
+            self.assertEqual(before, {p: p.read_bytes() for p in root.rglob("*") if p.is_file()})
 
 
 class AutoregressiveIntegrationTests(unittest.TestCase):

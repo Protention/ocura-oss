@@ -1,0 +1,8 @@
+{"job": "lint", "attempt": 2, "status": "passed", "duration_ms": 90}
+{"job": "tests", "attempt": 1, "status": "passed", "duration_ms": 500}
+{"job": "lint", "attempt": 1, "status": "failed", "duration_ms": 100}
+{"job": "package", "attempt": 1, "status": "failed", "duration_ms": 20}
+{"job": "tests", "attempt": 2, "status": "failed", "duration_ms": 1000}
+{"job": "smoke", "attempt": 2, "status": "passed", "duration_ms": 10}
+{"job": "build", "attempt": 1, "status": "passed", "duration_ms": 45}
+{"job": "smoke", "attempt": 1, "status": "failed", "duration_ms": 120}

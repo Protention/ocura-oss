@@ -6,6 +6,7 @@ prune docs/planning
 prune examples
 exclude tests/test_autoregressive_example.py
 exclude tests/test_history_example.py
+exclude tests/test_ci_report_example.py
 exclude tests/test_release_check.py
 recursive-include tests/fixtures *
 prune tools/migrations
