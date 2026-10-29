@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 import contextlib
 import hashlib
@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ocura_oss import cli
+from ocura_oss import __version__, cli
 
 
 @contextlib.contextmanager
@@ -40,11 +40,17 @@ class CliTests(unittest.TestCase):
         with contextlib.chdir(str(self.root)):
             return self._run(*arguments)
 
+    def test_version_flag_prints_package_version(self):
+        with self.assertRaises(SystemExit) as raised, captured_output() as (stdout, _stderr):
+            cli.main(["--version"])
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stdout.getvalue().strip(), f"ocura-oss {__version__}")
+
     def test_init_prints_ids_and_json_mode_parses(self):
         other = self.parent / "other"
         code, text, _ = self._run("init", "--root", str(other))
         self.assertEqual(code, 0)
-        self.assertIn("den:", text)
+        self.assertIn("project ledger:", text)
         self.assertIn("default pathway:", text)
 
     def test_init_refuses_existing_state(self):
@@ -179,14 +185,14 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         atom_id = next(
-            line.removeprefix("atom:").strip()
+            line.removeprefix("run:").strip()
             for line in run_summary.splitlines()
-            if line.startswith("atom:")
+            if line.startswith("run:")
         )
         chokepoint_id = next(
-            line.removeprefix("chokepoint:").strip()
+            line.removeprefix("branch point:").strip()
             for line in run_summary.splitlines()
-            if line.startswith("chokepoint:")
+            if line.startswith("branch point:")
         )
         atom_path = self.root / ".ocura-oss" / "atoms" / f"{atom_id}.json"
         atom_text = atom_path.read_text("utf-8")
@@ -286,7 +292,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         chokepoint_id = None
         for line in run_text.splitlines():
-            if line.startswith("chokepoint:"):
+            if line.startswith("branch point:"):
                 chokepoint_id = line.split(":", 1)[1].strip()
         self.assertTrue(chokepoint_id)
 
@@ -349,7 +355,7 @@ class CliTests(unittest.TestCase):
         code, automatic_ready, _ = self._run("compare", "--root", str(self.root))
         self.assertEqual(code, 0)
         self.assertIn("comparison: ready", automatic_ready)
-        self.assertIn(f"source chokepoint: {chokepoint_id}", automatic_ready)
+        self.assertIn(f"source branch point: {chokepoint_id}", automatic_ready)
 
     def test_branch_requires_reason_and_valid_source(self):
         code, _text, _err = self._run("branch", "--from", "chokepoint-" + "0" * 32, "--reason", "x")
@@ -361,7 +367,7 @@ class CliTests(unittest.TestCase):
         chokepoint_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
-            if line.startswith("chokepoint:")
+            if line.startswith("branch point:")
         ][0]
 
         with self.assertRaises(SystemExit) as ctx, contextlib.chdir(str(self.root)):
@@ -483,7 +489,7 @@ class CliTests(unittest.TestCase):
         spaced = self.parent / "some folder" / "proj"
         code, text, _ = self._run("init", "--root", str(spaced))
         self.assertEqual(code, 0)
-        self.assertIn("den:", text)
+        self.assertIn("project ledger:", text)
 
         code, text, _ = self._run(
             "run",
@@ -581,7 +587,7 @@ class CliTests(unittest.TestCase):
         chokepoint_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
-            if line.startswith("chokepoint:")
+            if line.startswith("branch point:")
         ][0]
         code, branch_json, _ = self._run_in_root(
             "branch",
@@ -603,7 +609,7 @@ class CliTests(unittest.TestCase):
         code, text, _ = self._run("verify", "--root", str(self.root))
         self.assertEqual(code, 0)
         self.assertIn("integrity: ok", text)
-        self.assertIn("1 atoms", text)
+        self.assertIn("1 runs", text)
         self.assertIn("2 logs", text)
 
         code, verify_json, _ = self._run("verify", "--root", str(self.root), "--json")
@@ -621,7 +627,7 @@ class CliTests(unittest.TestCase):
         atom_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
-            if line.startswith("atom:")
+            if line.startswith("run:")
         ][0]
         (self.root / ".ocura-oss" / "logs" / f"{atom_id}.stdout.log").unlink()
 
@@ -663,7 +669,7 @@ class CliTests(unittest.TestCase):
         chokepoint_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
-            if line.startswith("chokepoint:")
+            if line.startswith("branch point:")
         ][0]
 
         elsewhere = self.parent / "elsewhere"

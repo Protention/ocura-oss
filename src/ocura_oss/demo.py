@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 """Orchestration of the retained one-command demonstration."""
 
@@ -69,7 +69,7 @@ def run_demo(root: Path) -> DemoReport:
         steps.append(
             DemoStep(
                 "initialize",
-                f"den {den.id}; baseline pathway {pathway.id}",
+                f"ledger {den.id}; baseline pathway {pathway.id}",
             )
         )
 
@@ -88,7 +88,7 @@ def run_demo(root: Path) -> DemoReport:
         steps.append(
             DemoStep(
                 "baseline-run",
-                f"atom {baseline.atom.id} passed with declared batch=1",
+                f"run {baseline.atom.id} passed with declared batch=1",
             )
         )
 
@@ -133,7 +133,7 @@ def run_demo(root: Path) -> DemoReport:
         steps.append(
             DemoStep(
                 "rerun",
-                f"atom {rerun.atom.id} passed on pathway {child.id} with batch=4",
+                f"run {rerun.atom.id} passed on pathway {child.id} with batch=4",
             )
         )
 
@@ -145,7 +145,7 @@ def run_demo(root: Path) -> DemoReport:
         steps.append(
             DemoStep(
                 "verify",
-                f"verified {verification.atoms} atoms; every record matches its recorded checksum",
+                f"verified {verification.atoms} runs; every record matches its recorded checksum",
             )
         )
 

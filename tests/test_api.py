@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 import sys
 import tempfile
@@ -15,6 +15,11 @@ class PublicSurfaceTests(unittest.TestCase):
             set(ocura_oss.__all__),
             {
                 "Atom",
+                "Ledger",
+                "RunRecord",
+                "BranchPoint",
+                "Attempt",
+                "AttemptState",
                 "ChildComparison",
                 "Chokepoint",
                 "ComparisonResult",
@@ -23,10 +28,15 @@ class PublicSurfaceTests(unittest.TestCase):
                 "DemoReport",
                 "DemoStep",
                 "Den",
+                "FileDigest",
                 "Initialization",
                 "Outcome",
+                "OutputCapture",
                 "ParameterDelta",
                 "Pathway",
+                "RecoveredAttempt",
+                "RecoveryAction",
+                "RunContext",
                 "RunExecution",
                 "RunSummary",
                 "StateVerification",
@@ -36,6 +46,7 @@ class PublicSurfaceTests(unittest.TestCase):
                 "branch",
                 "compare",
                 "initialize",
+                "recover",
                 "run",
                 "run_demo",
                 "verify",
@@ -116,6 +127,30 @@ class ProgrammaticWorkflowTests(unittest.TestCase):
         ocura_oss.initialize(self.root)
         with self.assertRaisesRegex(ocura_oss.StoreError, "argument tokens"):
             ocura_oss.run("python -V", root=self.root)
+
+    def test_indexing_only_command_sequence_works_for_existing_and_combined_runs(self):
+        class Command:
+            def __len__(self):
+                return len(tokens)
+
+            def __getitem__(self, index):
+                return tokens[index]
+
+        tokens = [sys.executable, "-c", "print('sequence')"]
+        ocura_oss.initialize(self.root)
+        baseline = ocura_oss.run(Command(), root=self.root)
+        variation = ocura_oss.run(
+            Command(),
+            root=self.root,
+            source_branch_point_id=baseline.branch_point.id,
+            reason="same command container on a variation",
+        )
+        store = ocura_oss.Store(self.root)
+        for result in (baseline, variation):
+            self.assertIs(result.record.outcome, ocura_oss.Outcome.PASSED)
+            self.assertEqual(result.record.command, tuple(tokens))
+            self.assertEqual(store.read_verified_log(result.record.id).strip(), b"sequence")
+        self.assertTrue(store.verify_state().ok)
 
     def test_store_rejects_unknown_log_stream(self):
         ocura_oss.initialize(self.root)

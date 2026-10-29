@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "kind": "pathway",
+  "payload": {
+    "id": "pathway-00000000000000000000000000000005",
+    "den_id": "den-00000000000000000000000000000001",
+    "created_at": "2026-09-16T00:00:03.000000+00:00",
+    "parent_pathway_id": "pathway-00000000000000000000000000000002",
+    "source_chokepoint_id": "chokepoint-00000000000000000000000000000004",
+    "reason": "try batch 4",
+    "parameters": {
+      "batch": "4",
+      "label": "café"
+    }
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "26136b0fd1c58197ef0a1abca63cdd2f926e3c96c463465f8350945149facebf"
+  }
+}

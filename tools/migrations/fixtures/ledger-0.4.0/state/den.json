@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "kind": "den",
+  "payload": {
+    "id": "den-00000000000000000000000000000001",
+    "name": "frozen 0.4 migration fixture",
+    "created_at": "2026-09-16T00:00:00.000000+00:00",
+    "default_pathway_id": "pathway-00000000000000000000000000000002"
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "6214784bd4bfe648e54c76615383b71e5d88afd07fdc79f5349846b9d626b0f2"
+  }
+}

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 """Source validation, metadata-only branching, and comparison states."""
 
@@ -118,14 +118,25 @@ def compare(store: Store, chokepoint_id: str | None = None) -> model.ComparisonR
             children.append(store.load_pathway(candidate.id))
     children.sort(key=lambda item: (item.created_at, item.id))
 
+    newest_by_pathway: dict[str, model.Atom] = {}
+    if children:
+        child_ids = {child.id for child in children}
+        for candidate_atom in store.list_atoms():
+            if candidate_atom.pathway_id not in child_ids:
+                continue
+            previous = newest_by_pathway.get(candidate_atom.pathway_id)
+            if previous is None or (candidate_atom.started_at, candidate_atom.id) > (
+                previous.started_at,
+                previous.id,
+            ):
+                newest_by_pathway[candidate_atom.pathway_id] = candidate_atom
     comparisons = []
     any_missing = False
     for child in children:
-        child_atoms = [item for item in store.list_atoms() if item.pathway_id == child.id]
         child_run: model.RunSummary | None = None
         run_parameters: model.ParameterDelta | None = None
-        if child_atoms:
-            newest = max(child_atoms, key=lambda item: (item.started_at, item.id))
+        newest = newest_by_pathway.get(child.id)
+        if newest is not None:
             loaded = store.load_atom(newest.id)
             store.verify_atom_evidence(loaded)
             child_run = model.run_summary_from_atom(loaded)

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MPL-2.0
+# SPDX-License-Identifier: Apache-2.0
 
 import contextlib
 import hashlib
@@ -171,6 +171,7 @@ class RunnerTests(unittest.TestCase):
     def test_large_logs_are_hashed_correctly(self):
         execution = runner.run_command(
             self.store,
+            compress=False,
             pathway_id=self.pathway.id,
             argv=[
                 sys.executable,
@@ -335,7 +336,7 @@ class InterruptedEvidenceTests(unittest.TestCase):
     def test_keyboard_interrupt_records_interrupted_evidence(self):
         from unittest import mock
 
-        with mock.patch.object(runner.subprocess, "Popen", return_value=_FakeProcess()):
+        with mock.patch.object(runner.supervise.Tether, "launch", return_value=_FakeProcess()):
             execution = runner.run_command(
                 self.store,
                 pathway_id=self.pathway.id,

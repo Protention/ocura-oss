@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "kind": "atom",
+  "payload": {
+    "id": "atom-00000000000000000000000000000008",
+    "pathway_id": "pathway-00000000000000000000000000000005",
+    "started_at": "2026-09-16T00:00:06.000000+00:00",
+    "finished_at": "2026-09-16T00:00:07.000000+00:00",
+    "duration_seconds": 0.041024,
+    "outcome": "failed",
+    "return_code": 3,
+    "launch_error_category": null,
+    "declared_parameters": {
+      "batch": "8"
+    },
+    "command": [
+      "python",
+      "-c",
+      "import sys; print('failed', file=sys.stderr); sys.exit(3)"
+    ],
+    "stdout_log": ".ocura-oss/logs/atom-00000000000000000000000000000008.stdout.log",
+    "stderr_log": ".ocura-oss/logs/atom-00000000000000000000000000000008.stderr.log",
+    "stdout_bytes": 0,
+    "stderr_bytes": 8,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "128aa7b0a4ebd803fcadca288c4ede204be879c50a69a74fb1ad449e78cef45b"
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "7d2907cb2f29ccb3a8af532decd589fdfabe5c731c8b87865bb41fb94bf6ef8a"
+  }
+}
