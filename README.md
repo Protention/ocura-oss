@@ -143,25 +143,23 @@ intact. It stops there on purpose:
 Ocura OSS sits between these: more structure than loose log files, and far less to
 adopt than a tracking platform.
 
-## Autoregressive example: PyTorch, JAX, and Ray
+## Primary example: record and inspect
 
-The [autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md) trains a small
-character-level next-token model on an included text corpus. Choose PyTorch or
-JAX, run a baseline and a longer-training variant, then reconstruct the comparison
-from saved evidence. An optional Ray Core executor runs either backend as a local
-task. The example stays in the source repository; neither the wheel nor the source
-distribution includes its scripts or framework dependencies. Install only what you use.
-
-From a repository checkout, after installing Ocura:
+From this checkout, after `python -m pip install .`, create a small demonstration
+and inspect its retained history:
 
 ```console
-python -m pip install -r examples/autoregressive/requirements-pytorch.txt
-python examples/autoregressive/experiment.py run --backend pytorch --root ./ar-pytorch
-python examples/autoregressive/experiment.py report --root ./ar-pytorch
+ocura-oss demo --root ./ocura-oss-demo
+python examples/history/inspect_history.py --root ./ocura-oss-demo --archive
 ```
 
-The guide includes JAX and Ray commands. The script supplies metric reading and
-interpretation; the package supplies recording, lineage, and verification.
+Use a new destination for the demo; if you already ran it above, run only the
+inspection command. The [history guide](examples/history/README.md) explains the
+JSON report and how to inspect your own ledger. No optional dependencies are needed.
+
+The fuller CI-report, autoregressive, and Dream demonstrations live on the
+semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7).
+See [use cases](docs/use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
 
@@ -210,7 +208,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
 - [Local autocompression prototype](docs/autocompression.md): timing, verified reading, fingerprints, and reversible storage
-- [Autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
+- [Examples](docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The full references are included in this checkout and remain readable directly on GitHub.

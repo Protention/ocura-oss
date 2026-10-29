@@ -1,2 +1,0 @@
-# Optional CPU example backend; not an Ocura OSS runtime dependency.
-jax>=0.11.1,<0.12

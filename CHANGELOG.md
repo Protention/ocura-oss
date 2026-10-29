@@ -4,6 +4,10 @@ This file records user-visible changes to Ocura OSS.
 
 ## 0.7.0.dev0 - Unreleased
 
+- Keep the demo and history inspection as the primary example in the core
+  repository. Move the autoregressive demonstration and its backend tests to the
+  semi-permanent `examples/0.7` branch, alongside the CI-report and Dream examples.
+  Link their setup and compatibility requirements from the use-case catalog.
 - Preserve both filenames and Windows error details when wrapping operating-system
   failures, and accept indexing-only command sequences supported by earlier callers.
 - Add `run --from BRANCH_POINT_ID --reason TEXT -- COMMAND` and Python
