@@ -3,8 +3,10 @@
 Version 0.7.0.dev0.
 
 The maintained `examples/0.7` branch holds the fuller demonstrations separately
-from the primary walkthrough on `main`. These examples show how a caller uses
-Ocura to retain execution evidence and explain a variation. They target the
+from the primary demo and history walkthrough in the
+[core 0.7 draft PR #24](https://github.com/Protention/ocura-oss/pull/24). `main` remains
+at released 0.6 until the draft stack merges. These examples show how a caller
+uses Ocura to retain execution evidence and explain a variation. They target the
 unreleased 0.7 development interfaces. Follow the [catalog setup](../README.md#install-and-try)
 to check out this branch, then install it with `python -m pip install .`, or install
 its matching built wheel and copy the relevant example directories separately.

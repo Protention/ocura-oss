@@ -1,10 +1,11 @@
 # Ocura OSS 0.7 example catalog
 
 This is the maintained example catalog on **`examples/0.7`**, a long-lived branch
-for fuller demonstrations of the unreleased **0.7.0.dev0** interfaces. It stays
-separate from [`main`](https://github.com/Protention/ocura-oss/tree/main), which
-keeps the primary `ocura-oss demo` walkthrough and
-[history inspection](examples/history/README.md). Install this branch's checkout
+for fuller demonstrations of the unreleased **0.7.0.dev0** interfaces. The
+[core 0.7 draft PR #24](https://github.com/Protention/ocura-oss/pull/24) retains the
+primary `ocura-oss demo` and history walkthrough; this catalog stays on its own
+branch. [`main`](https://github.com/Protention/ocura-oss/tree/main) remains at the
+released 0.6 version until the draft stack merges. Install this branch's checkout
 before running its examples; a published package may not provide the interfaces they use.
 
 | Example | What it demonstrates | Additional requirements |
@@ -71,6 +72,7 @@ Clone the catalog branch, then install it in an activated virtual environment:
 ```console
 git clone --branch examples/0.7 --single-branch https://github.com/Protention/ocura-oss.git ocura-oss-examples
 cd ocura-oss-examples
+git rev-parse HEAD
 python -m pip install .
 ocura-oss demo --root ./ocura-oss-demo
 ```
@@ -81,6 +83,10 @@ out, run `python -m pip install .` from its root. For a built wheel, use a wheel
 from this same revision and copy the example directories separately. The example
 scripts and their optional dependencies are not bundled in package distributions.
 The Dream guides use Python 3.12 for their pinned CPU PyTorch setup.
+
+Record the commit ID printed by `git rev-parse HEAD` with your retained results.
+The branch can advance, and its CI tests the package and examples in that branch's
+own snapshot. Keep the exact revision when sharing or reproducing a run.
 
 The [published package](https://pypi.org/project/ocura-oss/) has its own
 [release documentation](https://protention.dev/); these examples require this
