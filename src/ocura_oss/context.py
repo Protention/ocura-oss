@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from ocura_oss import model
+from ocura_oss.errors import classify_os_error
 from ocura_oss.store import STATE_DIR_NAME, StoreError, size_and_sha256
 
 _GIT_TIMEOUT = 10.0
@@ -50,7 +51,9 @@ def capture(
             size, digest = size_and_sha256(path if path.is_absolute() else root / path)
         except OSError as exc:
             detail = exc.strerror or exc.__class__.__name__
-            raise StoreError(f"cannot read context file {name}: {detail}") from exc
+            raise StoreError(
+                f"cannot read context file {name}: {detail}", code=classify_os_error(exc)
+            ) from exc
         digests[path.as_posix()] = model.FileDigest(bytes=size, sha256=digest)
     return model.RunContext(
         platform=platform_facts, git_revision=revision, git_dirty=dirty, files=digests

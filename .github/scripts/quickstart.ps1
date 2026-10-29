@@ -42,6 +42,16 @@ ocura-oss manifest > retained.manifest
 Assert-Step "manifest"
 ocura-oss verify --against retained.manifest
 Assert-Step "verify --against"
+ocura-oss run --from $chokepoint --reason "try count 3" --param count=3 --substitute --json -- python -c "import sys; print(sys.argv[1])" "{count}" > variation.json
+Assert-Step "combined variation run"
+$printed = (Get-Content -Raw -Path (Read-Json variation.json).stdout_log).Trim()
+if ($printed -ne "3") { throw "combined variation passed '$printed', expected '3'" }
+ocura-oss compare --from $chokepoint --json > variation-compare.json
+Assert-Step "combined variation compare"
+$comparison = Read-Json variation-compare.json
+if ($comparison.state -ne "ready" -or $comparison.children.Count -ne 2) { throw "combined variation comparison did not retain both children" }
+ocura-oss verify --against retained.manifest
+Assert-Step "combined variation preserves manifest"
 ocura-oss demo --root (Join-Path $work "ocura-oss-demo")
 Assert-Step "demo"
 Write-Output "quickstart passed in $work"

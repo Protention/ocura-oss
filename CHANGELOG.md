@@ -2,8 +2,37 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## Unreleased
+## 0.7.0.dev0 - Unreleased
 
+- Preserve both filenames and Windows error details when wrapping operating-system
+  failures, and accept indexing-only command sequences supported by earlier callers.
+- Add `run --from BRANCH_POINT_ID --reason TEXT -- COMMAND` and Python
+  `run(..., source_branch_point_id=ID, reason=TEXT)` to create and execute a
+  variation in one call. Parameters override the new child pathway's inherited
+  labels; labels declared only on the source run are not copied. Existing run
+  results, defaults, and the separate `branch`/`run --pathway` workflow remain unchanged. Input
+  is checked before the child is created. A later storage or execution failure can
+  leave the child in place; structured errors retain known child and source IDs for
+  inspection and explicit continuation without automatic retries.
+- Record a stop request arriving between process-polling timeouts as an interrupted
+  run, stopping the command and retaining its evidence through the existing result
+  interface.
+- Add canonical public names `Ledger`, `RunRecord`, and `BranchPoint`; retain
+  `Pathway` and the legacy `Den`, `Atom`, and `Chokepoint` class aliases. Add
+  descriptive result properties, Store readers, source keywords, and the
+  `branch-points` CLI alias and `--run` storage selector. Existing constructor
+  fields, success JSON, schema-2 records, IDs, checksums, and retained manifests
+  remain compatible.
+- Add opt-in `--json-errors` for JSON results and structured failures, including
+  argument errors, stable error categories, known run IDs, execution state, and
+  recovery guidance. Existing `--json` behavior and exit statuses remain unchanged.
+  `logs` still prints log bytes. Python `StoreError` exposes diagnostic fields too;
+  `run()` errors that were `ValidationError` or `OSError` still are. A failure after launch directs
+  callers to inspect retained attempts and runs before considering resubmission.
+- Add an executable history inspection example for a fresh caller with only a
+  ledger root. It includes failed retries, empty variations, unfinished attempts,
+  and verified bounded log excerpts with original-content references. It never
+  executes or recovers a workload. Update terminology and migration guidance.
 - **Fixed:** validating a pathway no longer doubles its work for every branch
   generation. A history built by branching each run from the previous one made
   `run`, `branch`, `compare`, and `verify` take seconds after about ten generations
@@ -11,8 +40,9 @@ This file records user-visible changes to Ocura OSS.
 - `ocura-oss --version` prints the installed version.
 - `pathways` and `compare` read the atom records once per command, instead of
   once for every pathway or child pathway.
-- Add `ocura-oss runs` and `Store.list_runs()`: finalized runs in the order they
-  finished, including failed retries, each with the `chokepoint_id` to branch from.
+- Add `ocura-oss runs` and `Store.list_runs()`: finalized runs ordered by terminal
+  record timestamp and ID, including failed retries, each with the `chokepoint_id`
+  to branch from.
   Filter by pathway or outcome, page with `--limit` and `--after`, or list every
   match with `--all`. Each page counts the runs still unfinished, which can finish
   behind its cursor; a walk whose pages count none lists every finished run.

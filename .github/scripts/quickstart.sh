@@ -23,5 +23,10 @@ test "$(field compare.json state)" = "ready"
 python -c "import json; delta = json.load(open('compare.json'))['children'][0]['run_parameters']; assert delta['changed'] == {'count': {'source': '1', 'child': '2'}}, delta"
 ocura-oss manifest > retained.manifest
 ocura-oss verify --against retained.manifest
+ocura-oss run --from "$chokepoint" --reason "try count 3" --param count=3 --substitute --json -- python -c "import sys; print(sys.argv[1])" "{count}" > variation.json
+test "$(tr -d '\r\n' < "$(field variation.json stdout_log)")" = "3"
+ocura-oss compare --from "$chokepoint" --json > variation-compare.json
+python -c "import json; result=json.load(open('variation-compare.json')); assert result['state']=='ready' and len(result['children'])==2, result"
+ocura-oss verify --against retained.manifest
 ocura-oss demo --root "$work/ocura-oss-demo"
 echo "quickstart passed in $work"

@@ -2,8 +2,10 @@ include CHANGELOG.md
 include CONTRIBUTING.md
 include SECURITY.md
 recursive-include docs *.md
+prune docs/planning
 prune examples
 exclude tests/test_autoregressive_example.py
+exclude tests/test_history_example.py
 exclude tests/test_release_check.py
 recursive-include tests/fixtures *
 prune tools/migrations
