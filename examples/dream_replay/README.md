@@ -2,9 +2,11 @@
 
 Version 0.7.0.dev0.
 
-This experimental branch targets the unreleased 0.7 interfaces. Install this
-checkout or its built wheel; the published 0.6 package does not provide the new
-combined branch-to-run call used below.
+This experimental example is part of the maintained [0.7 catalog](../../docs/use-cases.md)
+on `examples/0.7` and targets the unreleased 0.7 interfaces. Follow the
+[catalog setup](../../README.md#install-and-try) and install this checkout or its
+matching built wheel; the published 0.6 package does not provide the new combined
+branch-to-run call used below.
 
 Which training run should get the next block of CPU time? This example records
 small GPT training segments, replays allocation policies against their saved

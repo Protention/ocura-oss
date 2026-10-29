@@ -2,6 +2,10 @@
 
 For the unreleased Ocura OSS 0.7.0.dev0 interfaces in this checkout.
 
+This guide belongs to the maintained [0.7 example catalog](../../docs/use-cases.md)
+on `examples/0.7`. Use the [catalog setup](../../README.md#install-and-try) to obtain
+the matching checkout.
+
 Train a character-level next-token model with **PyTorch** or **JAX**, either directly
 or inside a **Ray Core task**. Ocura OSS records the baseline, the reason for a
 variation, both outputs, and their lineage. Inspect the experiment later without

@@ -2,9 +2,11 @@
 
 Version 0.7.0.dev0.
 
-This experimental branch targets the unreleased 0.7 package. The pilot and its
-published evidence summary remain historical 0.4.0 results; updating the adapter
-does not revalidate those results or establish a policy benefit.
+This experimental example belongs to the maintained [0.7 catalog](../../docs/use-cases.md)
+on `examples/0.7` and targets the unreleased 0.7 package. Use the
+[catalog setup](../../README.md#install-and-try) to obtain the matching checkout.
+The pilot and its published evidence summary remain historical 0.4.0 results;
+updating the adapter does not revalidate those results or establish a policy benefit.
 
 This example studies implementation support: how Ocura OSS helps developers build
 and inspect a Dream-RSI workflow. A small, bounded CPU training experiment exercises

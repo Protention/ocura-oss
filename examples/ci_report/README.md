@@ -4,6 +4,10 @@ This repository-only example uses **0.7.0.dev0 (unreleased)**. It needs Python 3
 with Ocura installed; the reporter and its checks use only the standard library.
 The example is copied separately and is not bundled in the wheel or source distribution.
 
+It is part of the maintained [0.7 example catalog](../../docs/use-cases.md) on
+`examples/0.7`. Use the [catalog setup](../../README.md#install-and-try) to obtain
+the matching checkout.
+
 A small CI job reporter starts by counting input rows. That gives the wrong answer
 when a job has several attempts, and it accepts invalid fields. The example runs
 the same functional checks against that retained starter and a completed version,

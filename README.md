@@ -1,4 +1,27 @@
-# Ocura OSS
+# Ocura OSS 0.7 example catalog
+
+This is the maintained example catalog on **`examples/0.7`**, a long-lived branch
+for fuller demonstrations of the unreleased **0.7.0.dev0** interfaces. It stays
+separate from [`main`](https://github.com/Protention/ocura-oss/tree/main), which
+keeps the primary `ocura-oss demo` walkthrough and
+[history inspection](examples/history/README.md). Install this branch's checkout
+before running its examples; a published package may not provide the interfaces they use.
+
+| Example | What it demonstrates | Additional requirements |
+| --- | --- | --- |
+| [CI report](examples/ci_report/README.md) | Retain a failing check, a correction, and a later evidence-based handoff | None beyond Python and Ocura |
+| [Autoregressive training](examples/autoregressive/README.md) | Compare a baseline with a longer training run and reconstruct the report | PyTorch or JAX; optional Ray |
+| [Dream replay](examples/dream_replay/README.md) | Collect training history, replay fixed allocation policies, and run a selected policy | CPU PyTorch for training |
+| [Dream RSI](examples/dream_rsi/README.md) | Explore training with agents, replay policies, and retain redeployment evidence | CPU PyTorch for training; signed-in Codex CLI for live agent calls |
+
+Start with [installation](#install-and-try), then follow one guide. The
+[use-case guide](docs/use-cases.md) compares the workflows and also links the
+[history inspector](examples/history/README.md). Examples own their workloads,
+checkpoints, metrics, policies, and agent access; Ocura supplies execution records,
+lineage, and verified logs. Historical research evidence remains historical, and
+this catalog refresh establishes no new training-quality or compute-savings result.
+
+## About Ocura OSS
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -28,7 +51,7 @@ runs in a new project, especially for local development:
 
 - **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
   it adds no runtime dependencies to your project.
-- **Easy setup.** `pip install ocura-oss`, then `ocura-oss init`. There is no
+- **Easy setup.** Install this checkout, then run `ocura-oss init`. There is no
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
@@ -43,16 +66,25 @@ all ledger records and captured logs.
 
 Python 3.11 or later is required. Ocura OSS uses only the standard library at runtime.
 
-Install from [PyPI](https://pypi.org/project/ocura-oss/) in a virtual environment:
+Clone the catalog branch, then install it in an activated virtual environment:
 
 ```console
-python -m pip install ocura-oss
+git clone --branch examples/0.7 --single-branch https://github.com/Protention/ocura-oss.git ocura-oss-examples
+cd ocura-oss-examples
+python -m pip install .
 ocura-oss demo --root ./ocura-oss-demo
 ```
 
 The demo runs the complete workflow and retains a new directory for inspection.
-Its destination must not already exist. To install a repository checkout instead,
-run `python -m pip install .` from its root.
+Its destination must not already exist. If you already have this branch checked
+out, run `python -m pip install .` from its root. For a built wheel, use a wheel
+from this same revision and copy the example directories separately. The example
+scripts and their optional dependencies are not bundled in package distributions.
+The Dream guides use Python 3.12 for their pinned CPU PyTorch setup.
+
+The [published package](https://pypi.org/project/ocura-oss/) has its own
+[release documentation](https://protention.dev/); these examples require this
+unreleased 0.7 checkout or its matching wheel.
 
 ## Compare two runs
 
@@ -227,22 +259,23 @@ Use `Store(root).read_verified_log(run_id=baseline.record.id, stream="stdout")` 
 output as bytes checked against the stored run record's byte count and SHA-256 digest.
 Raw and gzip storage return the same original bytes.
 The method also accepts `stream="stderr"`; decoding and metric interpretation
-remain with your script. See the [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md#storeread_verified_log).
+remain with your script. See the [Python API](docs/python-api.md#storeread_verified_log).
 
 An agent can use the same CLI or Python workflow inside its existing execution
-environment. The [automation guide](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md) explains JSON results,
+environment. The [automation guide](docs/automation.md) explains JSON results,
 exit codes, parameter labels, and how to inspect earlier attempts.
 
 ## Documentation
 
-- [Overview](https://github.com/Protention/ocura-oss/blob/main/docs/index.md): installation, concepts, and the complete workflow
-- [CLI reference](https://github.com/Protention/ocura-oss/blob/main/docs/cli.md): every command, JSON fields, and exit codes
-- [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md): functions, typed results, and `Store`
-- [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
-- [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
+- [Example catalog](docs/use-cases.md): choose a development, training, replay, or history workflow
+- [Overview](docs/index.md): installation, concepts, and the complete workflow
+- [CLI reference](docs/cli.md): every command, JSON fields, and exit codes
+- [Python API](docs/python-api.md): functions, typed results, and `Store`
+- [Scripts and AI agents](docs/automation.md): JSON workflows and verified output consumption
+- [State and verification](docs/state-and-verification.md): records and checks
 - [Local autocompression prototype](docs/autocompression.md): timing, verified reading, fingerprints, and reversible storage
-- [Autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
-- [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
+- [Autoregressive example](examples/autoregressive/README.md): PyTorch, JAX, and Ray
+- [Migration tool](tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The full references are included in this checkout and remain readable directly on GitHub.
 The documentation for the published release is also [available online](https://protention.dev/).

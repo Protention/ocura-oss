@@ -2,6 +2,10 @@
 
 Version 0.7.0.dev0.
 
+This documentation accompanies the maintained **`examples/0.7`** branch. See the
+[example catalog](use-cases.md) for the fuller demonstrations and the
+[checkout setup](../README.md#install-and-try) for the matching development package.
+
 A local execution ledger for recording, branching, and comparing command runs.
 
 Record a baseline, explain the next variation, and keep its result connected to the
@@ -29,7 +33,7 @@ runs in a new project, especially for local development:
 
 - **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
   it adds no runtime dependencies to your project.
-- **Easy setup.** `pip install ocura-oss`, then `ocura-oss init`. There is no
+- **Easy setup.** Install this checkout, then run `ocura-oss init`. There is no
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
@@ -81,16 +85,17 @@ concurrent use, and the limits of each option.
 
 Python 3.11 or later is required. Ocura OSS uses only the standard library at runtime.
 
-Install from [PyPI](https://pypi.org/project/ocura-oss/) in a virtual environment:
+From the `examples/0.7` checkout root, in an activated virtual environment:
 
 ```console
-python -m pip install ocura-oss
+python -m pip install .
 ocura-oss demo --root ./ocura-oss-demo
 ```
 
 The demo runs the complete workflow and retains a new directory for inspection.
-Its destination must not already exist. To install a repository checkout instead,
-run `python -m pip install .` from its root.
+Its destination must not already exist. These examples need this unreleased 0.7
+checkout or its matching wheel; the [published package](https://pypi.org/project/ocura-oss/)
+has separate [release documentation](https://protention.dev/).
 
 ## Compare two runs
 

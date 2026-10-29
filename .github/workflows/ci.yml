@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, examples/0.7]
   pull_request:
   schedule:
     # Mondays 06:17 UTC: catch breakage from new runner images and Python releases.

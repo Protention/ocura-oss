@@ -1,19 +1,22 @@
-# Choose an example
+# Ocura OSS 0.7 example catalog
 
 Version 0.7.0.dev0.
 
-These examples show how a caller uses Ocura to retain execution evidence and
-explain a variation. They target the unreleased 0.7 development interfaces. Install
-this checkout with `python -m pip install .`, or install its built wheel and copy
-the relevant example directory separately. Example scripts and optional frameworks
-are not installed with the package.
+The maintained `examples/0.7` branch holds the fuller demonstrations separately
+from the primary walkthrough on `main`. These examples show how a caller uses
+Ocura to retain execution evidence and explain a variation. They target the
+unreleased 0.7 development interfaces. Follow the [catalog setup](../README.md#install-and-try)
+to check out this branch, then install it with `python -m pip install .`, or install
+its matching built wheel and copy the relevant example directories separately.
+Example scripts and optional frameworks are not installed with the package.
 
 | Workflow | Question it answers | Requirements |
 | --- | --- | --- |
 | [Fix a CI job reporter](../examples/ci_report/README.md) | What failed, why was it changed, and which evidence supports the handoff? | Python and Ocura |
 | [Compare autoregressive training](../examples/autoregressive/README.md) | What changed between the baseline and a longer training run? | PyTorch or JAX; optional Ray |
+| [Replay fixed training policies](../examples/dream_replay/README.md) | How can a caller select an allocation policy from recorded training history? | CPU PyTorch for training; no remote agent |
+| [Dream-RSI adaptation](../examples/dream_rsi/README.md) | How can an application retain evidence for training exploration and policy replay? | CPU PyTorch for training and a signed-in Codex CLI for live agent calls |
 | [Inspect an existing history](../examples/history/README.md) | What happened in this ledger, including failed or unfinished work? | Python and Ocura |
-| [Dream-RSI adaptation](https://github.com/Protention/ocura-oss/tree/feat/0.7-dream-examples/examples/dream_rsi) | How can an application retain evidence for training exploration and policy replay? | Separate experimental branch; CPU PyTorch for training and a signed-in Codex CLI for live agent calls |
 
 ## A development handoff
 
@@ -52,8 +55,8 @@ Its report interprets verified workload metrics; Ocura does not score models.
 An improved validation loss in that example describes that configuration and its
 changed budget, not a general framework or learning-quality advantage.
 
-Dream replay and Dream RSI remain on a separate experimental branch. Their code
-owns model checkpoints, policies, budgets, replay semantics, and agent access.
+Dream replay and Dream RSI are experimental entries in this branch's catalog.
+Their code owns model checkpoints, policies, budgets, replay semantics, and agent access.
 The fixed-recipe replay path needs no remote agent. The live RSI path is opt-in
 and consumes the caller's agent usage. Retained replay/report commands do not train
 or call an agent. Historical pilot measurements remain historical; the 0.7 refresh
