@@ -31,6 +31,10 @@ class RelocatedArtifactTests(unittest.TestCase):
                 rsi_report.contained(root, r"C:\old\pilot\checkpoints\one.pt", r"C:\old\pilot"),
                 root / "checkpoints" / "one.pt",
             )
+            self.assertEqual(
+                rsi_report.contained(root, r"requests\one.json", r"C:\old\pilot"),
+                root / "requests" / "one.json",
+            )
             for path in (
                 r"C:\old\pilot-other\checkpoints\one.pt",
                 r"C:\old\pilot\..\outside.pt",

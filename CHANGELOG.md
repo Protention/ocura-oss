@@ -4,6 +4,10 @@ This file records user-visible changes to Ocura OSS.
 
 ## 0.7.0.dev0 - Unreleased
 
+- On the experimental Dream branch, update replay/RSI adapters to the descriptive
+  readers and combined branch/run operation. Add archive reads and explicit
+  original-root mapping for copied historical checkpoint evidence, retaining
+  existing result keys, budgets, verification, and historical outcomes.
 - Add a repository-only CI-report walkthrough: retain a failing baseline, explain
   and run the correction, and inspect verified evidence without repeating work.
   Refresh the autoregressive example for the combined 0.7 operation and retained

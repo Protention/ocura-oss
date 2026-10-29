@@ -24,9 +24,10 @@ def contained(root, path, original_root=None):
         recorded = path_type(path)
         if recorded.is_absolute():
             try:
-                path = Path(*recorded.relative_to(original).parts)
+                recorded = recorded.relative_to(original)
             except ValueError as exc:
                 raise ValueError("artifact path is outside the specified original root") from exc
+        path = Path(*recorded.parts)
     result = (root / path).resolve()
     if not result.is_relative_to(root):
         raise ValueError("artifact path escapes the experiment root")

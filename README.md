@@ -192,6 +192,7 @@ with independent training controls. This implementation-support study demonstrat
 the package integration, with no established training-quality or resource-savings
 advantage. Training runs locally; agent inference uses an external Codex service.
 Agent access and CPU PyTorch belong to the optional repository example.
+These experimental example files retain their [MPL-2.0 license](examples/dream_replay/LICENSE).
 
 ## Python and automation
 
