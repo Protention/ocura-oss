@@ -26,8 +26,8 @@ STATE_DIR_NAME = ".ocura-oss"
 
 _ENVELOPE_KEYS = {"schema_version", "kind", "payload", "checksum"}
 _HASH_CHUNK = 1024 * 1024
-_REMOVE_RETRIES = 200
-_REMOVE_DELAY = 0.01
+_BUSY_RETRIES = 200
+_BUSY_DELAY = 0.01
 _SHOWN_MATCHES = 5
 
 _T = TypeVar("_T")
@@ -1270,6 +1270,24 @@ class Store:
                 problems.append((path.name, str(exc)))
         return records
 
+    def _load_attempt(self, path: Path) -> model.Attempt | None:
+        """Read an attempt record, or return None if its run finalized meanwhile.
+
+        Windows can briefly deny reads of a record that its finishing run is
+        removing, so a denied read is retried while the record still exists.
+        """
+        retries = _BUSY_RETRIES
+        while True:
+            try:
+                return self._load_listed(path, "attempt", model.attempt_from_payload)
+            except StoreError as exc:
+                if not path.exists():
+                    return None
+                if exc.code != "permission_denied" or not retries:
+                    raise
+            retries -= 1
+            time.sleep(_BUSY_DELAY)
+
     def _scan_attempts(
         self, problems: list[tuple[str, str]]
     ) -> list[tuple[model.Attempt, model.AttemptState]]:
@@ -1279,11 +1297,11 @@ class Store:
             return attempts
         for path in sorted(self.attempts_dir.glob("*.json")):
             try:
-                attempt = self._load_listed(path, "attempt", model.attempt_from_payload)
+                attempt = self._load_attempt(path)
             except StoreError as exc:
-                # A record that vanished was finalized while it was being read.
-                if path.exists():
-                    problems.append((f"attempts/{path.name}", str(exc)))
+                problems.append((f"attempts/{path.name}", str(exc)))
+                continue
+            if attempt is None:
                 continue
             if locking.is_held(self._attempt_lock(attempt.id)):
                 attempts.append((attempt, model.AttemptState.RUNNING))
@@ -1487,12 +1505,12 @@ def _remove_file(path: Path) -> None:
     Windows refuses to remove an open file, so a reader verifying the state
     at that instant would otherwise make the removal fail.
     """
-    for _ in range(_REMOVE_RETRIES):
+    for _ in range(_BUSY_RETRIES):
         try:
             path.unlink(missing_ok=True)
             return
         except PermissionError:
-            time.sleep(_REMOVE_DELAY)
+            time.sleep(_BUSY_DELAY)
     path.unlink(missing_ok=True)
 
 
