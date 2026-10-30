@@ -915,6 +915,19 @@ backing path when compressed. Compressed file contents are encoded; use
 
 The returned path has passed containment checks only. Use `read_verified_log()` to consume bytes that have been checked against the stored run record; `verify_atom_evidence()` checks both logs without returning their contents.
 
+### `Store.log_files`
+
+```python
+store.log_files(atom: RunRecord) -> dict[str, str]
+```
+
+Return each captured stream's current file relative to the project root, keyed
+`stdout` and `stderr`: the recorded path, plus `.gz` when the log is stored as
+gzip. A run recorded without output capture returns an empty dictionary. Only the
+paths and the files' presence are checked; nothing is read, verified, or locked.
+`ocura-oss run --json` and `show --json` report this as `log_files`. Raises
+`StoreError` for a recorded path that escapes the logs directory.
+
 ### `Store.read_verified_log`
 
 ```python

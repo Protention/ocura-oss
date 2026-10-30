@@ -74,10 +74,13 @@ The atom's recorded `stdout_log` and `stderr_log` remain logical paths; after
 compression, the physical file has an additional `.gz` suffix. Use `logs --info`
 to see which file currently holds the evidence.
 
-The compressed file is ordinary gzip, so standard tools such as `zcat`, `zgrep`,
-`zless`, `gzip -dc`, and `rg -z` read it directly at the recorded path plus `.gz`.
-They do not check the recorded SHA-256; `ocura-oss logs` and `verify` do. Windows
-PowerShell has no built-in gzip reader, so use `ocura-oss logs` there.
+`run` and `show` print each log's current file, and their JSON reports it as
+`log_files`: the recorded path, plus `.gz` when stored as gzip. That file is
+ordinary gzip, so standard tools such as `zcat`, `zgrep`, `zless`, and `gzip -dc`
+read it directly, and `rg -z PATTERN .ocura-oss/logs` searches raw and compressed
+logs together. These tools do not check the recorded SHA-256; `ocura-oss logs` and
+`verify` do. Windows PowerShell has no built-in gzip reader, so use
+`ocura-oss logs` there.
 
 The metadata includes a readable fingerprint, in this form:
 

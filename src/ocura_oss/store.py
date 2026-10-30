@@ -743,6 +743,20 @@ class Store:
         with self._log_guard(atom.id, relative) as path:
             return logstorage.physical_path(path)
 
+    def log_files(self, atom: model.Atom) -> dict[str, str]:
+        """Return each captured log's current file, relative to the project root.
+
+        A log stored as gzip is the recorded path plus ``.gz``. Only the paths and
+        the files' presence are checked: nothing is read, verified, or locked.
+        """
+        files: dict[str, str] = {}
+        for stream, (relative, _size, _digest) in zip(
+            ("stdout", "stderr"), _recorded_logs(atom), strict=False
+        ):
+            path = self._evidence_path(atom.id, relative)
+            files[stream] = relative if logstorage.physical_path(path) == path else f"{relative}.gz"
+        return files
+
     def read_verified_log(
         self,
         atom_id: str | None = None,

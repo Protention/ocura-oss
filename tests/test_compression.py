@@ -638,6 +638,13 @@ class CompressionTests(unittest.TestCase):
                 raw, packed = self._paths(atom)
                 self.assertEqual(packed.is_file(), compressed)
                 self.assertEqual(raw.is_file(), not compressed)
+                # Reported files exist, so standard tools can open them.
+                stored = packed if compressed else raw
+                self.assertEqual(self.root / result["log_files"]["stdout"], stored)
+                shown = io.StringIO()
+                with contextlib.redirect_stdout(shown):
+                    cli.main(["show", atom.id, "--root", str(self.root), "--json"])
+                self.assertEqual(json.loads(shown.getvalue())["log_files"], result["log_files"])
 
 
 if __name__ == "__main__":

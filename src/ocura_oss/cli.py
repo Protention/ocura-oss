@@ -778,6 +778,7 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             context_files=args.context_file,
         )
     atom = execution.atom
+    files = state.log_files(atom)
     for message in execution.storage_warnings:
         print(f"warning: {message}", file=sys.stderr)
     if args.json:
@@ -792,12 +793,13 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             "output_capture": atom.output_capture.value,
             "stdout_log": atom.stdout_log,
             "stderr_log": atom.stderr_log,
+            "log_files": files,
         }
         if execution.storage_warnings:
             payload["storage_warnings"] = list(execution.storage_warnings)
         _emit_json(payload)
     else:
-        _print_run(execution)
+        _print_run(execution, files)
     if atom.outcome is model.Outcome.LAUNCH_FAILED:
         return EXIT_LAUNCH_FAILED
     if atom.outcome in (model.Outcome.FAILED, model.Outcome.INTERRUPTED):
@@ -805,7 +807,7 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
     return EXIT_OK
 
 
-def _print_run(execution: runner.RunExecution) -> None:
+def _print_run(execution: runner.RunExecution, files: dict[str, str]) -> None:
     atom = execution.atom
     print(f"run: {atom.id}")
     print(f"branch point: {execution.chokepoint.id}")
@@ -813,8 +815,8 @@ def _print_run(execution: runner.RunExecution) -> None:
     print(f"outcome: {atom.outcome.value}")
     print(f"duration: {atom.duration_seconds:.6f}s")
     if atom.output_capture is model.OutputCapture.FULL:
-        print(f"stdout log: {atom.stdout_log}")
-        print(f"stderr log: {atom.stderr_log}")
+        print(f"stdout log: {files['stdout']}")
+        print(f"stderr log: {files['stderr']}")
         print(f"read: ocura-oss logs {atom.id}")
     else:
         print("output: not captured")
@@ -923,8 +925,9 @@ def _runs(args: argparse.Namespace) -> int:
 def _show(args: argparse.Namespace) -> int:
     state = _open_store(args.root, archive=args.archive)
     inspected = state.inspect_run(state.resolve_id(args.atom, "atom"))
+    files = state.log_files(inspected.atom)
     if args.json:
-        _emit_json(inspected.to_dict(include_command=args.command))
+        _emit_json({**inspected.to_dict(include_command=args.command), "log_files": files})
         return EXIT_OK
     atom, pathway = inspected.atom, inspected.pathway
     print(f"run: {atom.id}")
@@ -938,7 +941,7 @@ def _show(args: argparse.Namespace) -> int:
         print(f"child pathway: {child.id}  reason: {child.reason}")
     print(f"parameters: {json.dumps(dict(atom.declared_parameters), ensure_ascii=True)}")
     for stream in ("stdout", "stderr"):
-        print(f"{stream}: {getattr(atom, f'{stream}_log') or 'not captured'}")
+        print(f"{stream}: {files.get(stream, 'not captured')}")
         if atom.output_capture is model.OutputCapture.FULL:
             print(f"  bytes: {getattr(atom, f'{stream}_bytes')}")
             print(f"  sha256: {getattr(atom, f'{stream}_sha256')}")

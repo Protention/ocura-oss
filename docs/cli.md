@@ -297,6 +297,7 @@ storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
 | `output_capture` | string | `full`, or `none` when `--no-capture` was used |
 | `stdout_log` | string or null | Project-relative stdout log path; null without capture |
 | `stderr_log` | string or null | Project-relative stderr log path; null without capture |
+| `log_files` | object | Each captured stream's current file: the recorded path, plus `.gz` when stored as gzip; empty without capture |
 | `storage_warnings` | array of strings, optional | Post-finalization compression errors, present only when nonempty; also printed on stderr |
 
 Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.7` branch.
@@ -473,9 +474,10 @@ its last page. Otherwise, list again once they finish or `recover` closes them.
 This relies on the system clock not stepping backward.
 
 `show` selects one run record, validates its record and lineage, and returns `atom`,
-`pathway`, `chokepoint`, `children`, and
+`pathway`, `chokepoint`, `children`, `log_files`, and
 `verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
+`log_files` gives each captured stream's current file, as for `run`.
 The pathway includes the reason and source relationship. `chokepoint` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
 pathways branched from it, oldest first. Finding them scans the branch point and
