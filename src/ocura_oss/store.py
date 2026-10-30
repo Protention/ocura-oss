@@ -748,13 +748,27 @@ class Store:
 
         A log stored as gzip is the recorded path plus ``.gz``. Only the paths and
         the files' presence are checked: nothing is read, verified, or locked.
+        Unsafe or unreadable paths raise StoreError.
         """
         files: dict[str, str] = {}
         for stream, (relative, _size, _digest) in zip(
             ("stdout", "stderr"), _recorded_logs(atom), strict=False
         ):
-            path = self._evidence_path(atom.id, relative)
-            files[stream] = relative if logstorage.physical_path(path) == path else f"{relative}.gz"
+            try:
+                path = self._evidence_path(atom.id, relative)
+                physical = logstorage.physical_path(path)
+            except logstorage.LogStorageError as exc:
+                raise StoreError(
+                    f"atom {atom.id} {exc}: {relative}", code=exc.code, ids={"run_id": atom.id}
+                ) from (exc.__cause__ or exc)
+            except (OSError, ValueError) as exc:
+                code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
+                raise StoreError(
+                    f"atom {atom.id} log is unreadable: {relative}",
+                    code=code,
+                    ids={"run_id": atom.id},
+                ) from exc
+            files[stream] = relative if physical == path else f"{relative}.gz"
         return files
 
     def read_verified_log(

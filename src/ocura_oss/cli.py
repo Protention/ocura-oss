@@ -778,8 +778,14 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             context_files=args.context_file,
         )
     atom = execution.atom
-    files = state.log_files(atom)
-    for message in execution.storage_warnings:
+    storage_warnings = execution.storage_warnings
+    try:
+        files = state.log_files(atom)
+    except StoreError as exc:
+        # Optional path reporting must not replace an already recorded result.
+        files = {}
+        storage_warnings += (f"log file lookup failed: {exc}",)
+    for message in storage_warnings:
         print(f"warning: {message}", file=sys.stderr)
     if args.json:
         payload: dict[str, object] = {
@@ -795,8 +801,8 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             "stderr_log": atom.stderr_log,
             "log_files": files,
         }
-        if execution.storage_warnings:
-            payload["storage_warnings"] = list(execution.storage_warnings)
+        if storage_warnings:
+            payload["storage_warnings"] = list(storage_warnings)
         _emit_json(payload)
     else:
         _print_run(execution, files)
@@ -815,8 +821,8 @@ def _print_run(execution: runner.RunExecution, files: dict[str, str]) -> None:
     print(f"outcome: {atom.outcome.value}")
     print(f"duration: {atom.duration_seconds:.6f}s")
     if atom.output_capture is model.OutputCapture.FULL:
-        print(f"stdout log: {files['stdout']}")
-        print(f"stderr log: {files['stderr']}")
+        print(f"stdout log: {files.get('stdout', 'unavailable')}")
+        print(f"stderr log: {files.get('stderr', 'unavailable')}")
         print(f"read: ocura-oss logs {atom.id}")
     else:
         print("output: not captured")

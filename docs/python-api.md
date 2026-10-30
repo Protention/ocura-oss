@@ -926,7 +926,8 @@ Return each captured stream's current file relative to the project root, keyed
 gzip. A run recorded without output capture returns an empty dictionary. Only the
 paths and the files' presence are checked; nothing is read, verified, or locked.
 `ocura-oss run --json` and `show --json` report this as `log_files`. Raises
-`StoreError` for a recorded path that escapes the logs directory.
+`StoreError` for unsafe or unreadable storage paths, including a recorded path
+that escapes the logs directory.
 
 ### `Store.read_verified_log`
 
