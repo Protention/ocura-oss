@@ -171,7 +171,6 @@ class RunnerTests(unittest.TestCase):
     def test_large_logs_are_hashed_correctly(self):
         execution = runner.run_command(
             self.store,
-            compress=False,
             pathway_id=self.pathway.id,
             argv=[
                 sys.executable,

@@ -2,9 +2,9 @@
 
 Version 0.7.0.dev0.
 
-This draft builds on 0.6.0. Compression options, storage metadata, and conversion
-methods below are proposed branch behavior, absent from the released package.
-See [open design decisions](autocompression.md#decisions-before-merge).
+This draft builds on 0.6.0. Opt-in compression, storage metadata, and conversion
+methods below are absent from the released package. See
+[log compression](autocompression.md).
 
 Descriptive names, discovery, structured diagnostics, and creating and running a
 variation in one call are also unreleased.
@@ -148,7 +148,7 @@ run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = True,
+    compress: bool = False,
     compression_min_bytes: int = 1_048_576,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -171,8 +171,8 @@ Run one trusted local command and record terminal evidence.
 | `parameters` | mapping of string to string, or None | `None` | Add or replace labels for this run; with `source_branch_point_id`, set the new child's parameter overrides instead. Labels do not configure the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
-| `compress` | boolean | `True` | Consider only this run's finalized captured logs once for lossless gzip storage |
-| `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size for automatic compression; require at least 10% savings as well |
+| `compress` | boolean | `False` | Consider only this run's finalized captured logs once for lossless gzip storage |
+| `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size to compress when `compress` is true; require at least 10% savings as well |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
 | `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with the value the run records for that key |
 | `context` | boolean | `False` | Record the platform and the git revision and dirty state at launch |
@@ -230,12 +230,11 @@ The child runs with `shell=False` and the project root as its working directory.
 
 Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned run record has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
 
-By default each captured log of at least 1 MiB is considered for gzip compression
-at level 6 after this run is finalized. It must save at least 10%; smaller or
-incompressible logs remain raw. Original bytes and hashes remain unchanged, and
-no older logs are scanned. Set `compress=False` to retain raw storage or
-`compression_min_bytes=N` to change this run's threshold. See the
-[local compression prototype](autocompression.md) for storage compatibility and
+Logs stay raw by default. With `compress=True`, each captured log of at least
+`compression_min_bytes` (1 MiB) is considered for gzip compression at level 6
+after this run is finalized. It must save at least 10%; smaller or incompressible
+logs remain raw. Original bytes and hashes remain unchanged, and no older logs are
+scanned. See [log compression](autocompression.md) for storage compatibility and
 temporary disk space requirements.
 
 Each position in `masked_arguments` must index `command`; position 0 is the executable. The attempt and run records store `<masked>` at those positions and list them. Masking does not alter output, so a command that prints a masked value still writes it to a captured log.
@@ -1020,9 +1019,8 @@ Verify one captured log and return storage metadata without returning its
 contents. `atom_id` must be a full identifier. Invalid lineage, stream, capture
 mode, or evidence raises `StoreError`, as for `read_verified_log()`.
 
-The draft defines `LogInfo` in `ocura_oss.store`, without adding it to
-`ocura_oss.__all__`. Its shape and public status remain part of the design review.
-It has these fields:
+`LogInfo` is defined in `ocura_oss.store`, without adding it to
+`ocura_oss.__all__`. It has these fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -1070,7 +1068,7 @@ replacing files.
 
 Each returned `LogStorageChange` exposes the preferred `run_id` property and contains `atom_id`, `stream`, `action`,
 `original_bytes`, `stored_bytes`, and `path` (the project-relative backing path).
-This draft result type also lives in `ocura_oss.store`, without a top-level export.
+This result type also lives in `ocura_oss.store`, without a top-level export.
 Actions are `compressed`, `would-compress`, `restored`, `would-restore`,
 `unchanged`, `small`, or `no-savings`.
 The records and original digests remain unchanged, as do retained manifests.
@@ -1091,9 +1089,9 @@ store.decompress_logs()
 assert store.verify_state().ok
 ```
 
-This local prototype extends physical storage compatibility despite retaining
-record schema 2. Older readers require decompressed logs. See
-[automatic log compression](autocompression.md).
+Compressed storage extends physical storage despite retaining record schema 2;
+Ocura OSS 0.6 and earlier require decompressed logs. See
+[log compression](autocompression.md).
 
 ### `Store.verify_atom_evidence`
 

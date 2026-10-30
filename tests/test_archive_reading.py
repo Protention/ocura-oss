@@ -31,7 +31,6 @@ class ArchiveReadTests(unittest.TestCase):
             ],
             root=self.root,
             pathway_id=pathway,
-            compress=False,
         )
 
     def invoke(self, *arguments):

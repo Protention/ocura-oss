@@ -457,6 +457,39 @@ class AbandonedAttemptTests(JournalTestCase):
             self.store.recover()
         self.assertTrue(path.is_file())
 
+    def test_denied_attempt_reads_are_retried_while_the_record_exists(self):
+        attempt = self.abandon()
+        name = f"{attempt.id}.json"
+        path = self.store.attempts_dir / name
+        read_bytes = Path.read_bytes
+        denial = {}
+
+        # Windows briefly denies reads of a record that its finishing run is removing.
+        def read(target):
+            if target == path and denial["count"]:
+                denial["count"] -= 1
+                if denial["finalized"]:
+                    target.unlink()
+                raise PermissionError(13, "Permission denied", str(target))
+            return read_bytes(target)
+
+        not_finalized = "attempt was not finalized; run `ocura-oss recover` to close it"
+        unreadable = f"invalid attempt record {name}: malformed attempt record {name}: unreadable"
+        for count, finalized, problem, abandoned in (
+            (3, False, not_finalized, (attempt.id,)),
+            (sys.maxsize, False, unreadable, ()),
+            (1, True, None, ()),
+        ):
+            denial.update(count=count, finalized=finalized)
+            with (
+                self.subTest(count=count, finalized=finalized),
+                mock.patch("ocura_oss.store._BUSY_DELAY", 0),
+                mock.patch.object(Path, "read_bytes", autospec=True, side_effect=read),
+            ):
+                report = self.store.verify_state()
+                self.assertEqual(dict(report.problems).get(f"attempts/{name}"), problem)
+                self.assertEqual(report.abandoned_attempts, abandoned)
+
     def test_stray_lock_file_is_ignored_by_verification_and_removed_by_recovery(self):
         stray = self.store.attempts_dir / f"{model.make_id('atom')}.lock"
         stray.write_bytes(b"")

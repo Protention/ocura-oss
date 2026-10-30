@@ -116,15 +116,12 @@ the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
 `ocura-oss run`, stops the command and records an interrupted attempt; a second
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
-This local branch prototypes automatic lossless log compression: after each run,
-captured logs of at least 1 MiB use gzip only when it saves at least 10%. Read
-the original verified bytes with `ocura-oss logs <atom-id>` and inspect sizes,
-storage paths, and a readable stream/atom/hash fingerprint with `--info`.
-`run --no-compress` keeps raw storage; `compress --dry-run` previews a pass over
-older logs, and `decompress` restores raw files. Earlier versions need
-decompressed storage despite the unchanged record schema. See the
-[compression design and limits](docs/autocompression.md), including temporary
-disk headroom and compatibility. This prototype has not been published to PyPI.
+Logs stay raw unless you ask for lossless gzip storage: `run --compress` stores
+that run's logs of at least 1 MiB as gzip when this saves at least 10%, and
+`compress --dry-run` previews a pass over older logs; `decompress` restores raw
+files. `ocura-oss logs <run-id>` prints the verified original bytes either way,
+and `--info` shows sizes, the storage path, and a readable fingerprint. Ocura OSS
+0.6 cannot read compressed logs; see [log compression](docs/autocompression.md).
 
 ## When to use something else
 
@@ -207,7 +204,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md): functions, typed results, and `Store`
 - [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
-- [Local autocompression prototype](docs/autocompression.md): timing, verified reading, fingerprints, and reversible storage
+- [Log compression](docs/autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
 - [Examples](docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 

@@ -44,8 +44,8 @@ storage, and a later conversion can finish removing the duplicate.
 The run record continues to record the logical
 `.log` path and the original size and SHA-256. `ocura-oss logs ID` and
 `Store.read_verified_log()` transparently return the verified original bytes.
-`logs ID --info` reports the current physical path and sizes. See
-[automatic log compression](autocompression.md) for this local branch's policy.
+`logs ID --info` reports the current physical path and sizes. Logs stay raw
+unless compression is requested; see [log compression](autocompression.md).
 
 ## Record envelope
 
@@ -79,22 +79,21 @@ The repository keeps a small ledger written by 0.5.0 as a test fixture. Every la
 
 This describes how the format changes. It is not a commitment that schema 2 is final: the 0.x status in the [overview](index.md#project-status) still applies.
 
-### Local compressed-storage extension
+### Compressed-storage extension
 
-The autocompression prototype keeps JSON records and schema 2 unchanged, and
-reads existing raw schema-2 ledgers. It extends physical log storage: earlier
-versions cannot read compressed `.log.gz` backing files even though they can
-parse the unchanged records. Before returning to an older version, run this
-branch's `ocura-oss decompress` and `ocura-oss verify`. Use `run --no-compress`
-when newly recorded logs must remain directly readable by those versions.
+Optional log compression keeps JSON records and schema 2 unchanged. It extends
+physical log storage: Ocura OSS 0.6 and earlier cannot read compressed `.log.gz`
+backing files even though they can parse the unchanged records. Before returning
+to an older version, run `ocura-oss decompress` and `ocura-oss verify`. A ledger
+that never uses compression stays directly readable by those versions.
 
-Default compression considers only a run's own finalized captured logs, once,
-at 1 MiB or larger, with gzip level 6 and a minimum 10% saving. A manual
-`compress` pass handles existing finalized logs. Storage conversion preserves
-original bytes, original hashes, record checksums, and retained manifests.
-It does not compress active streams or enforce a disk quota, and needs room
-for temporary storage alongside the source file. JSON records and workload
-artifacts are not compressed by this prototype.
+`run --compress` considers only that run's own finalized captured logs, once, at
+1 MiB or larger, with gzip level 6 and a minimum 10% saving. A manual `compress`
+pass handles existing finalized logs. Storage conversion preserves original
+bytes, original hashes, record checksums, and retained manifests. It does not
+compress active streams or enforce a disk quota, and needs room for temporary
+storage alongside the source file. JSON records and workload artifacts are never
+compressed.
 
 ### Upgrading from 0.4
 
