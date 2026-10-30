@@ -60,6 +60,16 @@ This file records user-visible changes to Ocura OSS.
   to read a stable copy of a ledger without creating lock files. Archive mode
   refuses every change, and refuses a ledger with unfinished attempts, saying how
   to list and recover them.
+- Add `ocura-oss logs`, `Store.open_verified_log()`, and `Store.log_info()`: a
+  run's verified original log bytes, `--offset`/`--length` excerpts, and storage
+  metadata with `--info` or `--json`.
+- Add opt-in lossless log compression. `run --compress` (or `--compress-min-bytes N`)
+  stores a run's captured logs of at least 1 MiB as gzip once it finishes, when that
+  saves at least 10%; `compress` and `decompress` convert finalized logs, and
+  `--dry-run` previews either. Logs stay raw by default. Records, IDs, digests, and
+  retained manifests do not change, and every reader returns the original bytes.
+  Ocura OSS 0.6 cannot read compressed logs: run `decompress` and `verify` before
+  opening the ledger with it.
 
 ## 0.6.0 - 2026-10-22
 

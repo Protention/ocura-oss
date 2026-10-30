@@ -1,67 +1,45 @@
-# Automatic log compression
+# Log compression
 
 Version 0.7.0.dev0.
 
-This draft branch prototypes lossless compression for captured stdout and stderr.
-It uses Python's standard library and leaves the original execution records,
-byte counts, SHA-256 digests, and retained manifests unchanged. It has not been
-published as a package release. This development snapshot includes the prototype;
-its rollout policy remains unsettled. Keep the pull request in draft
-for future consideration until the decisions below are settled.
+Ocura OSS can store captured stdout and stderr losslessly as gzip. Compression is
+opt-in: logs stay raw unless a run or an explicit `compress` pass asks for it.
+Records, IDs, byte counts, SHA-256 digests, and retained manifests stay unchanged,
+and every Ocura OSS reader returns the original bytes. The runtime remains
+standard-library only. Compression manages captured logs; it does not manage
+workload checkpoints or impose a disk quota.
 
-## Decisions before merge
+Raw is the default because raw logs stay readable at their recorded paths by
+standard tools and by Ocura OSS 0.6, and because compressing a large log adds time
+before `run` returns. Turn compression on when disk space matters more.
 
-- **Default policy:** this prototype compresses new eligible logs automatically.
-  Decide whether the eventual feature should instead require an explicit opt-in.
-- **Compatibility:** unchanged JSON and retained manifests do not make gzip
-  backing readable by earlier versions. Settle how storage capabilities are
-  declared before promising schema compatibility or a downgrade path.
-- **Reading large logs:** `logs` and `open_verified_log()` use bounded snapshots,
-  retaining only requested windows. Large windows need temporary disk space. Review
-  that cost and interface; `read_verified_log()` still returns a complete in-memory
-  byte string.
-- **Read-only ledgers:** plain reads skip log locks on write-protected storage,
-  and `--archive` reads without any locks or writes. Archive mode assumes stable
-  storage with no writers or unfinished attempts. Review this contract before
-  adopting it as the archive interface.
-- **Minimal interface:** review the three added CLI commands, run flags, and
-  `Store` methods. Result types remain in `ocura_oss.store`, with no new top-level
-  exports. These draft names and shapes are not a release commitment.
+## Compressing a run's logs
 
-The runtime remains standard-library only. Compression manages captured logs;
-it does not manage workload checkpoints or impose a disk quota. The controls
-below describe a runnable prototype, rather than a completed rollout policy.
-
-## When compression runs
-
-After a run has finalized its atom and chokepoint, it considers only that run's
-captured logs, once. A log is eligible at **1,048,576 original bytes (1 MiB)** by
-default. It is stored as gzip at compression level 6 only if doing so saves at
-least **10%**. Smaller logs and logs that compress poorly stay raw. Stdout and
-stderr are considered separately, regardless of the command's outcome.
-
-There is no timer, background service, or scan of old runs on every new command.
-This keeps the cost proportional to the new logs. Compression errors are reported
-as storage warnings without replacing the command's actual outcome. The recorded
-evidence remains available; `verify` still reports any damaged evidence it finds.
+`run --compress` considers that run's captured logs once, after its run record
+and branch point are final. A log is eligible at **1,048,576 original bytes
+(1 MiB)** by default. It is stored as gzip at compression level 6 only if doing so
+saves at least **10%**. Smaller logs and logs that compress poorly stay raw.
+Stdout and stderr are considered separately, regardless of the command's outcome.
 
 ```console
-ocura-oss run -- python train.py
+ocura-oss run --compress -- python train.py
 ocura-oss run --compress-min-bytes 4194304 -- python train.py
-ocura-oss run --no-compress -- python train.py
 ```
 
-`--no-compress` applies to this run. `--compress-min-bytes N` takes a nonnegative
-byte count; `0` considers every captured log, while still requiring the savings
-threshold. `--no-capture` retains no logs and has nothing to compress. The Python
-equivalents are `run(compress=False)` and `run(compression_min_bytes=N)`.
+`--compress-min-bytes N` sets the threshold and implies `--compress`. It takes a
+nonnegative byte count; `0` considers every captured log, while still requiring
+the savings threshold. `--no-capture` retains no logs and has nothing to compress.
+The Python equivalent is `run(compress=True, compression_min_bytes=N)`.
 
-The current prototype changes storage for captured logs only. JSON records and
-workload-owned artifacts, datasets, and checkpoints are outside its scope.
+There is no timer, background service, or scan of old runs. The work happens
+before `run` returns and grows with the log's size; high-entropy output costs the
+most and may then stay raw. Compression errors are reported as storage warnings
+without replacing the command's actual outcome. JSON records and workload-owned
+artifacts, datasets, and checkpoints are never compressed.
 
 ## Reading a compressed log
 
-Use the atom ID returned by `run`, or listed by `chokepoints`:
+Use the run ID returned by `run`, or listed by `runs`:
 
 ```console
 ocura-oss logs atom-<id>
@@ -96,6 +74,11 @@ The atom's recorded `stdout_log` and `stderr_log` remain logical paths; after
 compression, the physical file has an additional `.gz` suffix. Use `logs --info`
 to see which file currently holds the evidence.
 
+The compressed file is ordinary gzip, so standard tools such as `zcat`, `zgrep`,
+`zless`, `gzip -dc`, and `rg -z` read it directly at the recorded path plus `.gz`.
+They do not check the recorded SHA-256; `ocura-oss logs` and `verify` do. Windows
+PowerShell has no built-in gzip reader, so use `ocura-oss logs` there.
+
 The metadata includes a readable fingerprint, in this form:
 
 ```text
@@ -107,7 +90,7 @@ prefix of its original SHA-256. A hash cannot tell you what a log says or recrea
 the log. This descriptor helps you recognize and refer to a verified log; the
 full 64-character digest remains the integrity check. The fingerprint stays the
 same when the physical storage changes. A semantic summary would be additional,
-lossy information and is not part of this prototype.
+lossy information and is not provided.
 
 ## Existing logs and reversible storage
 
@@ -151,12 +134,12 @@ conversion needs room for its temporary compressed copy alongside that raw file.
 Decompression likewise needs space for restored bytes while compressed storage
 still exists. Already compressed or high-entropy output may save nothing.
 
-The prototype retains record **schema 2**, but adds a **physical storage
-compatibility extension**. Earlier versions do not understand the `.log.gz`
-backing files, so an unchanged schema number does not make compressed state
-readable by them. Before opening this ledger with an older version, use this
-branch's `ocura-oss decompress`, then `ocura-oss verify`. Keep `--no-compress` on
-new runs if the ledger must remain readable by those older versions.
+Records keep **schema 2**, but gzip backing is a **physical storage
+extension**. Ocura OSS 0.6 and earlier do not understand `.log.gz` files: their
+`verify` reports the log as missing and the `.gz` file as orphaned, and they
+refuse to branch from or compare those runs. Before opening a ledger with an
+older version, run `ocura-oss decompress`, then `ocura-oss verify`. A ledger that
+never uses compression stays readable by them.
 
 Retained manifests cover the original records and digests, so they remain valid
 across compression and decompression. The hash still checks local consistency;

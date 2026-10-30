@@ -36,7 +36,6 @@ class HistoryExampleTests(unittest.TestCase):
             [sys.executable, "-c", f"import sys; print('evidence' * 80); sys.exit({code})"],
             root=self.root,
             pathway_id=pathway,
-            compress=False,
         )
 
     def invoke(self, *arguments, root=None):

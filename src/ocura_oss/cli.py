@@ -162,10 +162,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
             " `ocura-oss recover` closes it. With --json, command output"
             " stays in the logs and stdout contains one result object.\n"
             "Use --no-capture when output must not be retained, and --mask-arg"
-            " for a command token that must not be recorded. Captured logs of at"
-            " least 1 MiB are considered once after finalization for lossless gzip"
-            " storage, requiring at least 10% savings. Use --no-compress to keep"
-            " raw storage and `ocura-oss logs ID` to read either form.\n"
+            " for a command token that must not be recorded. With --compress,"
+            " captured logs of at least 1 MiB are stored as gzip after finalization"
+            " when that saves at least 10%; `ocura-oss logs ID` reads either form.\n"
             "With --substitute, write {KEY} in COMMAND to pass a parameter's value"
             " and record it from one declaration: --param batch=4 --substitute --"
             ' python train.py --batch "{batch}". Quote the placeholder in PowerShell.\n'
@@ -228,16 +227,16 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         help="retain no stdout or stderr; the record states that output was not captured",
     )
     run_parser.add_argument(
-        "--no-compress",
+        "--compress",
         action="store_true",
-        help="leave this run's captured logs uncompressed after finalization",
+        help="store this run's large captured logs as gzip after finalization",
     )
     run_parser.add_argument(
         "--compress-min-bytes",
         type=int,
-        default=1_048_576,
+        default=None,
         metavar="N",
-        help="minimum original log size for automatic compression (default: 1048576)",
+        help="minimum original log size to compress (default: 1048576); implies --compress",
     )
     run_parser.add_argument(
         "--mask-arg",
@@ -769,8 +768,10 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             parameters=declared,
             mirror=mirror,
             capture=not args.no_capture,
-            compress=not args.no_compress,
-            compression_min_bytes=args.compress_min_bytes,
+            compress=args.compress or args.compress_min_bytes is not None,
+            compression_min_bytes=(
+                1_048_576 if args.compress_min_bytes is None else args.compress_min_bytes
+            ),
             masked_arguments=args.mask_arg,
             substitute=args.substitute,
             context=args.context,
