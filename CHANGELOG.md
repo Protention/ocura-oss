@@ -70,8 +70,6 @@ This file records user-visible changes to Ocura OSS.
   retained manifests do not change, and every reader returns the original bytes.
   `run` and `show` print each log's current file, reported as `log_files` in JSON
   and by `Store.log_files()`, so standard gzip tools can open compressed logs.
-  Log-file lookup failures preserve completed run results and emit storage warnings;
-  direct lookup and `show` use the existing error diagnostics.
   Ocura OSS 0.6 cannot read compressed logs: run `decompress` and `verify` before
   opening the ledger with it.
 

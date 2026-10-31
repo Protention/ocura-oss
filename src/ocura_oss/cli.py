@@ -778,13 +778,8 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             context_files=args.context_file,
         )
     atom = execution.atom
-    storage_warnings = execution.storage_warnings
-    try:
-        files = state.log_files(atom)
-    except StoreError as exc:
-        # Optional path reporting must not replace an already recorded result.
-        files = {}
-        storage_warnings += (f"log file lookup failed: {exc}",)
+    files, lookup_warnings = _log_files(state, atom)
+    storage_warnings = execution.storage_warnings + lookup_warnings
     for message in storage_warnings:
         print(f"warning: {message}", file=sys.stderr)
     if args.json:
@@ -811,6 +806,14 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
     if atom.outcome in (model.Outcome.FAILED, model.Outcome.INTERRUPTED):
         return EXIT_COMMAND_FAILED
     return EXIT_OK
+
+
+def _log_files(state: store.Store, atom: model.Atom) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Look up current log files; this report never replaces a valid record."""
+    try:
+        return state.log_files(atom), ()
+    except StoreError as exc:
+        return {}, (f"log file lookup failed: {exc}",)
 
 
 def _print_run(execution: runner.RunExecution, files: dict[str, str]) -> None:
@@ -931,9 +934,14 @@ def _runs(args: argparse.Namespace) -> int:
 def _show(args: argparse.Namespace) -> int:
     state = _open_store(args.root, archive=args.archive)
     inspected = state.inspect_run(state.resolve_id(args.atom, "atom"))
-    files = state.log_files(inspected.atom)
+    files, storage_warnings = _log_files(state, inspected.atom)
+    for message in storage_warnings:
+        print(f"warning: {message}", file=sys.stderr)
     if args.json:
-        _emit_json({**inspected.to_dict(include_command=args.command), "log_files": files})
+        payload = {**inspected.to_dict(include_command=args.command), "log_files": files}
+        if storage_warnings:
+            payload["storage_warnings"] = list(storage_warnings)
+        _emit_json(payload)
         return EXIT_OK
     atom, pathway = inspected.atom, inspected.pathway
     print(f"run: {atom.id}")
@@ -947,10 +955,12 @@ def _show(args: argparse.Namespace) -> int:
         print(f"child pathway: {child.id}  reason: {child.reason}")
     print(f"parameters: {json.dumps(dict(atom.declared_parameters), ensure_ascii=True)}")
     for stream in ("stdout", "stderr"):
-        print(f"{stream}: {files.get(stream, 'not captured')}")
         if atom.output_capture is model.OutputCapture.FULL:
+            print(f"{stream}: {files.get(stream, 'unavailable')}")
             print(f"  bytes: {getattr(atom, f'{stream}_bytes')}")
             print(f"  sha256: {getattr(atom, f'{stream}_sha256')}")
+        else:
+            print(f"{stream}: not captured")
     if args.command:
         print(f"command: {json.dumps(list(atom.command), ensure_ascii=True)}")
     print("verification: record and lineage checked; logs not checked")

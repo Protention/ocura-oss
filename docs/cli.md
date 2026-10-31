@@ -481,7 +481,9 @@ This relies on the system clock not stepping backward.
 `pathway`, `chokepoint`, `children`, `log_files`, and
 `verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
-`log_files` gives each captured stream's current file, as for `run`.
+`log_files` gives each captured stream's current file, as for `run`. If that
+lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
+still succeeds, because the run record itself is valid.
 The pathway includes the reason and source relationship. `chokepoint` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
 pathways branched from it, oldest first. Finding them scans the branch point and

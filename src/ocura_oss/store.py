@@ -754,21 +754,10 @@ class Store:
         for stream, (relative, _size, _digest) in zip(
             ("stdout", "stderr"), _recorded_logs(atom), strict=False
         ):
-            try:
+            with _log_failures(atom.id, relative):
                 path = self._evidence_path(atom.id, relative)
-                physical = logstorage.physical_path(path)
-            except logstorage.LogStorageError as exc:
-                raise StoreError(
-                    f"atom {atom.id} {exc}: {relative}", code=exc.code, ids={"run_id": atom.id}
-                ) from (exc.__cause__ or exc)
-            except (OSError, ValueError) as exc:
-                code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
-                raise StoreError(
-                    f"atom {atom.id} log is unreadable: {relative}",
-                    code=code,
-                    ids={"run_id": atom.id},
-                ) from exc
-            files[stream] = relative if physical == path else f"{relative}.gz"
+                raw = logstorage.physical_path(path) == path
+            files[stream] = relative if raw else f"{relative}.gz"
         return files
 
     def read_verified_log(
@@ -832,7 +821,7 @@ class Store:
     @contextlib.contextmanager
     def _log_guard(self, atom_id: str, relative: str, *, change: bool = False) -> Iterator[Path]:
         """Serialize cooperating readers and storage changes of one logical log."""
-        try:
+        with _log_failures(atom_id, relative):
             path = self._evidence_path(atom_id, relative)
             if self.archive:
                 self._check_archive()
@@ -854,15 +843,6 @@ class Store:
                             # Write-protected storage: read as 0.6 did; bytes are still verified.
                             self._unlocked_reads = True
                     yield path
-        except logstorage.LogStorageError as exc:
-            raise StoreError(
-                f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
-            ) from (exc.__cause__ or exc)
-        except (OSError, ValueError, TimeoutError) as exc:
-            code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
-            raise StoreError(
-                f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
-            ) from exc
 
     def log_info(
         self,
@@ -1516,6 +1496,22 @@ def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
         if relative is not None and size is not None and digest is not None:
             logs.append((relative, size, digest))
     return logs
+
+
+@contextlib.contextmanager
+def _log_failures(atom_id: str, relative: str) -> Iterator[None]:
+    """Report a log's storage failures as StoreError."""
+    try:
+        yield
+    except logstorage.LogStorageError as exc:
+        raise StoreError(
+            f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
+        ) from (exc.__cause__ or exc)
+    except (OSError, ValueError, TimeoutError) as exc:
+        code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
+        raise StoreError(
+            f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
+        ) from exc
 
 
 def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:
