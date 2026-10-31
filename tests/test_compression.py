@@ -611,6 +611,25 @@ class CompressionTests(unittest.TestCase):
                 self.assertEqual(result.stdout, b"")
                 self.assertIn(error, result.stderr)
 
+    def test_conversion_skips_a_run_finishing_during_its_scan(self):
+        atom = self._run_bytes(b"x" * 2048).atom
+        attempt = self.store._attempt_path(atom.id)
+        attempt.touch()
+        list_chokepoints = self.store.list_chokepoints
+
+        def finish_during_scan():
+            points = [point for point in list_chokepoints() if point.atom_id != atom.id]
+            attempt.unlink()
+            return points
+
+        with mock.patch.object(self.store, "list_chokepoints", finish_during_scan):
+            self.assertEqual(self.store.compress_logs(min_bytes=0), ())
+        with (
+            mock.patch.object(self.store, "list_chokepoints", return_value=[]),
+            self.assertRaisesRegex(StoreError, "no terminal chokepoint"),
+        ):
+            self.store.compress_logs(min_bytes=0)
+
     def test_log_lookup_failure_raises_but_show_keeps_the_record(self):
         atom = self._run_bytes(b"retained evidence").atom
         raw, packed = self._paths(atom)

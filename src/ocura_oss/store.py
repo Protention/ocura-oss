@@ -907,11 +907,12 @@ class Store:
         self.require()
         self.load_den()
         atoms = [self.load_atom(atom_id)] if atom_id is not None else self.list_atoms()
+        # A run removes its attempt after writing its chokepoint. Checking in that
+        # order keeps a run finishing during this scan from looking incomplete.
+        finished = [atom for atom in atoms if not self._attempt_path(atom.id).exists()]
         terminal_atoms = {point.atom_id for point in self.list_chokepoints()}
         changes: list[LogStorageChange] = []
-        for listed in atoms:
-            if self._attempt_path(listed.id).exists():
-                continue
+        for listed in finished:
             atom = self.load_atom(listed.id)
             if atom.id not in terminal_atoms:
                 raise StoreError(f"atom {atom.id} has no terminal chokepoint")
