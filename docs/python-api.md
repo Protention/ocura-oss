@@ -182,8 +182,8 @@ Run one trusted local command and record terminal evidence.
 
 `RunExecution` exposing the recorded `RunRecord` as `.record`, terminal
 `BranchPoint` as `.branch_point`, and
-`storage_warnings`, a tuple of post-finalization compression errors (empty on
-success). Compression warnings do not replace the command's actual outcome.
+`storage_warnings`, a tuple of post-finalization compression errors or stop requests
+(empty on success). Compression warnings do not replace the command's actual outcome.
 
 #### Raises
 
@@ -1514,7 +1514,7 @@ Records produced by one command attempt.
 | `atom` | `RunRecord` | Compatible constructor field and property |
 | `branch_point` | `BranchPoint` | Preferred property for the terminal evidence boundary |
 | `chokepoint` | `BranchPoint` | Compatible constructor field and property |
-| `storage_warnings` | tuple of strings | Post-finalization compression errors; actual command outcome remains recorded on the run record |
+| `storage_warnings` | tuple of strings | Post-finalization compression errors or stop requests; actual command outcome remains recorded on the run record |
 
 ### `ocura_oss.RunSummary`
 

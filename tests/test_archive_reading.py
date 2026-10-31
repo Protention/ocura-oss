@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from ocura_oss import Store, StoreError, initialize, logstorage, run
+from ocura_oss import Store, StoreError, initialize, locking, logstorage, run
 
 
 class ArchiveReadTests(unittest.TestCase):
@@ -225,10 +225,14 @@ class ArchiveReadTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b"")
 
-    def test_normal_reads_skip_locks_only_on_write_protected_storage(self):
+    def test_normal_reads_skip_locks_only_where_none_can_be_taken(self):
         data = b"evidence " * 100
         atom = self.record(data).atom
-        for denied in (PermissionError("lock denied"), OSError(errno.EROFS, "read-only")):
+        for denied in (
+            PermissionError("lock denied"),
+            OSError(errno.EROFS, "read-only"),
+            locking.LockUnavailable(errno.ENOLCK, "no locks available"),
+        ):
             for change, encoding in (
                 (lambda store: store.compress_logs(atom_id=atom.id, min_bytes=1), "raw"),
                 (lambda store: store.decompress_logs(atom_id=atom.id), "gzip"),

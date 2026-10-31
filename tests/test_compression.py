@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
-from ocura_oss import api, cli, locking, model, runner
+from ocura_oss import api, cli, locking, logstorage, model, runner
 from ocura_oss.store import Store, StoreError
 
 _MIB = 1024 * 1024
@@ -391,9 +391,10 @@ class CompressionTests(unittest.TestCase):
                         f"ocura_oss.logstorage.{target}",
                         side_effect=OSError("injected write failure"),
                     ),
-                    self.assertRaises(StoreError),
+                    self.assertRaises(StoreError) as failure,
                 ):
                     self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+                self.assertEqual(failure.exception.code, "io_error")
                 self.assertEqual(raw.read_bytes(), data)
                 self.assertFalse(packed.exists())
                 self.assertEqual(self._snapshot(), before)
@@ -448,11 +449,12 @@ class CompressionTests(unittest.TestCase):
         with (
             mock.patch(
                 "ocura_oss.logstorage.os.replace",
-                side_effect=OSError("injected publication failure"),
+                side_effect=PermissionError("injected publication failure"),
             ),
-            self.assertRaises(StoreError),
+            self.assertRaises(StoreError) as failure,
         ):
             self.store.decompress_logs(atom_id=atom.id)
+        self.assertEqual(failure.exception.code, "permission_denied")
         self.assertFalse(raw.exists())
         self.assertEqual(gzip.decompress(packed.read_bytes()), data)
         self.assertEqual(self._snapshot(), before)
@@ -469,6 +471,41 @@ class CompressionTests(unittest.TestCase):
         self.assertIn("injected storage failure", execution.storage_warnings[0])
         self.assertEqual(self.store.read_verified_log(execution.atom.id), b"recorded output")
         self.assertEqual(self.store.list_attempts(), [])
+        self.assertTrue(self.store.verify_state().ok)
+
+    def test_stop_during_compression_finishes_the_run_and_keeps_converted_streams(self):
+        compress = logstorage.compress
+
+        def stop_at_stderr(path, *args, **kwargs):
+            if path.name.endswith(".stderr.log"):
+                raise KeyboardInterrupt
+            return compress(path, *args, **kwargs)
+
+        with mock.patch("ocura_oss.logstorage.compress", stop_at_stderr):
+            execution = self._run_bytes(b"a" * _MIB, stderr=b"b" * _MIB, compress=True)
+        self.assertIs(execution.atom.outcome, model.Outcome.PASSED)
+        self.assertIn("log compression stopped", execution.storage_warnings[0])
+        self.assertEqual(self.store.list_attempts(), [])
+        self.assertTrue(self.store.verify_state().ok)
+        self.assertTrue(self._paths(execution.atom)[1].is_file())
+        stderr, stderr_packed = self._paths(execution.atom, "stderr")
+        self.assertTrue(stderr.is_file())
+        self.store.compress_logs()
+        self.assertTrue(stderr_packed.is_file())
+
+    def test_directory_linked_outside_the_project_reports_recorded_paths(self):
+        target = self.root.parent / "elsewhere"
+        self.store.logs_dir.rename(target)
+        try:
+            self.store.logs_dir.symlink_to(target, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+        atom = self._run_bytes(b"linked" * 10000).atom
+        self.assertEqual(self.store.log_info(atom.id).path, atom.stdout_log)
+        change = self._stdout_change(self.store.compress_logs(atom_id=atom.id, min_bytes=1), atom)
+        self.assertEqual(change.path, f"{atom.stdout_log}.gz")
+        self.assertEqual(self.store.log_info(atom.id).path, change.path)
+        self.assertEqual(self.store.log_files(atom)["stdout"], change.path)
         self.assertTrue(self.store.verify_state().ok)
 
     @unittest.skipUnless(sys.platform == "win32", "Windows lock-file handoff")
@@ -581,6 +618,31 @@ class CompressionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, expected)
                 self.assertEqual(result.stderr, b"")
+
+    def test_cli_logs_stop_quietly_when_the_reader_closes(self):
+        atom = self._run_bytes(b"more than a pipe holds\n" * 200000).atom
+        for flags in ((), ("--json-errors",)):
+            with self.subTest(flags=flags):
+                reader = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "ocura_oss",
+                        "logs",
+                        atom.id,
+                        "--root",
+                        str(self.root),
+                        *flags,
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                self.assertTrue(reader.stdout.read(100))
+                reader.stdout.close()
+                stderr = reader.stderr.read()
+                reader.stderr.close()
+                self.assertEqual(reader.wait(), 0, stderr)
+                self.assertEqual(stderr, b"")
 
     def test_cli_rejects_late_gzip_corruption_without_releasing_log_bytes(self):
         data = b"original verified output\n" * 150000

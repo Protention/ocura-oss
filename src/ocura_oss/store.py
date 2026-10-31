@@ -756,8 +756,7 @@ class Store:
         ):
             with _log_failures(atom.id, relative):
                 path = self._evidence_path(atom.id, relative)
-                raw = logstorage.physical_path(path) == path
-            files[stream] = relative if raw else f"{relative}.gz"
+                files[stream] = _stored_path(relative, logstorage.physical_path(path), path)
         return files
 
     def read_verified_log(
@@ -837,10 +836,12 @@ class Store:
                             lock = locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None)
                             stack.enter_context(lock)
                         except OSError as exc:
-                            denied = isinstance(exc, PermissionError) or exc.errno == errno.EROFS
+                            denied = exc.errno == errno.EROFS or isinstance(
+                                exc, (PermissionError, locking.LockUnavailable)
+                            )
                             if change or not denied:
                                 raise
-                            # Write-protected storage: read as 0.6 did; bytes are still verified.
+                            # No usable lock here: read as 0.6 did; bytes are still verified.
                             self._unlocked_reads = True
                     yield path
 
@@ -867,7 +868,7 @@ class Store:
                 stored_bytes=physical.stat().st_size,
                 sha256=digest,
                 fingerprint=f"{stream}/{atom_id[5:13]}/sha256:{digest[:12]}",
-                path=physical.relative_to(self.root).as_posix(),
+                path=_stored_path(relative, physical, path),
             )
 
     def compress_logs(
@@ -954,7 +955,7 @@ class Store:
                         action=result.action,
                         original_bytes=result.original_bytes,
                         stored_bytes=result.stored_bytes,
-                        path=result.path.relative_to(self.root).as_posix(),
+                        path=_stored_path(relative, result.path, path),
                     )
                 )
         return tuple(changes)
@@ -1513,6 +1514,11 @@ def _log_failures(atom_id: str, relative: str) -> Iterator[None]:
         raise StoreError(
             f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
         ) from exc
+
+
+def _stored_path(relative: str, physical: Path, path: Path) -> str:
+    """Name a log's current file from its recorded path, which a linked directory keeps."""
+    return relative if physical == path else f"{relative}.gz"
 
 
 def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:

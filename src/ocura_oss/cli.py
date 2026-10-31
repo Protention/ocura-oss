@@ -5,7 +5,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import errno
 import json
+import os
 import sys
 from collections.abc import Sequence
 from dataclasses import asdict
@@ -1198,9 +1201,20 @@ def _logs(args: argparse.Namespace) -> int:
     with state.open_verified_log(
         atom_id, stream=args.stream, offset=args.offset, length=args.length
     ) as source:
-        while chunk := source.read(1024 * 1024):
-            output.write(chunk)
-    output.flush()
+        try:
+            while chunk := source.read(1024 * 1024):
+                output.write(chunk)
+            output.flush()
+        except OSError as exc:
+            # A reader such as `head` may stop early; Windows can report that as EINVAL.
+            closed = sys.platform == "win32" and exc.errno == errno.EINVAL
+            if not (closed or isinstance(exc, BrokenPipeError)):
+                raise
+            # Keep the interpreter's final flush of stdout from failing as well.
+            with contextlib.suppress(OSError):
+                discard = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(discard, output.fileno())
+                os.close(discard)
     return EXIT_OK
 
 

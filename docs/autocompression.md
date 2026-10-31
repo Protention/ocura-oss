@@ -34,7 +34,9 @@ The Python equivalent is `run(compress=True, compression_min_bytes=N)`.
 There is no timer, background service, or scan of old runs. The work happens
 before `run` returns and grows with the log's size; high-entropy output costs the
 most and may then stay raw. Compression errors are reported as storage warnings
-without replacing the command's actual outcome. JSON records and workload-owned
+without replacing the command's actual outcome. So is a stop request during
+compression: the run still finishes normally, a log already converted stays gzip,
+and `ocura-oss compress` can finish the rest. JSON records and workload-owned
 artifacts, datasets, and checkpoints are never compressed.
 
 ## Reading a compressed log

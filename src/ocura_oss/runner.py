@@ -254,6 +254,9 @@ def run_command(
                     )
                 except StoreError as exc:
                     storage_warnings = (f"log compression failed: {exc}",)
+                except KeyboardInterrupt:
+                    # A stop request ends this optional step, not the finished run.
+                    storage_warnings = ("log compression stopped; `compress` can finish it",)
             # Last, and while still holding the attempt's lock: a reader then sees
             # either a live attempt or a complete atom and chokepoint.
             store._remove_attempt(attempt.id)

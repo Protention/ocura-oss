@@ -318,7 +318,7 @@ def compress(
         raw.unlink()
         return StorageResult("compressed", size, stored, compressed)
     except (OSError, EOFError, zlib.error, ValueError) as exc:
-        raise LogStorageError(f"cannot compress log: {path}") from exc
+        raise LogStorageError(f"cannot compress log: {path}", code=_read_error_code(exc)) from exc
     finally:
         _discard(temporary)
 
@@ -353,6 +353,6 @@ def restore(path: Path, size: int, digest: str, *, dry_run: bool = False) -> Sto
         compressed.unlink()
         return StorageResult("restored", size, size, raw)
     except (OSError, EOFError, zlib.error, ValueError) as exc:
-        raise LogStorageError(f"cannot restore log: {path}") from exc
+        raise LogStorageError(f"cannot restore log: {path}", code=_read_error_code(exc)) from exc
     finally:
         _discard(temporary)

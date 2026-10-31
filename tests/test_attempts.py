@@ -3,6 +3,7 @@
 """Attempt journal, liveness locks, recovery, and concurrent recording."""
 
 import contextlib
+import errno
 import io
 import json
 import os
@@ -71,11 +72,42 @@ def stop(process):
             stream.close()
 
 
+@contextlib.contextmanager
+def lock_call_fails(code):
+    """Make the operating system's lock call fail with *code*."""
+    if sys.platform == "win32":
+        with (
+            mock.patch.object(locking, "_kernel32") as kernel,
+            mock.patch.object(locking.ctypes, "get_last_error", return_value=code),
+        ):
+            kernel.LockFileEx.return_value = 0
+            yield
+    else:
+        with mock.patch.object(locking.fcntl, "flock", side_effect=OSError(code, "injected")):
+            yield
+
+
 class LockTests(unittest.TestCase):
     def setUp(self):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.path = Path(self._temporary.name) / "attempt.lock"
+
+    def test_only_contention_looks_like_a_held_lock(self):
+        busy, refused = (33, 50) if sys.platform == "win32" else (errno.EAGAIN, errno.ENOLCK)
+        with (
+            lock_call_fails(busy),
+            self.assertRaises(TimeoutError),
+            locking.hold(self.path, wait_limit=0),
+        ):
+            self.fail("a busy lock must not be taken")
+        with lock_call_fails(refused):
+            with (
+                self.assertRaises(locking.LockUnavailable),
+                locking.hold(self.path, wait_limit=None),
+            ):
+                self.fail("a refused lock must not be taken")
+            self.assertTrue(locking.is_held(self.path), "a recorder may still be alive")
 
     def test_missing_lock_file_is_not_held(self):
         self.assertFalse(locking.is_held(self.path))

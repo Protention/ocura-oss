@@ -298,7 +298,7 @@ storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
 | `stdout_log` | string or null | Project-relative stdout log path; null without capture |
 | `stderr_log` | string or null | Project-relative stderr log path; null without capture |
 | `log_files` | object | Each captured stream's current file: the recorded path, plus `.gz` when stored as gzip; empty without capture or when lookup fails |
-| `storage_warnings` | array of strings, optional | Post-finalization compression or log-file lookup errors, present only when nonempty; also printed on stderr |
+| `storage_warnings` | array of strings, optional | Post-finalization compression errors or stop requests, or log-file lookup errors, present only when nonempty; also printed on stderr |
 
 If log-file lookup fails, `run` preserves the recorded result, IDs, and exit status,
 returns empty `log_files`, and reports a storage warning. Text output marks the
@@ -353,10 +353,11 @@ attempt records, saying how to list and recover them, and assumes the storage
 remains unchanged while reading; it does not coordinate with active writers.
 
 Normal mode takes a lock for each log it reads. When the storage is write-protected
-it reads without one, as 0.6.0 did; every byte is still verified, so a concurrent
-change makes the read fail rather than return wrong data. `compress` and
-`decompress` still require the lock. Unlike archive mode, this also reads ledgers
-with unfinished attempts and lists them.
+or refuses file locks, it reads without one, as 0.6.0 did; every byte is still
+verified, so a concurrent change makes the read fail rather than return wrong data.
+`compress` and `decompress` still require the lock, so do not run them against such
+storage from another machine. Unlike archive mode, this also reads ledgers with
+unfinished attempts and lists them.
 
 Content snapshots may need writable OS temporary storage outside the archive.
 Archive mode does not introduce an export format or snapshot an active ledger.
@@ -394,7 +395,8 @@ temporary space about that size; set `TMPDIR` to choose where, or read a range.
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded
 transparently. A missing log, damaged evidence, or a run recorded without
-capture returns status 2 without printing log contents. Success returns 0.
+capture returns status 2 without printing log contents. Success returns 0, as does
+a reader that closes the pipe early, as `head` does; the output simply stops there.
 
 Metadata fields in both `--info` and `--json` are `atom_id`, `stream`, `outcome`,
 `started_at`, `encoding` (`raw` or `gzip`), `original_bytes`, `stored_bytes`,
