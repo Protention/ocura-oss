@@ -650,10 +650,24 @@ class KilledRecorderTests(ProcessTestCase):
 
 class ConcurrentRecordingTests(ProcessTestCase):
     def test_runs_sharing_a_root_never_look_like_damage(self):
+        self.assert_recorders_look_healthy()
+
+    def test_compressing_runs_sharing_a_root_never_look_like_damage(self):
+        self.assert_recorders_look_healthy("--compress-min-bytes", "0")
+
+    def assert_recorders_look_healthy(self, *flags):
         command = "import time; print('x' * 4096); time.sleep(0.4)"
         recorders = [
             self.spawn(
-                "run", "--root", str(self.root), "--json", "--", sys.executable, "-c", command
+                "run",
+                "--root",
+                str(self.root),
+                "--json",
+                *flags,
+                "--",
+                sys.executable,
+                "-c",
+                command,
             )
             for _ in range(6)
         ]

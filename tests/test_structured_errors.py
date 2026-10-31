@@ -126,6 +126,7 @@ class StructuredErrorTests(unittest.TestCase):
             "output_capture",
             "stdout_log",
             "stderr_log",
+            "log_files",
         }
         for command, status, outcome in (
             ([sys.executable, "-c", "print('ordinary output')"], 0, "passed"),

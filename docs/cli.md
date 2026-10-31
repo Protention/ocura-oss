@@ -297,7 +297,12 @@ storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
 | `output_capture` | string | `full`, or `none` when `--no-capture` was used |
 | `stdout_log` | string or null | Project-relative stdout log path; null without capture |
 | `stderr_log` | string or null | Project-relative stderr log path; null without capture |
-| `storage_warnings` | array of strings, optional | Post-finalization compression errors, present only when nonempty; also printed on stderr |
+| `log_files` | object | Each captured stream's current file: the recorded path, plus `.gz` when stored as gzip; empty without capture or when lookup fails |
+| `storage_warnings` | array of strings, optional | Post-finalization compression or log-file lookup errors, present only when nonempty; also printed on stderr |
+
+If log-file lookup fails, `run` preserves the recorded result, IDs, and exit status,
+returns empty `log_files`, and reports a storage warning. Text output marks the
+current log files as unavailable; the recorded logical paths remain in JSON.
 
 Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.7` branch.
 
@@ -383,11 +388,12 @@ bytes outside the range, before releasing any output.
 Only the returned window is retained. Windows of at most 1 MiB stay in memory;
 larger windows use OS temporary storage, removed on close. RAM stays bounded for
 large content reads, with one decoding pass. A short range still scans the entire
-original stream for SHA-256 verification.
+original stream for SHA-256 verification. A complete read of a large log needs free
+temporary space about that size; set `TMPDIR` to choose where, or read a range.
 
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded
-transparently. A missing log, damaged evidence, or an run recorded without
+transparently. A missing log, damaged evidence, or a run recorded without
 capture returns status 2 without printing log contents. Success returns 0.
 
 Metadata fields in both `--info` and `--json` are `atom_id`, `stream`, `outcome`,
@@ -473,9 +479,12 @@ its last page. Otherwise, list again once they finish or `recover` closes them.
 This relies on the system clock not stepping backward.
 
 `show` selects one run record, validates its record and lineage, and returns `atom`,
-`pathway`, `chokepoint`, `children`, and
+`pathway`, `chokepoint`, `children`, `log_files`, and
 `verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
+`log_files` gives each captured stream's current file, as for `run`. If that
+lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
+still succeeds, because the run record itself is valid.
 The pathway includes the reason and source relationship. `chokepoint` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
 pathways branched from it, oldest first. Finding them scans the branch point and

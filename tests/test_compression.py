@@ -611,6 +611,87 @@ class CompressionTests(unittest.TestCase):
                 self.assertEqual(result.stdout, b"")
                 self.assertIn(error, result.stderr)
 
+    def test_conversion_skips_a_run_finishing_during_its_scan(self):
+        atom = self._run_bytes(b"x" * 2048).atom
+        attempt = self.store._attempt_path(atom.id)
+        attempt.touch()
+        list_chokepoints = self.store.list_chokepoints
+
+        def finish_during_scan():
+            points = [point for point in list_chokepoints() if point.atom_id != atom.id]
+            attempt.unlink()
+            return points
+
+        with mock.patch.object(self.store, "list_chokepoints", finish_during_scan):
+            self.assertEqual(self.store.compress_logs(min_bytes=0), ())
+        with (
+            mock.patch.object(self.store, "list_chokepoints", return_value=[]),
+            self.assertRaisesRegex(StoreError, "no terminal chokepoint"),
+        ):
+            self.store.compress_logs(min_bytes=0)
+
+    def test_log_lookup_failure_raises_but_show_keeps_the_record(self):
+        atom = self._run_bytes(b"retained evidence").atom
+        raw, packed = self._paths(atom)
+        packed.mkdir()
+        with self.assertRaises(StoreError) as failure:
+            self.store.log_files(atom)
+        self.assertEqual(failure.exception.code, "integrity_error")
+        self.assertEqual(failure.exception.ids, {"run_id": atom.id})
+        for flags in ((), ("--archive",)):
+            with self.subTest(flags=flags):
+                code, stdout, stderr = self._cli("show", atom.id, "--json-errors", *flags)
+                self.assertEqual(code, 0)
+                shown = json.loads(stdout)
+                self.assertEqual(shown["atom"]["id"], atom.id)
+                self.assertEqual(shown["log_files"], {})
+                self.assertIn("not a regular file", shown["storage_warnings"][0])
+                self.assertIn("log file lookup failed", stderr)
+        self.assertIn("stdout: unavailable", self._cli("show", atom.id)[1])
+        self.assertEqual(raw.read_bytes(), b"retained evidence")
+
+    def test_cli_log_lookup_failure_preserves_completed_run_results(self):
+        script = (
+            "from pathlib import Path; import sys; "
+            "attempt = next(Path('.ocura-oss/attempts').glob('*.json')); "
+            "Path('.ocura-oss/logs', attempt.stem + '.stdout.log.gz').mkdir(); "
+            "sys.stdout.write('x' * 2048); sys.exit(int(sys.argv[1]))"
+        )
+        for flags, return_code in ((("--json-errors",), 7), ((), 0)):
+            with self.subTest(flags=flags):
+                previous = {atom.id for atom in self.store.list_atoms()}
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = cli.main(
+                        [
+                            "run",
+                            "--root",
+                            str(self.root),
+                            "--quiet",
+                            *flags,
+                            "--compress-min-bytes",
+                            "1024",
+                            "--",
+                            sys.executable,
+                            "-c",
+                            script,
+                            str(return_code),
+                        ]
+                    )
+                self.assertEqual(code, 0 if return_code == 0 else 1)
+                (atom,) = [item for item in self.store.list_atoms() if item.id not in previous]
+                self.assertEqual(atom.return_code, return_code)
+                if flags:
+                    payload = json.loads(stdout.getvalue())
+                    self.assertEqual(payload["atom_id"], atom.id)
+                    self.assertEqual(payload["log_files"], {})
+                    self.assertEqual(len(payload["storage_warnings"]), 2)
+                else:
+                    self.assertIn("stdout log: unavailable", stdout.getvalue())
+                self.assertIn("log file lookup failed", stderr.getvalue())
+                self.assertEqual((self.root / atom.stdout_log).read_bytes(), b"x" * 2048)
+                self.assertEqual(self.store.list_attempts(), [])
+
     def test_cli_run_compression_flags(self):
         for flags, compressed in (
             ([], False),
@@ -638,6 +719,13 @@ class CompressionTests(unittest.TestCase):
                 raw, packed = self._paths(atom)
                 self.assertEqual(packed.is_file(), compressed)
                 self.assertEqual(raw.is_file(), not compressed)
+                # Reported files exist, so standard tools can open them.
+                stored = packed if compressed else raw
+                self.assertEqual(self.root / result["log_files"]["stdout"], stored)
+                shown = io.StringIO()
+                with contextlib.redirect_stdout(shown):
+                    cli.main(["show", atom.id, "--root", str(self.root), "--json"])
+                self.assertEqual(json.loads(shown.getvalue())["log_files"], result["log_files"])
 
 
 if __name__ == "__main__":

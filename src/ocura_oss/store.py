@@ -743,6 +743,23 @@ class Store:
         with self._log_guard(atom.id, relative) as path:
             return logstorage.physical_path(path)
 
+    def log_files(self, atom: model.Atom) -> dict[str, str]:
+        """Return each captured log's current file, relative to the project root.
+
+        A log stored as gzip is the recorded path plus ``.gz``. Only the paths and
+        the files' presence are checked: nothing is read, verified, or locked.
+        Unsafe or unreadable paths raise StoreError.
+        """
+        files: dict[str, str] = {}
+        for stream, (relative, _size, _digest) in zip(
+            ("stdout", "stderr"), _recorded_logs(atom), strict=False
+        ):
+            with _log_failures(atom.id, relative):
+                path = self._evidence_path(atom.id, relative)
+                raw = logstorage.physical_path(path) == path
+            files[stream] = relative if raw else f"{relative}.gz"
+        return files
+
     def read_verified_log(
         self,
         atom_id: str | None = None,
@@ -804,7 +821,7 @@ class Store:
     @contextlib.contextmanager
     def _log_guard(self, atom_id: str, relative: str, *, change: bool = False) -> Iterator[Path]:
         """Serialize cooperating readers and storage changes of one logical log."""
-        try:
+        with _log_failures(atom_id, relative):
             path = self._evidence_path(atom_id, relative)
             if self.archive:
                 self._check_archive()
@@ -826,15 +843,6 @@ class Store:
                             # Write-protected storage: read as 0.6 did; bytes are still verified.
                             self._unlocked_reads = True
                     yield path
-        except logstorage.LogStorageError as exc:
-            raise StoreError(
-                f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
-            ) from (exc.__cause__ or exc)
-        except (OSError, ValueError, TimeoutError) as exc:
-            code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
-            raise StoreError(
-                f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
-            ) from exc
 
     def log_info(
         self,
@@ -899,11 +907,12 @@ class Store:
         self.require()
         self.load_den()
         atoms = [self.load_atom(atom_id)] if atom_id is not None else self.list_atoms()
+        # A run removes its attempt after writing its chokepoint. Checking in that
+        # order keeps a run finishing during this scan from looking incomplete.
+        finished = [atom for atom in atoms if not self._attempt_path(atom.id).exists()]
         terminal_atoms = {point.atom_id for point in self.list_chokepoints()}
         changes: list[LogStorageChange] = []
-        for listed in atoms:
-            if self._attempt_path(listed.id).exists():
-                continue
+        for listed in finished:
             atom = self.load_atom(listed.id)
             if atom.id not in terminal_atoms:
                 raise StoreError(f"atom {atom.id} has no terminal chokepoint")
@@ -1488,6 +1497,22 @@ def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
         if relative is not None and size is not None and digest is not None:
             logs.append((relative, size, digest))
     return logs
+
+
+@contextlib.contextmanager
+def _log_failures(atom_id: str, relative: str) -> Iterator[None]:
+    """Report a log's storage failures as StoreError."""
+    try:
+        yield
+    except logstorage.LogStorageError as exc:
+        raise StoreError(
+            f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
+        ) from (exc.__cause__ or exc)
+    except (OSError, ValueError, TimeoutError) as exc:
+        code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
+        raise StoreError(
+            f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
+        ) from exc
 
 
 def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:

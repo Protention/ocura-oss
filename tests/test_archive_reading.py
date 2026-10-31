@@ -228,13 +228,23 @@ class ArchiveReadTests(unittest.TestCase):
     def test_normal_reads_skip_locks_only_on_write_protected_storage(self):
         data = b"evidence " * 100
         atom = self.record(data).atom
-        with patch("ocura_oss.locking.hold", side_effect=PermissionError("lock denied")) as hold:
-            self.assertEqual(self.store.read_verified_log(atom.id), data)
-            self.assertTrue(self.store.verify_state().ok)
-            self.assertEqual(hold.call_count, 1)
-            with self.assertRaisesRegex(StoreError, "unreadable"):
-                self.store.compress_logs(atom_id=atom.id, min_bytes=1)
-        self.assertEqual(self.store.log_info(atom.id).encoding, "raw")
+        for denied in (PermissionError("lock denied"), OSError(errno.EROFS, "read-only")):
+            for change, encoding in (
+                (lambda store: store.compress_logs(atom_id=atom.id, min_bytes=1), "raw"),
+                (lambda store: store.decompress_logs(atom_id=atom.id), "gzip"),
+            ):
+                with self.subTest(denied=denied, encoding=encoding):
+                    self.store.decompress_logs(atom_id=atom.id)
+                    if encoding == "gzip":
+                        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+                    store = Store(self.root)
+                    with patch("ocura_oss.locking.hold", side_effect=denied) as hold:
+                        self.assertEqual(store.read_verified_log(atom.id), data)
+                        self.assertTrue(store.verify_state().ok)
+                        self.assertEqual(hold.call_count, 1)
+                        with self.assertRaisesRegex(StoreError, "unreadable"):
+                            change(store)
+                    self.assertEqual(self.store.log_info(atom.id).encoding, encoding)
         with (
             patch("ocura_oss.locking.hold", side_effect=OSError(errno.EIO, "lock failed")),
             self.assertRaisesRegex(StoreError, "log is unreadable"),

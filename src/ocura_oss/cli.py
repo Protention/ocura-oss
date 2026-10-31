@@ -778,7 +778,9 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             context_files=args.context_file,
         )
     atom = execution.atom
-    for message in execution.storage_warnings:
+    files, lookup_warnings = _log_files(state, atom)
+    storage_warnings = execution.storage_warnings + lookup_warnings
+    for message in storage_warnings:
         print(f"warning: {message}", file=sys.stderr)
     if args.json:
         payload: dict[str, object] = {
@@ -792,12 +794,13 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             "output_capture": atom.output_capture.value,
             "stdout_log": atom.stdout_log,
             "stderr_log": atom.stderr_log,
+            "log_files": files,
         }
-        if execution.storage_warnings:
-            payload["storage_warnings"] = list(execution.storage_warnings)
+        if storage_warnings:
+            payload["storage_warnings"] = list(storage_warnings)
         _emit_json(payload)
     else:
-        _print_run(execution)
+        _print_run(execution, files)
     if atom.outcome is model.Outcome.LAUNCH_FAILED:
         return EXIT_LAUNCH_FAILED
     if atom.outcome in (model.Outcome.FAILED, model.Outcome.INTERRUPTED):
@@ -805,7 +808,15 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
     return EXIT_OK
 
 
-def _print_run(execution: runner.RunExecution) -> None:
+def _log_files(state: store.Store, atom: model.Atom) -> tuple[dict[str, str], tuple[str, ...]]:
+    """Look up current log files; this report never replaces a valid record."""
+    try:
+        return state.log_files(atom), ()
+    except StoreError as exc:
+        return {}, (f"log file lookup failed: {exc}",)
+
+
+def _print_run(execution: runner.RunExecution, files: dict[str, str]) -> None:
     atom = execution.atom
     print(f"run: {atom.id}")
     print(f"branch point: {execution.chokepoint.id}")
@@ -813,8 +824,8 @@ def _print_run(execution: runner.RunExecution) -> None:
     print(f"outcome: {atom.outcome.value}")
     print(f"duration: {atom.duration_seconds:.6f}s")
     if atom.output_capture is model.OutputCapture.FULL:
-        print(f"stdout log: {atom.stdout_log}")
-        print(f"stderr log: {atom.stderr_log}")
+        print(f"stdout log: {files.get('stdout', 'unavailable')}")
+        print(f"stderr log: {files.get('stderr', 'unavailable')}")
         print(f"read: ocura-oss logs {atom.id}")
     else:
         print("output: not captured")
@@ -923,8 +934,14 @@ def _runs(args: argparse.Namespace) -> int:
 def _show(args: argparse.Namespace) -> int:
     state = _open_store(args.root, archive=args.archive)
     inspected = state.inspect_run(state.resolve_id(args.atom, "atom"))
+    files, storage_warnings = _log_files(state, inspected.atom)
+    for message in storage_warnings:
+        print(f"warning: {message}", file=sys.stderr)
     if args.json:
-        _emit_json(inspected.to_dict(include_command=args.command))
+        payload = {**inspected.to_dict(include_command=args.command), "log_files": files}
+        if storage_warnings:
+            payload["storage_warnings"] = list(storage_warnings)
+        _emit_json(payload)
         return EXIT_OK
     atom, pathway = inspected.atom, inspected.pathway
     print(f"run: {atom.id}")
@@ -938,10 +955,12 @@ def _show(args: argparse.Namespace) -> int:
         print(f"child pathway: {child.id}  reason: {child.reason}")
     print(f"parameters: {json.dumps(dict(atom.declared_parameters), ensure_ascii=True)}")
     for stream in ("stdout", "stderr"):
-        print(f"{stream}: {getattr(atom, f'{stream}_log') or 'not captured'}")
         if atom.output_capture is model.OutputCapture.FULL:
+            print(f"{stream}: {files.get(stream, 'unavailable')}")
             print(f"  bytes: {getattr(atom, f'{stream}_bytes')}")
             print(f"  sha256: {getattr(atom, f'{stream}_sha256')}")
+        else:
+            print(f"{stream}: not captured")
     if args.command:
         print(f"command: {json.dumps(list(atom.command), ensure_ascii=True)}")
     print("verification: record and lineage checked; logs not checked")
