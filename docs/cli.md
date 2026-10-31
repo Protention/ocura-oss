@@ -279,9 +279,10 @@ A passing command records `passed`. A nonzero return code records `failed`. A la
 
 The final text summary includes the run record, branch point, pathway, outcome, duration, log paths, and the return code or launch category when available. With `--no-capture`, it states `output: not captured` in place of the log paths. It does not repeat command arguments or parameter values; `pathways` lists a pathway's parameters and `compare` lists what each run recorded.
 
-Log paths in the run summary and run record are logical paths; compressed physical
-storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
---info` to find its current backing path. The text summary includes a read command.
+The run summary prints each log's current file. The run record keeps the logical
+path, which never changes; compressed physical storage appends `.gz`. Use `logs ID`
+to read either representation or `logs ID --info` to find its current backing path.
+The text summary includes a read command.
 
 #### JSON output
 
@@ -295,8 +296,8 @@ storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
 | `return_code` | integer or null | Child exit status when available |
 | `launch_error_category` | string or null | Error category or `interrupted` |
 | `output_capture` | string | `full`, or `none` when `--no-capture` was used |
-| `stdout_log` | string or null | Project-relative stdout log path; null without capture |
-| `stderr_log` | string or null | Project-relative stderr log path; null without capture |
+| `stdout_log` | string or null | Project-relative recorded stdout log path; null without capture. A compressed log is not at this path, so open files through `log_files` |
+| `stderr_log` | string or null | Project-relative recorded stderr log path; null without capture. A compressed log is not at this path, so open files through `log_files` |
 | `log_files` | object | Each captured stream's current file: the recorded path, plus `.gz` when stored as gzip; empty without capture or when lookup fails |
 | `storage_warnings` | array of strings, optional | Post-finalization compression errors or stop requests, or log-file lookup errors, present only when nonempty; also printed on stderr |
 
