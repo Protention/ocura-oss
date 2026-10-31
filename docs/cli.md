@@ -388,11 +388,12 @@ bytes outside the range, before releasing any output.
 Only the returned window is retained. Windows of at most 1 MiB stay in memory;
 larger windows use OS temporary storage, removed on close. RAM stays bounded for
 large content reads, with one decoding pass. A short range still scans the entire
-original stream for SHA-256 verification.
+original stream for SHA-256 verification. A complete read of a large log needs free
+temporary space about that size; set `TMPDIR` to choose where, or read a range.
 
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded
-transparently. A missing log, damaged evidence, or an run recorded without
+transparently. A missing log, damaged evidence, or a run recorded without
 capture returns status 2 without printing log contents. Success returns 0.
 
 Metadata fields in both `--info` and `--json` are `atom_id`, `stream`, `outcome`,
