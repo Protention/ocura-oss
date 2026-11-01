@@ -55,7 +55,7 @@ def run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = True,
+    compress: bool = False,
     compression_min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -73,9 +73,9 @@ def run(
     *command* whose values are replaced by a placeholder in every record. The
     command still receives the real values.
 
-    Large completed logs are losslessly compressed once per run when this
-    saves at least ten percent. Pass ``compress=False`` for raw files, or set
-    ``compression_min_bytes`` (default 1 MiB). Read original output with
+    Logs stay raw unless ``compress=True``: completed logs of at least
+    ``compression_min_bytes`` (default 1 MiB) are then losslessly compressed once,
+    when this saves at least ten percent. Read original output with
     ``Store.read_verified_log()``. Storage errors appear in the returned
     ``storage_warnings`` and do not change the command's recorded outcome.
 

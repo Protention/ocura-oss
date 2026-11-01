@@ -2,9 +2,9 @@
 
 Version 0.7.0.dev0.
 
-This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
-`decompress` commands below are proposed branch behavior, absent from the released
-package. See [open design decisions](autocompression.md#decisions-before-merge).
+This draft builds on 0.6.0. Opt-in compression and the `logs`, `compress`, and
+`decompress` commands below are absent from the released package. See
+[log compression](autocompression.md).
 
 Discovery commands, `branch-points`, descriptive Python names, `run --from`, and
 `--json-errors` are also unreleased. A ledger contains run records and pathways; a branch point
@@ -183,7 +183,7 @@ Run one trusted local command and record terminal evidence.
 ocura-oss run [--root PATH] [--pathway ID | --from BRANCH_POINT_ID --reason TEXT]
               [--param KEY=VALUE] [--quiet] [--json] [--json-errors]
               [--no-capture] [--mask-arg POSITION] [--substitute]
-              [--no-compress] [--compress-min-bytes N]
+              [--compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
 ```
 
@@ -202,8 +202,8 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--json-errors` | flag | false | Emit JSON results and structured errors with execution state and known IDs |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
-| `--no-compress` | flag | false | Keep this run's captured logs raw after finalization |
-| `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original size for automatic gzip compression; logs must also save at least 10% |
+| `--compress` | flag | false | Store this run's captured logs as gzip after finalization when that saves at least 10% |
+| `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original log size to compress; implies `--compress` |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
 | `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
 | `--context` | flag | false | Record the platform and the git revision and dirty state at launch |
@@ -250,12 +250,12 @@ The command runs with `shell=False` and the project root as its working director
 
 Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal.
 
-After finalization, captured logs of at least 1 MiB are considered once for
+Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given.
+Then, after finalization, logs of at least 1 MiB (or `N`) are considered once for
 lossless gzip compression. Each must save at least 10%; small and incompressible
-logs remain raw. No older runs are scanned. `--no-compress` disables this step for
-the run, and `--compress-min-bytes N` changes its size threshold. Compression
-errors emit storage warnings on stderr without changing the command's recorded
-outcome. See the [local prototype's policy and compatibility limits](autocompression.md).
+logs remain raw. No older runs are scanned. Compression errors emit storage
+warnings on stderr without changing the command's recorded outcome. See
+[log compression](autocompression.md) for costs and compatibility.
 
 With `--no-capture`, no log files are written. Output still streams to the terminal unless `--quiet` or `--json` is present, and is otherwise discarded.
 
@@ -436,8 +436,8 @@ over the whole ledger.
 
 Use `--dry-run` to inspect older logs before an explicit pass. Conversion needs
 temporary disk headroom. Earlier readers do not support gzip backing despite
-the unchanged record schema; use this branch's `decompress` and `verify` before
-returning to one. See [automatic log compression](autocompression.md).
+the unchanged record schema; use `decompress` and `verify` before returning to
+one. See [log compression](autocompression.md).
 
 ## `runs` and `show`
 

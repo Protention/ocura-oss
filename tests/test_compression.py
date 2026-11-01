@@ -114,8 +114,11 @@ class CompressionTests(unittest.TestCase):
         self.assertEqual(self.store.read_verified_log(atom.id), data)
         self.assertEqual(self.store.verify_state().digest, before.digest)
 
-    def test_default_automatic_compression_at_threshold_only_for_new_run(self):
-        old = self._run_bytes(b"old" * _MIB).atom
+    def test_logs_stay_raw_by_default_and_compress_at_threshold_on_request(self):
+        old = api.run(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'old'*1048576)"],
+            root=self.root,
+        ).atom
         old_raw, old_packed = self._paths(old)
         execution = api.run(
             [
@@ -125,6 +128,7 @@ class CompressionTests(unittest.TestCase):
                 "sys.stderr.buffer.write(b'b'*1048575)",
             ],
             root=self.root,
+            compress=True,
         )
         stdout, stdout_packed = self._paths(execution.atom)
         stderr, stderr_packed = self._paths(execution.atom, "stderr")
@@ -137,11 +141,7 @@ class CompressionTests(unittest.TestCase):
         self.assertTrue(self.store.verify_state().ok)
         self.assertEqual(self.store.list_attempts(), [])
 
-    def test_automatic_compression_can_be_disabled_and_threshold_changed(self):
-        disabled = self._run_bytes(b"x" * _MIB, compress=False).atom
-        raw, packed = self._paths(disabled)
-        self.assertTrue(raw.is_file())
-        self.assertFalse(packed.exists())
+    def test_compression_threshold_can_be_changed(self):
         small = self._run_bytes(b"x" * 1024, compress=True, compression_min_bytes=1024).atom
         raw, packed = self._paths(small)
         self.assertFalse(raw.exists())
@@ -613,7 +613,7 @@ class CompressionTests(unittest.TestCase):
 
     def test_cli_run_compression_flags(self):
         for flags, compressed in (
-            (["--no-compress"], False),
+            ([], False),
             (["--compress-min-bytes", "1024"], True),
         ):
             with self.subTest(flags=flags):

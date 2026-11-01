@@ -69,7 +69,7 @@ def run_command(
     declared_parameters: Mapping[str, str],
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = True,
+    compress: bool = False,
     compression_min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -91,10 +91,10 @@ def run_command(
     positions whose values are replaced by a placeholder in every record; the
     command itself still receives them.
 
-    Completed logs at least ``compression_min_bytes`` large are compressed
-    once when this run finishes, if gzip saves at least ten percent. Pass
-    ``compress=False`` to keep raw files. Compression failures are returned in
-    ``storage_warnings`` without changing the recorded command's outcome.
+    With ``compress``, completed logs at least ``compression_min_bytes`` large
+    are compressed once when this run finishes, if gzip saves at least ten
+    percent. Compression failures are returned in ``storage_warnings`` without
+    changing the recorded command's outcome.
 
     The run records its pathway's effective parameters as its own labels;
     ``declared_parameters`` adds to them and wins for a key both name. When
@@ -253,7 +253,7 @@ def run_command(
                         atom, min_bytes=compression_min_bytes, eligible_only=True
                     )
                 except StoreError as exc:
-                    storage_warnings = (f"automatic log compression failed: {exc}",)
+                    storage_warnings = (f"log compression failed: {exc}",)
             # Last, and while still holding the attempt's lock: a reader then sees
             # either a live attempt or a complete atom and chokepoint.
             store._remove_attempt(attempt.id)
