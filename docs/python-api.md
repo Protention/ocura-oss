@@ -182,8 +182,8 @@ Run one trusted local command and record terminal evidence.
 
 `RunExecution` exposing the recorded `RunRecord` as `.record`, terminal
 `BranchPoint` as `.branch_point`, and
-`storage_warnings`, a tuple of post-finalization compression errors (empty on
-success). Compression warnings do not replace the command's actual outcome.
+`storage_warnings`, a tuple of post-finalization compression errors or stop requests
+(empty on success). Compression warnings do not replace the command's actual outcome.
 
 #### Raises
 
@@ -915,6 +915,20 @@ backing path when compressed. Compressed file contents are encoded; use
 
 The returned path has passed containment checks only. Use `read_verified_log()` to consume bytes that have been checked against the stored run record; `verify_atom_evidence()` checks both logs without returning their contents.
 
+### `Store.log_files`
+
+```python
+store.log_files(atom: RunRecord) -> dict[str, str]
+```
+
+Return each captured stream's current file relative to the project root, keyed
+`stdout` and `stderr`: the recorded path, plus `.gz` when the log is stored as
+gzip. A run recorded without output capture returns an empty dictionary. Only the
+paths and the files' presence are checked; nothing is read, verified, or locked.
+`ocura-oss run --json` and `show --json` report this as `log_files`. Raises
+`StoreError` for unsafe or unreadable storage paths, including a recorded path
+that escapes the logs directory.
+
 ### `Store.read_verified_log`
 
 ```python
@@ -1500,7 +1514,7 @@ Records produced by one command attempt.
 | `atom` | `RunRecord` | Compatible constructor field and property |
 | `branch_point` | `BranchPoint` | Preferred property for the terminal evidence boundary |
 | `chokepoint` | `BranchPoint` | Compatible constructor field and property |
-| `storage_warnings` | tuple of strings | Post-finalization compression errors; actual command outcome remains recorded on the run record |
+| `storage_warnings` | tuple of strings | Post-finalization compression errors or stop requests; actual command outcome remains recorded on the run record |
 
 ### `ocura_oss.RunSummary`
 

@@ -68,6 +68,8 @@ This file records user-visible changes to Ocura OSS.
   saves at least 10%; `compress` and `decompress` convert finalized logs, and
   `--dry-run` previews either. Logs stay raw by default. Records, IDs, digests, and
   retained manifests do not change, and every reader returns the original bytes.
+  `run` and `show` print each log's current file, reported as `log_files` in JSON
+  and by `Store.log_files()`, so standard gzip tools can open compressed logs.
   Ocura OSS 0.6 cannot read compressed logs: run `decompress` and `verify` before
   opening the ledger with it.
 

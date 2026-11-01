@@ -16,6 +16,7 @@ Locks are advisory and reliable on local filesystems only.
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import sys
 import time
@@ -27,6 +28,11 @@ _WAIT_LIMIT = 10.0
 _REMOVE_LIMIT = 2.0
 _READER_GRACE = 0.25
 
+
+class LockUnavailable(OSError):
+    """The system refused a lock for a reason other than another holder."""
+
+
 if sys.platform == "win32":
     import ctypes
     import msvcrt
@@ -36,6 +42,7 @@ if sys.platform == "win32":
     # LockFileEx. Both kinds go through it to keep one lock implementation.
     _FAIL_IMMEDIATELY = 0x1
     _EXCLUSIVE = 0x2
+    _LOCK_BUSY = (33, 997)  # ERROR_LOCK_VIOLATION, ERROR_IO_PENDING
 
     class _Overlapped(ctypes.Structure):
         _fields_ = (
@@ -67,11 +74,14 @@ if sys.platform == "win32":
 
     def _try_lock(descriptor: int, *, shared: bool = False) -> bool:
         flags = _FAIL_IMMEDIATELY | (0 if shared else _EXCLUSIVE)
-        return bool(
-            _kernel32.LockFileEx(
-                msvcrt.get_osfhandle(descriptor), flags, 0, 1, 0, ctypes.byref(_Overlapped())
-            )
-        )
+        if _kernel32.LockFileEx(
+            msvcrt.get_osfhandle(descriptor), flags, 0, 1, 0, ctypes.byref(_Overlapped())
+        ):
+            return True
+        error = ctypes.get_last_error()
+        if error in _LOCK_BUSY:
+            return False
+        raise LockUnavailable(0, ctypes.FormatError(error), None, error)
 
     def _unlock(descriptor: int) -> None:
         _kernel32.UnlockFileEx(
@@ -104,12 +114,16 @@ if sys.platform == "win32":
 else:
     import fcntl
 
+    _LOCK_BUSY = (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES)
+
     def _try_lock(descriptor: int, *, shared: bool = False) -> bool:
         kind = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
         try:
             fcntl.flock(descriptor, kind | fcntl.LOCK_NB)
-        except OSError:
-            return False
+        except OSError as exc:
+            if exc.errno in _LOCK_BUSY:
+                return False
+            raise LockUnavailable(exc.errno, exc.strerror) from exc
         return True
 
     def _unlock(descriptor: int) -> None:
@@ -146,6 +160,9 @@ def is_held(path: Path) -> bool:
             return True
         _unlock(descriptor)
         return False
+    except LockUnavailable:
+        # Nothing here can show a recorder has gone, so never assume it has.
+        return True
     finally:
         os.close(descriptor)
 
@@ -157,7 +174,8 @@ def hold(path: Path, *, wait_limit: float | None = _WAIT_LIMIT) -> Iterator[None
     The file is removed on exit. If the process dies first, the file remains
     but the operating system drops the lock, so :func:`is_held` reports false.
     ``wait_limit=None`` waits until the owner releases it, for storage changes
-    whose duration depends on the size of a log.
+    whose duration depends on the size of a log. :class:`LockUnavailable` means
+    there is no owner to wait for: the filesystem refused the lock.
     """
     descriptor = _acquire(path, wait_limit)
     if descriptor is None:

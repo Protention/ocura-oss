@@ -183,7 +183,7 @@ These operating-system mechanisms are best effort: a command still runs when one
 Limits:
 
 - Where a command or a process it started outlives a killed recorder, it can keep writing to its logs. Recover only after it has stopped; otherwise later verification reports its log as changed.
-- The locks are advisory operating-system file locks. They are reliable on local filesystems. On a network filesystem, a running attempt may be reported as abandoned or the reverse.
+- The locks are advisory operating-system file locks. They are reliable on local filesystems. On a network filesystem, a running attempt may be reported as abandoned or the reverse. Where the filesystem refuses file locks, `run`, `recover`, `compress`, and `decompress` stop with an error, and reads and `verify` continue without locks.
 
 ## Concurrent use
 
