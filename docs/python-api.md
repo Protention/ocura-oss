@@ -34,7 +34,7 @@ Declared parameter mappings require nonempty string values. Keys must begin with
 
 Identifier parameters take full identifiers. The shortened identifiers that the CLI accepts are expanded by [`Store.resolve_id`](#storeresolve_id).
 
-Use these operations from a script or an AI agent inside its existing execution environment. The [automation guide](automation.md) describes caller responsibilities; the [training example](../examples/autoregressive/README.md) supplies PyTorch/JAX workloads with an optional local Ray executor.
+Use these operations from a script or an AI agent inside its existing execution environment. The [automation guide](automation.md) describes caller responsibilities; the [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) on the separate `examples/0.7` branch supplies PyTorch/JAX workloads with an optional local Ray executor.
 
 ## Workflow example
 

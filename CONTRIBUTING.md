@@ -30,8 +30,8 @@ Run these checks before opening a pull request:
 ```console
 python -m unittest discover -s tests
 python -m unittest discover -s tools/migrations/tests
-python -m ruff check src tests tools
-python -m ruff format --check src tests tools
+python -m ruff check src tests tools examples
+python -m ruff format --check src tests tools examples
 python -m mypy src/ocura_oss
 python -m mypy --strict tools/migrations/migrate_0_4.py
 python tools/check_release.py
@@ -48,13 +48,17 @@ When you change a command that the README shows, update those two scripts to mat
 
 The test suite uses `unittest`; pytest is not required. Please add or update tests when behavior changes, and update the README and changelog when a public command or record changes.
 
-When changing examples, also run Ruff on `examples/` and use the optional integration
-checks described in [the autoregressive guide](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md).
-Continuous integration lints `examples/` and runs the PyTorch and JAX check on Linux;
-it does not run the Ray check.
-The normal test suite keeps framework imports optional. Examples, their requirements,
-and their tests stay in the repository and are excluded from both distributions.
-The core package stays dependency-free.
+The primary [history example](examples/history/README.md) is covered by the normal
+test suite and the Ruff checks above. Fuller demonstrations and their tests live
+on the semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7);
+make changes to those examples on that branch and follow the selected guide's
+checks. The [autoregressive guide](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md)
+describes its optional backend checks. The examples branch runs PyTorch and JAX
+on Linux in CI; it does not run the Ray check. Core CI requires no training frameworks.
+
+Example tests keep framework imports optional. Example scripts, requirements,
+and tests stay outside both package distributions. The core package stays
+dependency-free.
 
 ## Pull requests
 

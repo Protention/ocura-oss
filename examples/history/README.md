@@ -1,8 +1,27 @@
-# Inspect an existing history
+# Record and inspect a small history
 
 This repository-only example uses the unreleased discovery and naming interfaces.
 Install this checkout with `python -m pip install .` before running it. It needs no
 optional dependencies and is excluded from the package distributions.
+
+From the checkout root, create a small demonstration and inspect it:
+
+```console
+ocura-oss demo --root ./ocura-oss-demo
+python examples/history/inspect_history.py --root ./ocura-oss-demo --archive
+```
+
+The demo records a baseline and a variation in a new directory. Its destination
+must not already exist. Keep that directory: the second command reads its saved
+records and verified output without running the workload again. If you already
+ran the demo, use only the second command. Archive mode requires a stable ledger
+with no writers or unfinished attempts.
+
+This is the core repository's primary example. Fuller development, training, and
+replay demonstrations live on [`examples/0.7`](https://github.com/Protention/ocura-oss/tree/examples/0.7);
+see the [use-case catalog](../../docs/use-cases.md).
+
+## Inspect your own ledger
 
 Given only an existing project root, a fresh caller can inspect its history:
 

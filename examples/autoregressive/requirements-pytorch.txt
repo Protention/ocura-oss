@@ -1,2 +1,0 @@
-# Optional example backend; not an Ocura OSS runtime dependency.
-torch>=2.6,<3

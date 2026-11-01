@@ -56,9 +56,36 @@ it stops the command and still returns a recorded `interrupted` result. If a `ru
 process is killed instead, its attempt remains unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
 `recover --json` closes it as `abandoned` once the command itself has stopped.
 
-The [autoregressive example](../examples/autoregressive/README.md) is an executable
+On the `examples/0.7` branch, the [CI-report example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/ci_report/README.md) demonstrates a failed test
+run, a reasoned fix through the combined operation, and later inspection without
+rerunning the work. The [autoregressive example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) is an executable
 client of this interface, with PyTorch/JAX choices and an optional Ray Core executor.
+See [use cases](use-cases.md) for the separate checkout and requirements.
 The [Python API](python-api.md) provides the same operations with typed results.
+
+### From a run result to the next command
+
+Descriptive names coexist with the existing JSON fields and ID prefixes:
+
+| Returned field | Meaning | Use it for |
+| --- | --- | --- |
+| `atom_id` | This run record | `logs ID` or `show ID` |
+| `chokepoint_id` | This run's terminal branch point | `run --from ID --reason TEXT` or `compare --from ID` |
+| `pathway_id` | The pathway containing this run | A later `run --pathway ID` on that same line of work |
+| `outcome` | The recorded execution outcome | Decide what evidence to inspect before continuing |
+
+With JSON output enabled, workload output is retained in logs. For example,
+Python's unittest runner writes its results to stderr:
+
+```console
+ocura-oss logs <atom-id> --root ./experiment --stream stderr
+ocura-oss show <atom-id> --root ./experiment --command --json
+```
+
+A nonzero workload exit can still return a complete run result with these IDs.
+Retain that result and inspect the logs. An Ocura error envelope is different:
+follow its execution state and known IDs as described below, rather than assuming
+that the workload did not run.
 
 ## Consume saved output
 
