@@ -1,10 +1,10 @@
 # State and verification
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
 
-The unreleased descriptive names are **ledger**, **run record**, and **branch point**.
+The descriptive names are **ledger**, **run record**, and **branch point**.
 Their Python types are `Ledger`, `RunRecord`, and `BranchPoint`; `Den`, `Atom`, and
 `Chokepoint` remain aliases. The directory layout, record kinds, ID prefixes, JSON
 keys, and manifest entries below retain their original spellings. Adopting the

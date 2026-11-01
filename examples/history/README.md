@@ -1,6 +1,6 @@
 # Record and inspect a small history
 
-This repository-only example uses the unreleased discovery and naming interfaces.
+This repository-only example uses the discovery and naming interfaces from Ocura OSS 0.7.
 Install this checkout with `python -m pip install .` before running it. It needs no
 optional dependencies and is excluded from the package distributions.
 
@@ -47,7 +47,7 @@ make the command exit 2; they are never replaced with a successful result.
 Failures keep the existing `error` string and add an `error_details` object with
 `code`, `message`, `execution`, `ids`, and `recovery`. This applies both to an
 unavailable stream within a report and to a failure that prevents the report.
-Use these fields with the [CLI error contract](../../docs/cli.md#structured-errors-unreleased)
+Use these fields with the [CLI error contract](../../docs/cli.md#structured-errors)
 instead of parsing English messages. Known ledger, run, branch point, and pathway
 IDs are retained when available; source error diagnostics take precedence.
 Raw operating-system errors are classified by type and error number. Invalid

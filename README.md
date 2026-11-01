@@ -10,16 +10,16 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## Unreleased usability work
+## New in 0.7.0
 
-This checkout adds descriptive Python names, `runs` and `show` for history
+Version 0.7 adds descriptive Python names, `runs` and `show` for history
 discovery, bounded verified log reads, and opt-in `--json-errors` for structured
 failures. It also adds `run --from ID --reason TEXT` to create and execute a
-variation in one call. These interfaces are absent from published 0.6.0. The
+variation in one call. The
 [history example](examples/history/README.md) starts with only a project root, retains failed
 retries and empty variations, and returns verified excerpts with stable references.
 The [naming guide](docs/naming-migration.md) maps descriptive names to compatible legacy names
-and unchanged JSON fields. This is an unreleased development snapshot.
+and unchanged JSON fields. Existing ledgers and callers remain compatible.
 
 ## Why use it
 
@@ -69,7 +69,7 @@ Use the baseline's `chokepoint_id` to branch and the branch result's `id` for th
 child run. When typing an ID by hand, its first four or more hexadecimal characters
 are enough if they match one record.
 
-In this unreleased checkout, replace the separate `branch` and child `run` calls
+You can replace the separate `branch` and child `run` calls
 with one command:
 
 ```console
@@ -172,7 +172,7 @@ assert verify(root).ok
 comparison = compare(source_branch_point_id=baseline.branch_point.id, root=root)
 ```
 
-The unreleased Python API can also replace the separate `branch()` and child
+The Python API can also replace the separate `branch()` and child
 `run()` calls:
 
 ```python
