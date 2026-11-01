@@ -1,12 +1,12 @@
 # Automatic log compression
 
-Version 0.6.0.
+Version 0.7.0.dev0.
 
 This draft branch prototypes lossless compression for captured stdout and stderr.
 It uses Python's standard library and leaves the original execution records,
 byte counts, SHA-256 digests, and retained manifests unchanged. It has not been
-published as a package release. Version 0.6.0 above identifies the base release;
-the prototype has no assigned release version. Keep the pull request in draft
+published as a package release. This development snapshot includes the prototype;
+its rollout policy remains unsettled. Keep the pull request in draft
 for future consideration until the decisions below are settled.
 
 ## Decisions before merge
@@ -116,13 +116,15 @@ Preview a pass over finalized logs, then apply it explicitly:
 ```console
 ocura-oss compress --dry-run
 ocura-oss compress
-ocura-oss compress --atom atom-<id> --min-bytes 262144 --json
+ocura-oss compress --run atom-<id> --min-bytes 262144 --json
 ocura-oss decompress --dry-run
 ocura-oss decompress
 ocura-oss verify
 ```
 
-`--atom` limits either operation to one finalized atom. These commands accept
+`--run` limits either operation to one finalized run record. The legacy `--atom`
+option remains accepted; supplying both requires them to resolve to the same run.
+These commands accept
 unique ID prefixes, `--root PATH`, and `--json`; Python `Store.compress_logs()`
 and `Store.decompress_logs()` take full atom IDs. A dry run verifies the selected
 evidence and calculates prospective changes without replacing stored files.

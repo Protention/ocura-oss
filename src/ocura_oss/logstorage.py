@@ -21,12 +21,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, cast
 
+from ocura_oss.errors import classify_os_error
+
 DEFAULT_MIN_BYTES = 1024 * 1024
 _CHUNK = 1024 * 1024
 
 
 class LogStorageError(Exception):
     """A log representation is missing, unsafe, unreadable, or inconsistent."""
+
+    def __init__(self, message: str, *, code: str = "integrity_error") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -37,6 +43,12 @@ class StorageResult:
     original_bytes: int
     stored_bytes: int
     path: Path
+
+
+def _read_error_code(exc: BaseException) -> str:
+    if isinstance(exc, OSError) and not isinstance(exc, gzip.BadGzipFile):
+        return classify_os_error(exc)
+    return "integrity_error"
 
 
 def _paths(path: Path) -> tuple[Path, Path]:
@@ -52,7 +64,7 @@ def _paths(path: Path) -> tuple[Path, Path]:
             if candidate.exists() and not candidate.is_file():
                 raise LogStorageError(f"log path is not a regular file: {candidate}")
     except (OSError, ValueError) as exc:
-        raise LogStorageError(f"log path is unreadable: {raw}") from exc
+        raise LogStorageError(f"log path is unreadable: {raw}", code=_read_error_code(exc)) from exc
     return raw, compressed
 
 
@@ -126,7 +138,7 @@ def _verify(
         with gzip.open(path, "rb") if gzipped else path.open("rb") as source:
             return _consume(source, size, digest, path, collect=collect, sink=sink)
     except (OSError, EOFError, zlib.error, ValueError) as exc:
-        raise LogStorageError(f"log is unreadable: {path}") from exc
+        raise LogStorageError(f"log is unreadable: {path}", code=_read_error_code(exc)) from exc
 
 
 def read_verified(
@@ -182,11 +194,13 @@ def verified_snapshot(
     """
     _validate_size(size)
     if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= size:
-        raise LogStorageError(f"log offset must be between 0 and original size {size}")
+        raise LogStorageError(
+            f"log offset must be between 0 and original size {size}", code="invalid_input"
+        )
     if length is not None and (
         isinstance(length, bool) or not isinstance(length, int) or length < 0
     ):
-        raise LogStorageError("log length must be a nonnegative integer")
+        raise LogStorageError("log length must be a nonnegative integer", code="invalid_input")
     extent = size - offset if length is None else min(length, size - offset)
     # Ownership passes to the caller; failures close it below.
     snapshot = cast(

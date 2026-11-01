@@ -46,7 +46,7 @@ class DocumentedCompareOutputTests(unittest.TestCase):
             root,
             "branch",
             "--from",
-            self.field(baseline, "chokepoint"),
+            self.field(baseline, "branch point"),
             "--reason",
             "try count 2",
             "--param",

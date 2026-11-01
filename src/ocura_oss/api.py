@@ -4,17 +4,19 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ocura_oss import branching, logstorage, runner
+from ocura_oss import branching, logstorage, model, runner
 from ocura_oss.demo import DemoReport
 from ocura_oss.demo import run_demo as _run_demo
-from ocura_oss.model import ComparisonResult, Den, Pathway
+from ocura_oss.errors import with_execution
+from ocura_oss.model import ComparisonResult, Ledger, Pathway
 from ocura_oss.runner import RunExecution
-from ocura_oss.store import RecoveredAttempt, StateVerification, Store
+from ocura_oss.store import RecoveredAttempt, StateVerification, Store, StoreError
 
 _Root = os.PathLike[str] | str | None
 
@@ -24,12 +26,16 @@ class Initialization:
     """State created by :func:`initialize`."""
 
     root: Path
-    den: Den
+    den: Ledger
     pathway: Pathway
+
+    @property
+    def ledger(self) -> Ledger:
+        return self.den
 
 
 def initialize(root: _Root = None, *, name: str = "ocura-oss") -> Initialization:
-    """Create one den and its default pathway under a project root.
+    """Create one ledger and its default pathway under a project root.
 
     The operation refuses to replace an existing ``.ocura-oss/`` directory.
     When *root* is omitted, the current working directory is used.
@@ -44,6 +50,8 @@ def run(
     *,
     root: _Root = None,
     pathway_id: str | None = None,
+    source_branch_point_id: str | None = None,
+    reason: str | None = None,
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
@@ -77,36 +85,100 @@ def run(
     key. ``context=True`` records the
     platform and git state at launch; *context_files* names files whose size
     and digest are recorded. Neither is captured unless requested.
+
+    With ``source_branch_point_id`` and a nonblank ``reason``, create a child
+    pathway from that verified source, then run the command there. This conflicts
+    with ``pathway_id``. *parameters* supplies the child's overrides of the source
+    pathway's parameters; source-run-only labels are not inherited. The result is
+    the same ``RunExecution`` as an ordinary run. The child is created only after
+    the run's inputs are checked. A later storage or execution failure can leave it
+    in place. Its identity is retained in ``StoreError.ids``; inspect it before
+    deciding whether to continue explicitly with ``pathway_id``. Repeating the
+    combined call creates another child.
     """
-    store = _required_store(root)
-    selected_pathway = pathway_id or store.load_den().default_pathway_id
-    return runner.run_command(
-        store,
-        pathway_id=selected_pathway,
-        argv=command,
-        declared_parameters={} if parameters is None else parameters,
-        mirror=mirror,
-        capture=capture,
-        compress=compress,
-        compression_min_bytes=compression_min_bytes,
-        masked_arguments=masked_arguments,
-        substitute=substitute,
-        context=context,
-        context_files=context_files,
-    )
+    known_ids: dict[str, str] = {}
+    if isinstance(parameters, Mapping):
+        parameters = dict(parameters)
+    try:
+        if source_branch_point_id is None and reason is not None:
+            raise StoreError("reason requires source_branch_point_id", code="invalid_input")
+        if source_branch_point_id is not None:
+            if pathway_id is not None:
+                raise StoreError(
+                    "source_branch_point_id cannot be combined with pathway_id",
+                    code="invalid_input",
+                )
+            if not model.is_valid_id(source_branch_point_id, "chokepoint"):
+                raise StoreError(
+                    "source_branch_point_id must be a full branch point id", code="invalid_input"
+                )
+            if not isinstance(reason, str) or not reason.strip():
+                raise StoreError(
+                    "source_branch_point_id requires a nonblank reason", code="invalid_input"
+                )
+            known_ids["source_branch_point_id"] = source_branch_point_id
+        store = _required_store(root)
+        create_child = None
+        if source_branch_point_id is None:
+            selected_pathway = pathway_id or store.load_den().default_pathway_id
+        else:
+            source, _source_run, parent = branching.load_verified_source(
+                store, source_branch_point_id
+            )
+            selected_pathway = parent.id
+            assert isinstance(reason, str)
+            create_child = functools.partial(
+                branching.create_child_pathway,
+                store,
+                source_chokepoint=source,
+                source_pathway=parent,
+                reason=reason,
+                overrides={} if parameters is None else parameters,
+            )
+    except (StoreError, OSError, model.ValidationError) as exc:
+        raise with_execution(exc, "not_started", known_ids)  # noqa: B904 - it sets the cause
+    try:
+        return runner.run_command(
+            store,
+            pathway_id=selected_pathway,
+            argv=command,
+            declared_parameters={} if parameters is None else parameters,
+            mirror=mirror,
+            capture=capture,
+            compress=compress,
+            compression_min_bytes=compression_min_bytes,
+            masked_arguments=masked_arguments,
+            substitute=substitute,
+            context=context,
+            context_files=context_files,
+            create_pathway=create_child,
+        )
+    except StoreError as exc:
+        exc.ids = {**known_ids, **exc.ids}
+        raise
 
 
 def branch(
-    source_chokepoint_id: str,
+    source_chokepoint_id: str | None = None,
     *,
     reason: str,
     root: _Root = None,
     parameters: Mapping[str, str] | None = None,
+    source_branch_point_id: str | None = None,
 ) -> Pathway:
-    """Create a metadata-only child pathway from verified terminal evidence."""
+    """Create a metadata-only child pathway from verified terminal evidence.
+
+    Pass the source positionally or as ``source_branch_point_id``. The legacy
+    ``source_chokepoint_id`` keyword remains accepted; differing values conflict.
+    """
+    source_id = _source_id(source_chokepoint_id, source_branch_point_id)
+    if source_id is None:
+        raise StoreError(
+            "a source branch point id is required", code="invalid_input", execution="not_started"
+        )
     store = _required_store(root)
     source_chokepoint, _source_atom, source_pathway = branching.load_verified_source(
-        store, source_chokepoint_id
+        store, source_id
     )
     return branching.create_child_pathway(
         store,
@@ -117,15 +189,23 @@ def branch(
     )
 
 
-def compare(source_chokepoint_id: str | None = None, *, root: _Root = None) -> ComparisonResult:
+def compare(
+    source_chokepoint_id: str | None = None,
+    *,
+    root: _Root = None,
+    source_branch_point_id: str | None = None,
+) -> ComparisonResult:
     """Compare a verified source run with child pathway evidence.
 
-    Omitting *source_chokepoint_id* selects the newest chokepoint referenced by
+    Omitting the source selects the newest branch point referenced by
     a child pathway after the complete state passes verification. A state with
-    no child pathways selects its newest terminal chokepoint.
+    no child pathways selects its newest terminal branch point. Pass an explicit
+    source positionally or as ``source_branch_point_id``. The legacy
+    ``source_chokepoint_id`` keyword remains accepted; differing values conflict.
     """
+    source_id = _source_id(source_chokepoint_id, source_branch_point_id)
     store = _required_store(root)
-    return branching.compare(store, source_chokepoint_id)
+    return branching.compare(store, source_id)
 
 
 def verify(root: _Root = None, *, against: Iterable[str] | None = None) -> StateVerification:
@@ -155,3 +235,13 @@ def _required_store(root: _Root) -> Store:
     store = Store(root)
     store.require()
     return store
+
+
+def _source_id(legacy: str | None, canonical: str | None) -> str | None:
+    if legacy is not None and canonical is not None and legacy != canonical:
+        raise StoreError(
+            "source_branch_point_id conflicts with source_chokepoint_id",
+            code="invalid_input",
+            execution="not_started",
+        )
+    return canonical if canonical is not None else legacy

@@ -1,6 +1,6 @@
 # Ocura OSS
 
-Version 0.6.0.
+Version 0.7.0.dev0.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -11,6 +11,16 @@ records and logs before branching or comparing them.
 
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
+
+## Unreleased usability work
+
+This checkout adds descriptive Python names, `runs` and `show` for history
+discovery, bounded verified log reads, and opt-in `--json-errors` for structured
+failures. These interfaces are absent from published 0.6.0. The
+[history example](../examples/history/README.md) starts with only a project root, retains failed
+retries and empty variations, and returns verified excerpts with stable references.
+The [naming guide](naming-migration.md) maps descriptive names to compatible legacy names
+and unchanged JSON fields. This is an unreleased development snapshot.
 
 ## Why use it
 
@@ -23,10 +33,9 @@ runs in a new project, especially for local development:
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
-- **Easy to modify.** This draft is thirteen modules, about 5,200 lines of
-  typed Python, and its records are plain JSON files. You or an agent can read all
-  of it and change it to fit your workflow, and the Apache-2.0 license does not
-  require you to publish your changes.
+- **Easy to inspect and adapt.** Records are plain JSON files, and the typed
+  Python API is available alongside the CLI. The Apache-2.0 license permits
+  modifications without requiring you to publish them.
 
 To remove the ledger, delete `.ocura-oss/` in your project. That directory holds
 all ledger records and captured logs.
@@ -62,7 +71,7 @@ all ledger records and captured logs.
   git revision; `--context-file` records a file's digest.
 - **Later rewrites can be detected.** `ocura-oss manifest` prints checksums to keep
   elsewhere, and `verify --against` checks the state against them.
-- **Verification is stricter.** Every atom must have exactly one chokepoint.
+- **Verification is stricter.** Every run record must have exactly one branch point.
 
 The core runtime still uses only the standard library. See
 [state and verification](state-and-verification.md) for the format, attempts,
@@ -102,7 +111,7 @@ Without `--json`, `compare` prints:
 
 ```text
 comparison: ready
-source chokepoint: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
+source branch point: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
 source pathway: pathway-1378d1d28cb54987b9e80d59d61aec74
 source run: passed 0.056063s
 child pathway: pathway-ce4c71137dd449398fe2b4e0198c83c3
@@ -176,13 +185,13 @@ from ocura_oss import branch, compare, initialize, run, verify
 
 root = initialize("experiment", name="example").root
 baseline = run([sys.executable, "-c", "print(1)"], root=root, parameters={"count": "1"})
-child = branch(baseline.chokepoint.id, root=root, reason="try count 2", parameters={"count": "2"})
+child = branch(baseline.branch_point.id, root=root, reason="try count 2", parameters={"count": "2"})
 run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id)
 assert verify(root).ok
-comparison = compare(baseline.chokepoint.id, root=root)
+comparison = compare(source_branch_point_id=baseline.branch_point.id, root=root)
 ```
 
-Use `Store(root).read_verified_log(atom_id, stream="stdout")` to consume verified
+Use `Store(root).read_verified_log(run_id=baseline.record.id, stream="stdout")` to consume verified
 output bytes. The method also accepts `stream="stderr"`; use `verify(root)` for a
 complete state check. See the [Python API](python-api.md#storeread_verified_log).
 
@@ -204,9 +213,11 @@ The documentation for the published release is also [available online](https://p
 
 ## Local state and operating model
 
-State lives under `.ocura-oss/` in the project root. A **den** identifies that state;
-a **pathway** groups runs in a lineage; an **atom** records one command attempt;
-a **chokepoint** identifies terminal evidence from which a branch can be created.
+State lives under `.ocura-oss/` in the project root. A **ledger** identifies that
+state; a **pathway** groups runs in a lineage; a **run record** retains one command
+attempt; a **branch point** identifies terminal evidence from which a branch can
+be created. Older names (`Den`, `Atom`, and `Chokepoint`) remain Python aliases;
+stored IDs, directories, and JSON keys retain their existing spellings.
 
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.

@@ -22,7 +22,8 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 
-WHEEL_BUDGET_BYTES = 64 * 1024
+# Close to the 0.7 wheel (about 70 KiB), so further growth is noticed.
+WHEEL_BUDGET_BYTES = 72 * 1024
 UNRELEASED = "Unreleased"
 
 _VERSION_LINE = re.compile(r'^__version__ = "([^"]+)"$', re.MULTILINE)

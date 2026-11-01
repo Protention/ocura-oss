@@ -351,13 +351,17 @@ def parameter_delta(
 
 
 @dataclass(frozen=True)
-class Den:
+class Ledger:
     """Project-local state identity and default pathway."""
 
     id: str
     name: str
     created_at: str
     default_pathway_id: str
+
+
+# Legacy names remain the same classes, including their constructor fields.
+Den = Ledger
 
 
 @dataclass(frozen=True)
@@ -371,6 +375,14 @@ class Pathway:
     source_chokepoint_id: str | None
     reason: str
     parameters: Mapping[str, str]
+
+    @property
+    def ledger_id(self) -> str:
+        return self.den_id
+
+    @property
+    def source_branch_point_id(self) -> str | None:
+        return self.source_chokepoint_id
 
 
 @dataclass(frozen=True)
@@ -396,7 +408,7 @@ class RunContext:
 
 
 @dataclass(frozen=True)
-class Atom:
+class RunRecord:
     """One recorded command attempt and its referenced output logs."""
 
     id: str
@@ -420,11 +432,14 @@ class Atom:
     context: RunContext | None = None
 
 
+Atom = RunRecord
+
+
 @dataclass(frozen=True)
 class Attempt:
     """A command attempt recorded before launch and not yet finalized.
 
-    Its ``id`` is the identifier of the atom that finalizing it writes.
+    Its ``id`` is the identifier of the run record that finalizing it writes.
     """
 
     id: str
@@ -439,9 +454,17 @@ class Attempt:
     masked_arguments: tuple[int, ...] = ()
     context: RunContext | None = None
 
+    @property
+    def run_id(self) -> str:
+        return self.id
+
+    @property
+    def branch_point_id(self) -> str:
+        return self.chokepoint_id
+
 
 @dataclass(frozen=True)
-class Chokepoint:
+class BranchPoint:
     """Terminal evidence boundary that can serve as a branch source."""
 
     id: str
@@ -451,6 +474,13 @@ class Chokepoint:
     kind: str
     outcome: Outcome
     branchable: bool
+
+    @property
+    def run_id(self) -> str:
+        return self.atom_id
+
+
+Chokepoint = BranchPoint
 
 
 _LOG_FIELDS = (
@@ -797,6 +827,10 @@ class RunSummary:
     duration_seconds: float | None
     return_code: int | None
 
+    @property
+    def run_id(self) -> str:
+        return self.id
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -829,6 +863,10 @@ class PathwaySummary:
     parameters: Mapping[str, str]
     has_terminal_evidence: bool
 
+    @property
+    def source_branch_point_id(self) -> str | None:
+        return self.source_chokepoint_id
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -849,6 +887,10 @@ class ChokepointSummary:
     outcome: Outcome
     created_at: str
     branchable: bool
+
+    @property
+    def run_id(self) -> str:
+        return self.atom_id
 
     def to_dict(self) -> dict:
         return {
@@ -902,6 +944,10 @@ class ChildComparison:
     run_parameters: ParameterDelta | None
     missing_evidence: bool
 
+    @property
+    def source_branch_point_id(self) -> str:
+        return self.source_chokepoint_id
+
     def to_dict(self) -> dict:
         return {
             "pathway_id": self.pathway_id,
@@ -917,13 +963,17 @@ class ChildComparison:
 
 @dataclass(frozen=True)
 class ComparisonResult:
-    """Comparison state and every child associated with a source chokepoint."""
+    """Comparison state and every child associated with a source branch point."""
 
     state: ComparisonState
     source_chokepoint_id: str
     source_pathway_id: str
     source_run: RunSummary
     children: tuple[ChildComparison, ...]
+
+    @property
+    def source_branch_point_id(self) -> str:
+        return self.source_chokepoint_id
 
     def to_dict(self) -> dict:
         return {

@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ocura_oss import api, supervise
+from ocura_oss import api, runner, supervise
 from ocura_oss.store import Store
 
 WAIT_SECONDS = 30.0
@@ -178,6 +178,68 @@ class RecorderTests(unittest.TestCase):
         self.assertEqual(result["launch_error_category"], "interrupted")
         self.assertTrue(is_quiet(self.beat), "the command is still running")
         self.assertEqual(self.store.list_attempts(), [])
+        self.assertTrue(self.store.verify_state().ok)
+
+    def test_interrupts_between_wait_calls_record_the_run_and_stop_descendants(self):
+        for boundary in ("timeout handler", "completed wait"):
+            with self.subTest(boundary=boundary), mock.patch.object(supervise, "Tether") as factory:
+                tether = factory.return_value
+                process = tether.launch.return_value
+                process.stdout = process.stderr = None
+                process.wait.side_effect = [
+                    subprocess.TimeoutExpired("command", 0.05)
+                    if boundary == "timeout handler"
+                    else 0,
+                    0,
+                ]
+                injected = False
+
+                def interrupt_at_boundary(frame, event, _argument, boundary=boundary):
+                    nonlocal injected
+                    if frame.f_code is runner._execute.__code__ and event == "line":
+                        reached = (
+                            isinstance(sys.exception(), subprocess.TimeoutExpired)
+                            if boundary == "timeout handler"
+                            else frame.f_locals.get("finished") is True
+                        )
+                        if reached and not injected:
+                            injected = True
+                            raise KeyboardInterrupt
+                    return interrupt_at_boundary
+
+                previous_trace = sys.gettrace()
+                try:
+                    sys.settrace(interrupt_at_boundary)
+                    try:
+                        result = api.run(["simulated-command"], root=self.root)
+                    except KeyboardInterrupt:
+                        self.fail(f"first interruption escaped from {boundary}")
+                finally:
+                    sys.settrace(previous_trace)
+                self.assertTrue(injected, f"did not reach {boundary}")
+                process.terminate.assert_called_once_with()
+                tether.release.assert_called_once_with(command_finished=False)
+                self.assertEqual(result.record.outcome.value, "interrupted")
+                self.assertEqual(result.record.launch_error_category, "interrupted")
+                self.assertIsNone(result.record.return_code)
+                self.assertEqual(self.store.list_attempts(), [])
+                self.assertTrue(self.store.verify_state().ok)
+
+    def test_second_interrupt_during_stop_leaves_an_attempt_for_recovery(self):
+        with mock.patch.object(supervise, "Tether") as factory:
+            tether = factory.return_value
+            process = tether.launch.return_value
+            process.stdout = process.stderr = None
+            process.wait.side_effect = [KeyboardInterrupt, KeyboardInterrupt]
+            with self.assertRaises(KeyboardInterrupt):
+                api.run(["simulated-command"], root=self.root)
+            process.terminate.assert_called_once_with()
+            tether.release.assert_called_once_with(command_finished=False)
+            self.assertEqual(self.store.list_atoms(), [])
+            self.assertEqual(len(self.store.list_attempts()), 1)
+            self.assertEqual(len(api.recover(self.root)), 1)
+            tether.launch.assert_called_once()
+        self.assertEqual(self.store.list_atoms()[0].outcome.value, "abandoned")
         self.assertTrue(self.store.verify_state().ok)
 
     @unittest.skipUnless(os.name == "posix", "SIGTERM and SIGHUP are POSIX stop requests")
