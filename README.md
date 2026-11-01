@@ -21,9 +21,9 @@ runs in a new project, especially for local development:
   server, database, account, or configuration file. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
-- **Easy to modify.** The whole package is twelve modules, about 4,400 lines of
-  typed Python, and its records are plain JSON files. You or an agent can read all
-  of it and change it to fit your workflow, and the Apache-2.0 license does not
+- **Easy to modify.** This draft is thirteen modules, about 5,200 lines of typed
+  Python, and its records are plain JSON files. You or an agent can read all of
+  it and change it to fit your workflow, and the Apache-2.0 license does not
   require you to publish your changes.
 
 To remove the ledger, delete `.ocura-oss/` in your project. That directory holds
@@ -92,6 +92,16 @@ the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
 `ocura-oss run`, stops the command and records an interrupted attempt; a second
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
+This local branch prototypes automatic lossless log compression: after each run,
+captured logs of at least 1 MiB use gzip only when it saves at least 10%. Read
+the original verified bytes with `ocura-oss logs <atom-id>` and inspect sizes,
+storage paths, and a readable stream/atom/hash fingerprint with `--info`.
+`run --no-compress` keeps raw storage; `compress --dry-run` previews a pass over
+older logs, and `decompress` restores raw files. Earlier versions need
+decompressed storage despite the unchanged record schema. See the
+[compression design and limits](docs/autocompression.md), including temporary
+disk headroom and compatibility. This prototype has not been published to PyPI.
+
 ## When to use something else
 
 Ocura OSS records what ran, how runs relate, and whether those records are still
@@ -145,6 +155,7 @@ comparison = compare(baseline.chokepoint.id, root=root)
 
 Use `Store(root).read_verified_log(atom_id, stream="stdout")` to consume recorded
 output as bytes checked against the stored atom's byte count and SHA-256 digest.
+Raw and gzip storage return the same original bytes.
 The method also accepts `stream="stderr"`; decoding and metric interpretation
 remain with your script. See the [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md#storeread_verified_log).
 
@@ -159,6 +170,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Python API](https://github.com/Protention/ocura-oss/blob/main/docs/python-api.md): functions, typed results, and `Store`
 - [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
+- [Local autocompression prototype](docs/autocompression.md): timing, verified reading, fingerprints, and reversible storage
 - [Autoregressive example](https://github.com/Protention/ocura-oss/blob/main/examples/autoregressive/README.md): PyTorch, JAX, and Ray
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
