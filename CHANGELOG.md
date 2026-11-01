@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.7.0.dev0 - Unreleased
+## 0.7.0 - 2026-11-01
 
 - Keep the demo and history inspection as the primary example in the core
   repository. Move the autoregressive demonstration and its backend tests to the
@@ -72,6 +72,13 @@ This file records user-visible changes to Ocura OSS.
   and by `Store.log_files()`, so standard gzip tools can open compressed logs.
   Ocura OSS 0.6 cannot read compressed logs: run `decompress` and `verify` before
   opening the ledger with it.
+- Keep completed run results available when optional compression or log-path
+  reporting fails. Interrupted compression reports a storage warning and leaves
+  finalized evidence intact. Refused locks fail promptly for writes; verified
+  reads can fall back to unlocked access where locks are unavailable.
+- Support linked log directories when reporting storage paths, classify conversion
+  failures by their underlying cause, and stop log output quietly when its reader
+  closes the pipe.
 
 ## 0.6.0 - 2026-10-22
 

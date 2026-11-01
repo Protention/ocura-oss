@@ -1,13 +1,12 @@
 # Python API reference
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
-This draft builds on 0.6.0. Opt-in compression, storage metadata, and conversion
-methods below are absent from the released package. See
-[log compression](autocompression.md).
+Version 0.7 adds opt-in compression, storage metadata, and conversion
+methods. See [log compression](autocompression.md).
 
 Descriptive names, discovery, structured diagnostics, and creating and running a
-variation in one call are also unreleased.
+variation in one call are also available in 0.7.
 New code uses `Ledger`, `RunRecord`, and `BranchPoint`, with `Pathway` unchanged.
 `Den`, `Atom`, and `Chokepoint` remain class aliases. Constructor field names and
 JSON serialization retain their existing spellings; descriptive properties are
@@ -523,7 +522,7 @@ print(report.comparison.state.value)
 
 ## Store
 
-### Preferred readers (unreleased)
+### Preferred readers
 
 Start with these descriptive interfaces. Their validation and ordering match the
 compatible legacy methods documented in detail below.
@@ -1777,10 +1776,10 @@ String enum describing evidence completeness for one comparison.
 
 ### `ocura_oss.StoreError`
 
-In this unreleased checkout, `StoreError` also exposes `code`, `execution`, `ids`,
+In 0.7, `StoreError` also exposes `code`, `execution`, `ids`,
 and `recovery` for machine-readable diagnostics. Its string remains the human
 message. Execution states and recovery hints follow the
-[CLI error contract](cli.md#structured-errors-unreleased). A caller must inspect
+[CLI error contract](cli.md#structured-errors). A caller must inspect
 `unknown` execution before deciding to repeat work; these fields do not provide
 idempotency or exactly-once execution. Ordinary `OSError` can still propagate
 from the Python API where documented.
@@ -1828,7 +1827,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. This development snapshot reports `"0.7.0.dev0"`.
+Installed package version. This release reports `"0.7.0"`.
 
 ## Typing
 

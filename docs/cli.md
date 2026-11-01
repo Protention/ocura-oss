@@ -1,14 +1,13 @@
 # Command-line reference
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
-This draft builds on 0.6.0. Opt-in compression and the `logs`, `compress`, and
-`decompress` commands below are absent from the released package. See
-[log compression](autocompression.md).
+Version 0.7 adds opt-in compression and the `logs`, `compress`, and
+`decompress` commands. See [log compression](autocompression.md).
 
 Discovery commands, `branch-points`, descriptive Python names, `run --from`, and
-`--json-errors` are also unreleased. A ledger contains run records and pathways; a branch point
-identifies terminal evidence for a variation. Existing JSON keys and stored IDs
+`--json-errors` are also available in 0.7. A ledger contains run records and pathways;
+a branch point identifies terminal evidence for a variation. Existing JSON keys and stored IDs
 retain their legacy spellings. See the [naming guide](naming-migration.md).
 
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
@@ -76,7 +75,7 @@ Every command accepts `--json`. JSON mode writes one result document to standard
 
 `run --json` retains child stdout and stderr in their logs without streaming them. A recorded command failure, interruption, or launch failure still returns a JSON result with its existing nonzero exit status. Invalid input or a state error returns no result document.
 
-### Structured errors (unreleased)
+### Structured errors
 
 Pass `--json-errors` before the command or among its options to opt into structured
 failures. This flag also enables normal JSON results, so it replaces `--json` for
@@ -543,7 +542,7 @@ The listing is fail-closed. A malformed or misnamed record causes exit status 2 
 ## `branch-points` (legacy alias: `chokepoints`)
 
 Both command names accept the same arguments and retain the existing success
-JSON shape. `branch-points` is the descriptive spelling in this unreleased checkout.
+JSON shape. `branch-points` is the descriptive spelling introduced in 0.7.
 
 List structurally valid terminal branch point records in reverse creation order, newest first.
 

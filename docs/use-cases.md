@@ -1,6 +1,6 @@
 # Choose an example
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
 The core repository keeps one primary example: record a small demonstration, then
 inspect its retained history. The fuller demonstrations live together on the
@@ -23,7 +23,7 @@ how to inspect your own ledger. No optional dependencies are needed.
 
 ## Fuller demonstrations
 
-These examples currently target **0.7.0.dev0 (unreleased)**. Use a separate checkout
+These examples retain their own **0.7.0.dev0 package snapshot**. Use a separate checkout
 so you can run them without switching your core development checkout:
 
 ```console
