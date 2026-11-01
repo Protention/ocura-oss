@@ -2,6 +2,14 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## Unreleased
+
+- **Fixed:** validating a pathway no longer doubles its work for every branch
+  generation. A history built by branching each run from the previous one made
+  `run`, `branch`, `compare`, and `verify` take seconds after about ten generations
+  and far longer after that. Each record is now validated once per operation.
+- `ocura-oss --version` prints the installed version.
+
 ## 0.6.0 - 2026-10-22
 
 - **License:** Ocura OSS is now released under the Apache License 2.0. Versions 0.5.0
