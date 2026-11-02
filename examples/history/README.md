@@ -1,7 +1,7 @@
 # Record and inspect a small history
 
 This repository-only example uses the discovery and naming interfaces from Ocura OSS 0.7.
-Install this checkout with `python -m pip install .` before running it. It needs no
+Run it with Ocura OSS installed from PyPI or from this checkout. It needs no
 optional dependencies and is excluded from the package distributions.
 
 From the checkout root, create a small demonstration and inspect it:

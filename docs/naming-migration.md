@@ -1,6 +1,6 @@
 # Descriptive names and compatibility
 
-Version 0.7.0.
+Version 0.7.1.
 
 Ocura OSS 0.7 introduces descriptive names while preserving legacy callers and
 stored state. The 0.6.0 package exposes the legacy names.

@@ -1,6 +1,6 @@
 # Log compression
 
-Version 0.7.0.
+Version 0.7.1.
 
 Ocura OSS can store captured stdout and stderr losslessly as gzip. Compression is
 opt-in: logs stay raw unless a run or an explicit `compress` pass asks for it.
