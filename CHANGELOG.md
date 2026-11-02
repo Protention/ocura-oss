@@ -2,6 +2,12 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.7.2 - 2026-11-02
+
+- On Python 3.11 and 3.12, record a stop request that arrives between polls of the
+  command as an interrupted run. It could instead end `run` with a traceback, leaving
+  the attempt for `recover` and, on macOS, the command still running.
+
 ## 0.7.1 - 2026-11-02
 
 This documentation release changes no code or record formats.

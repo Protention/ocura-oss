@@ -1,6 +1,6 @@
 # Scripts and AI agents
 
-Version 0.7.1.
+Version 0.7.2.
 
 Discovery, descriptive Python names, bounded readers, `run --from`, and
 `--json-errors` are available in 0.7. See the
