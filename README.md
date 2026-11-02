@@ -1,12 +1,11 @@
 # Ocura OSS 0.7 example catalog
 
 This is the maintained example catalog on **`examples/0.7`**, a long-lived branch
-for fuller demonstrations of the unreleased **0.7.0.dev0** interfaces. The
-[core 0.7 draft PR #24](https://github.com/Protention/ocura-oss/pull/24) retains the
-primary `ocura-oss demo` and history walkthrough; this catalog stays on its own
-branch. [`main`](https://github.com/Protention/ocura-oss/tree/main) remains at the
-released 0.6 version until the draft stack merges. Install this branch's checkout
-before running its examples; a published package may not provide the interfaces they use.
+for fuller demonstrations of **Ocura OSS 0.7.0**. Its package source matches the
+[0.7.0 release](https://github.com/Protention/ocura-oss/releases/tag/v0.7.0).
+[`main`](https://github.com/Protention/ocura-oss/tree/main) retains the primary
+`ocura-oss demo` and history walkthrough; this catalog stays on its own branch.
+Use the scripts from this checkout with the released package from PyPI.
 
 | Example | What it demonstrates | Additional requirements |
 | --- | --- | --- |
@@ -22,298 +21,70 @@ checkpoints, metrics, policies, and agent access; Ocura supplies execution recor
 lineage, and verified logs. Historical research evidence remains historical, and
 this catalog refresh establishes no new training-quality or compute-savings result.
 
-## About Ocura OSS
-
-A local execution ledger for recording, branching, and comparing command runs.
-
-Record a baseline, explain the next variation, and keep its result connected to the
-original run. Ocura OSS stores command arguments, outcomes, timing, output logs,
-declared parameters, and branch lineage in your project. It verifies the relevant
-records and logs before branching or comparing them.
-
-Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
-provides JSON output throughout the workflow; the Python API returns typed results.
-
-## Unreleased usability work
-
-This checkout adds descriptive Python names, `runs` and `show` for history
-discovery, bounded verified log reads, and opt-in `--json-errors` for structured
-failures. It also adds `run --from ID --reason TEXT` to create and execute a
-variation in one call. These interfaces are absent from published 0.6.0. The
-[history example](examples/history/README.md) starts with only a project root, retains failed
-retries and empty variations, and returns verified excerpts with stable references.
-The [naming guide](docs/naming-migration.md) maps descriptive names to compatible legacy names
-and unchanged JSON fields. This is an unreleased development snapshot.
-
-## Why use it
-
-Ocura OSS is built to just work. It aims to be the easiest way to start recording
-runs in a new project, especially for local development:
-
-- **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
-  it adds no runtime dependencies to your project.
-- **Easy setup.** Install this checkout, then run `ocura-oss init`. There is no
-  server, database, account, or configuration file. Every command accepts `--json`
-  and returns a documented exit code, so an AI agent with a shell can do the setup
-  and run the whole workflow.
-- **Easy to inspect and adapt.** Records are plain JSON files, and the typed
-  Python API is available alongside the CLI. The Apache-2.0 license permits
-  modifications without requiring you to publish them.
-
-To remove the ledger, delete `.ocura-oss/` in your project. That directory holds
-all ledger records and captured logs.
-
 ## Install and try
 
-Python 3.11 or later is required. Ocura OSS uses only the standard library at runtime.
-
-Clone the catalog branch, then install it in an activated virtual environment:
+Use an activated virtual environment. The core package needs Python 3.11 or later;
+the pinned Dream training setup uses Python 3.12 and CPU PyTorch.
 
 ```console
 git clone --branch examples/0.7 --single-branch https://github.com/Protention/ocura-oss.git ocura-oss-examples
 cd ocura-oss-examples
 git rev-parse HEAD
-python -m pip install .
+python -m pip install ocura-oss==0.7.0
 ocura-oss demo --root ./ocura-oss-demo
 ```
 
-The demo runs the complete workflow and retains a new directory for inspection.
-Its destination must not already exist. If you already have this branch checked
-out, run `python -m pip install .` from its root. For a built wheel, use a wheel
-from this same revision and copy the example directories separately. The example
-scripts and their optional dependencies are not bundled in package distributions.
-The Dream guides use Python 3.12 for their pinned CPU PyTorch setup.
+The demo destination must be new. Keep the checkout for its example scripts;
+they and their optional frameworks are not installed with the package. Install
+only the backend needed by the selected guide. To work on the package itself,
+`python -m pip install .` also works: its source matches the final 0.7.0 release.
 
-Record the commit ID printed by `git rev-parse HEAD` with your retained results.
-The branch can advance, and its CI tests the package and examples in that branch's
-own snapshot. Keep the exact revision when sharing or reproducing a run.
+Record the commit printed by `git rev-parse HEAD` with retained results. The branch
+can advance; keep the exact revision when sharing or reproducing a run.
 
-The [published package](https://pypi.org/project/ocura-oss/) has its own
-[release documentation](https://protention.dev/); these examples require this
-unreleased 0.7 checkout or its matching wheel.
+## Start with a development handoff
 
-## Compare two runs
+The CI-report example needs no optional framework or agent account. It records
+an expected test failure, a declared reason for the correction, and the passing
+child run. Its report reconstructs that evidence without running tests again:
 
 ```console
-ocura-oss init --name example --json
-ocura-oss run --json --param count=1 -- python -c "print(1)"
-ocura-oss branch --json --from <chokepoint-id> --reason "try count 2" --param count=2
-ocura-oss run --json --pathway <child-pathway-id> -- python -c "print(2)"
-ocura-oss verify --json
-ocura-oss compare --json
+python examples/ci_report/workflow.py run --root ./ci-report-run
+python examples/ci_report/workflow.py report --root ./ci-report-run
 ```
 
-Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
-child run. When typing an ID by hand, its first four or more hexadecimal characters
-are enough if they match one record.
+Use a new destination. The [guide](examples/ci_report/README.md) explains the
+retained source files, logs, run IDs, and limits of the evidence.
 
-In this unreleased checkout, replace the separate `branch` and child `run` calls
-with one command:
+## Package interfaces
 
-```console
-ocura-oss run --json-errors --from <chokepoint-id> --reason "try count 2" --param count=2 -- python -c "print(2)"
-```
+Ocura OSS is a local execution ledger for recording, branching, and comparing
+command runs. It has no runtime dependencies. Version 0.7.0 adds descriptive
+Python names, history discovery, verified log reads, structured errors, and the
+combined branch-to-run call while preserving existing ledgers and callers.
 
-This creates a child pathway and runs there, returning the usual run result and
-its `pathway_id`. Its parameters override the source pathway's labels; labels
-declared only on the source run are not inherited. A later storage failure can
-leave an empty child. Inspect the error's known IDs and execution state before
-continuing explicitly with `run --pathway CHILD_ID`; repeating `run --from`
-creates another child. See [recovery guidance](docs/automation.md#handle-uncertain-execution-without-duplicate-work).
-
-Without `--json`, `compare` prints:
-
-```text
-comparison: ready
-source branch point: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
-source pathway: pathway-1378d1d28cb54987b9e80d59d61aec74
-source run: passed 0.056063s
-child pathway: pathway-ce4c71137dd449398fe2b4e0198c83c3
-  reason: try count 2
-  parameters: added count=2
-  source run: passed 0.056063s
-  child run: passed 0.061312s
-  run parameters: changed count (1 -> 2)
-```
-
-`compare` reports each variant's relationship to its source, parameter changes,
-outcomes, and timing. `parameters` is how the branch differs from the pathway it
-came from; `run parameters` is how the labels the two runs recorded differ. With no
-`--from`, it compares the newest baseline that has a branch. Read the recorded
-output logs for workload-specific metrics, such as validation loss or accuracy.
-
-**Parameters are recorded labels.** Set actual inputs in your command as well:
-`--param batch=4 -- python train.py --batch 4`. A run on a branch records the
-branch's parameters without repeating them, and can add or replace labels with its
-own `--param`. To declare a value once, add `--substitute` and write `"{batch}"` in
-the command.
-
-Omit `--json` for terminal output. By default, `run` streams the command's output
-while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
-the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
-`ocura-oss run`, stops the command and records an interrupted attempt; a second
-Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
-
-This local branch prototypes automatic lossless log compression: after each run,
-captured logs of at least 1 MiB use gzip only when it saves at least 10%. Read
-the original verified bytes with `ocura-oss logs <atom-id>` and inspect sizes,
-storage paths, and a readable stream/atom/hash fingerprint with `--info`.
-`run --no-compress` keeps raw storage; `compress --dry-run` previews a pass over
-older logs, and `decompress` restores raw files. Earlier versions need
-decompressed storage despite the unchanged record schema. See the
-[compression design and limits](docs/autocompression.md), including temporary
-disk headroom and compatibility. This prototype has not been published to PyPI.
-
-## When to use something else
-
-Ocura OSS records what ran, how runs relate, and whether those records are still
-intact. It stops there on purpose:
-
-- **You want dashboards, metric charts, or a tracking server shared by a team.**
-  Use an experiment tracker such as [MLflow](https://mlflow.org/). Ocura OSS has no
-  server and no user interface, and it keeps your output as logs without reading
-  metrics from it.
-- **You need to version datasets or model files, or rebuild a pipeline.** Use a
-  tool such as [DVC](https://dvc.org/). A branch here is lineage metadata; it does
-  not snapshot files.
-- **You run one command and keep its output.** A log file is enough.
-
-Ocura OSS sits between these: more structure than loose log files, and far less to
-adopt than a tracking platform.
-
-## Development example: explain a fix
-
-The [CI-report example](examples/ci_report/README.md) turns a failing JSONL job
-reporter into a working one. It records both test runs and the reason for the
-change, then reconstructs the result from verified evidence without running the
-tests again. It uses only Python and this unreleased 0.7 checkout.
-
-```console
-python examples/ci_report/workflow.py run --root ./ci-report-demo
-python examples/ci_report/workflow.py report --root ./ci-report-demo
-```
-
-The example retains its own source versions and input fixture; Ocura supplies the
-run records, lineage, reasons, and verified logs. This is a reproducible development
-walkthrough that a person or an agent can follow. See the [use cases](docs/use-cases.md)
-for the development, training, and experimental replay workflows.
-
-## Autoregressive example: PyTorch, JAX, and Ray
-
-The [autoregressive example](examples/autoregressive/README.md) trains a small
-character-level next-token model on an included text corpus. Choose PyTorch or
-JAX, run a baseline and a longer-training variant, then reconstruct the comparison
-from saved evidence. An optional Ray Core executor runs either backend as a local
-task. The example stays in the source repository; neither the wheel nor the source
-distribution includes its scripts or framework dependencies. Install only what you use.
-
-From a repository checkout, after installing Ocura:
-
-```console
-python -m pip install -r examples/autoregressive/requirements-pytorch.txt
-python examples/autoregressive/experiment.py run --backend pytorch --root ./ar-pytorch
-python examples/autoregressive/experiment.py report --root ./ar-pytorch
-```
-
-The guide includes JAX and Ray commands. The script supplies metric reading and
-interpretation; the package supplies recording, lineage, and verification.
-
-The [Dream-RSI-inspired replay example](examples/dream_replay/README.md) adds a CPU
-training-search workflow: save and restore nanoGPT checkpoints, replay allocation
-policies from verified logs, and try the selected policy on a fresh seed. Checkpoint
-management and policy selection remain example code. Its default smoke profile
-demonstrates the mechanism; it does not establish compute savings.
-
-The [Dream-RSI training adaptation](examples/dream_rsi/README.md) adds real discovery
-and policy-development agents, recorded-history replay, and repeated redeployment
-with independent training controls. This implementation-support study demonstrates
-the package integration, with no established training-quality or resource-savings
-advantage. Training runs locally; agent inference uses an external Codex service.
-Agent access and CPU PyTorch belong to the optional repository example.
-These experimental example files retain their [MPL-2.0 license](examples/dream_replay/LICENSE).
-
-## Python and automation
-
-```python
-import sys
-from ocura_oss import branch, compare, initialize, run, verify
-
-root = initialize("experiment", name="example").root
-baseline = run([sys.executable, "-c", "print(1)"], root=root, parameters={"count": "1"})
-child = branch(baseline.branch_point.id, root=root, reason="try count 2", parameters={"count": "2"})
-run([sys.executable, "-c", "print(2)"], root=root, pathway_id=child.id)
-assert verify(root).ok
-comparison = compare(source_branch_point_id=baseline.branch_point.id, root=root)
-```
-
-The unreleased Python API can also replace the separate `branch()` and child
-`run()` calls:
-
-```python
-variation = run(
-    [sys.executable, "-c", "print(2)"],
-    root=root,
-    source_branch_point_id=baseline.branch_point.id,
-    reason="try count 2",
-    parameters={"count": "2"},
-)
-```
-
-It returns the same `RunExecution`; the child's ID is `variation.record.pathway_id`.
-
-Use `Store(root).read_verified_log(run_id=baseline.record.id, stream="stdout")` to consume recorded
-output as bytes checked against the stored run record's byte count and SHA-256 digest.
-Raw and gzip storage return the same original bytes.
-The method also accepts `stream="stderr"`; decoding and metric interpretation
-remain with your script. See the [Python API](docs/python-api.md#storeread_verified_log).
-
-An agent can use the same CLI or Python workflow inside its existing execution
-environment. The [automation guide](docs/automation.md) explains JSON results,
-exit codes, parameter labels, and how to inspect earlier attempts.
-
-## Documentation
-
-- [Example catalog](docs/use-cases.md): choose a development, training, replay, or history workflow
-- [Overview](docs/index.md): installation, concepts, and the complete workflow
-- [CLI reference](docs/cli.md): every command, JSON fields, and exit codes
+- [Overview](docs/index.md): the complete CLI and Python workflow
+- [Names and compatibility](docs/naming-migration.md): `Ledger`, `RunRecord`, and `BranchPoint`, with legacy aliases
 - [Python API](docs/python-api.md): functions, typed results, and `Store`
-- [Scripts and AI agents](docs/automation.md): JSON workflows and verified output consumption
-- [State and verification](docs/state-and-verification.md): records and checks
-- [Local autocompression prototype](docs/autocompression.md): timing, verified reading, fingerprints, and reversible storage
-- [Autoregressive example](examples/autoregressive/README.md): PyTorch, JAX, and Ray
-- [Migration tool](tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
+- [CLI reference](docs/cli.md): commands, JSON fields, and error handling
+- [Published documentation](https://protention.dev/): the released package reference
 
-The full references are included in this checkout and remain readable directly on GitHub.
-The documentation for the published release is also [available online](https://protention.dev/).
+The [0.6.0 example snapshot](https://github.com/Protention/ocura-oss/tree/v0.6.0/examples/autoregressive)
+remains available for the previous release.
 
-## Local state and operating model
+## Validation and historical results
 
-State lives under `.ocura-oss/` in the project root. A **ledger** identifies that
-state; a **pathway** groups runs in a lineage; a **run record** retains one command
-attempt; a **branch point** identifies terminal evidence from which a branch can
-be created. Older names (`Den`, `Atom`, and `Chokepoint`) remain Python aliases;
-stored IDs, directories, and JSON keys retain their existing spellings.
+CI tests this branch's source and built distributions, plus the released PyPI
+0.7.0 package with the PyTorch, JAX, and Dream CPU integrations. Live agent calls
+and optional Ray execution are not part of CI. The Dream guides include the
+opt-in training checks and live-run budgets.
 
-Each branch records its source and reason. It represents a new line of work;
-workspace files, process state, and model weights are managed by the workload.
-Several processes may record runs under one state root at once. Delete `.ocura-oss/`
-to discard that project's records.
+The Dream RSI pilot and curated measurements remain September 2026 results from
+Ocura OSS 0.4.0. Updating the adapter and rerunning compatibility checks does not
+repeat that pilot or establish a new policy benefit. Each application owns its
+checkpoints, source copies, metrics, and replay policy; Ocura supplies execution
+records, lineage, and verified logs.
 
-Commands run with `shell=False` in the project root and inherit the invoking
-environment's permissions. Use trusted, owner-authorized workloads. For generated
-or otherwise untrusted commands, provide isolation and permissions through your
-execution environment; Ocura OSS itself does not sandbox or restrict them.
-
-Records retain command arguments, parameter labels, reasons, and output. Keep secrets
-out of these fields; `run --mask-arg` and `run --no-capture` cover a command token or
-output that cannot be avoided. SHA-256 checksums detect local inconsistencies; they do not
-authenticate authorship or prevent a writer from replacing records and checksums.
-
-## Project status
-
-Ocura OSS is research software under the [Apache License 2.0](https://github.com/Protention/ocura-oss/blob/main/LICENSE).
-Versions 0.5.0 and earlier were released under MPL-2.0. The 0.x interface and record
-format may change before 1.0, and there is no production support commitment.
-
-Bug reports and focused pull requests are welcome. See [Contributing](https://github.com/Protention/ocura-oss/blob/main/CONTRIBUTING.md)
-and the [security policy](https://github.com/Protention/ocura-oss/blob/main/SECURITY.md).
+Ocura OSS 0.7.0 is Apache-2.0 licensed; the Dream examples retain their own
+[MPL-2.0 license](examples/dream_replay/LICENSE). See [Contributing](CONTRIBUTING.md)
+and the [security policy](SECURITY.md) for the core package.

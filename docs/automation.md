@@ -1,10 +1,10 @@
 # Scripts and AI agents
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
-The discovery, descriptive Python names, bounded readers, `run --from`, and
-`--json-errors` sections describe unreleased work in this checkout. Published 0.6.0 does not
-include those interfaces. See the [naming and compatibility guide](naming-migration.md).
+Discovery, descriptive Python names, bounded readers, `run --from`, and
+`--json-errors` are available in 0.7. See the
+[naming and compatibility guide](naming-migration.md).
 
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
 command tool. Use it when you want a durable record connecting a baseline to later
@@ -56,10 +56,11 @@ it stops the command and still returns a recorded `interrupted` result. If a `ru
 process is killed instead, its attempt remains unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
 `recover --json` closes it as `abandoned` once the command itself has stopped.
 
-The [CI-report example](../examples/ci_report/README.md) demonstrates a failed test
+On the `examples/0.7` branch, the [CI-report example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/ci_report/README.md) demonstrates a failed test
 run, a reasoned fix through the combined operation, and later inspection without
-rerunning the work. The [autoregressive example](../examples/autoregressive/README.md) is an executable
+rerunning the work. The [autoregressive example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) is an executable
 client of this interface, with PyTorch/JAX choices and an optional Ray Core executor.
+See [use cases](use-cases.md) for the separate checkout and requirements.
 The [Python API](python-api.md) provides the same operations with typed results.
 
 ### From a run result to the next command
@@ -165,7 +166,7 @@ base64 bytes. An unavailable stream remains an error rather than an empty succes
 
 ## Handle uncertain execution without duplicate work
 
-`--json-errors` opts into the [structured error contract](cli.md#structured-errors-unreleased).
+`--json-errors` opts into the [structured error contract](cli.md#structured-errors).
 It implies JSON results. Existing `--json` callers keep their original behavior.
 Inspect the error's execution state and known IDs before deciding what to do next;
 the recovery field describes an inspection or recovery step, not permission to

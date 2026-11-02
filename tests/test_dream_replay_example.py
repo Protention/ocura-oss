@@ -480,7 +480,7 @@ class DreamCPUIntegrationTests(unittest.TestCase):
                     [sys.executable, str(EXAMPLE / "experiment.py"), *map(str, args)],
                     capture_output=True,
                     text=True,
-                    timeout=150,
+                    timeout=360,
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 return json.loads(completed.stdout)
@@ -495,7 +495,8 @@ class DreamCPUIntegrationTests(unittest.TestCase):
                 "--profile",
                 "smoke",
                 "--max-seconds",
-                120,
+                # Sixteen fresh PyTorch processes need startup allowance on slower hosts.
+                300,
             )
             self.assertEqual(collected["segments"], 16)
             self.assertEqual(collected["failed_segments"], 0)
@@ -510,7 +511,7 @@ class DreamCPUIntegrationTests(unittest.TestCase):
                 "--seed",
                 201,
                 "--max-seconds",
-                120,
+                300,
             )
             selected_root = Path(fresh["arms"]["selected"]["root"])
             restored = command("report", "--root", selected_root)

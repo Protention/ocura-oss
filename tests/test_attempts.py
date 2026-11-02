@@ -3,6 +3,7 @@
 """Attempt journal, liveness locks, recovery, and concurrent recording."""
 
 import contextlib
+import errno
 import io
 import json
 import os
@@ -71,11 +72,42 @@ def stop(process):
             stream.close()
 
 
+@contextlib.contextmanager
+def lock_call_fails(code):
+    """Make the operating system's lock call fail with *code*."""
+    if sys.platform == "win32":
+        with (
+            mock.patch.object(locking, "_kernel32") as kernel,
+            mock.patch.object(locking.ctypes, "get_last_error", return_value=code),
+        ):
+            kernel.LockFileEx.return_value = 0
+            yield
+    else:
+        with mock.patch.object(locking.fcntl, "flock", side_effect=OSError(code, "injected")):
+            yield
+
+
 class LockTests(unittest.TestCase):
     def setUp(self):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.path = Path(self._temporary.name) / "attempt.lock"
+
+    def test_only_contention_looks_like_a_held_lock(self):
+        busy, refused = (33, 50) if sys.platform == "win32" else (errno.EAGAIN, errno.ENOLCK)
+        with (
+            lock_call_fails(busy),
+            self.assertRaises(TimeoutError),
+            locking.hold(self.path, wait_limit=0),
+        ):
+            self.fail("a busy lock must not be taken")
+        with lock_call_fails(refused):
+            with (
+                self.assertRaises(locking.LockUnavailable),
+                locking.hold(self.path, wait_limit=None),
+            ):
+                self.fail("a refused lock must not be taken")
+            self.assertTrue(locking.is_held(self.path), "a recorder may still be alive")
 
     def test_missing_lock_file_is_not_held(self):
         self.assertFalse(locking.is_held(self.path))
@@ -457,6 +489,39 @@ class AbandonedAttemptTests(JournalTestCase):
             self.store.recover()
         self.assertTrue(path.is_file())
 
+    def test_denied_attempt_reads_are_retried_while_the_record_exists(self):
+        attempt = self.abandon()
+        name = f"{attempt.id}.json"
+        path = self.store.attempts_dir / name
+        read_bytes = Path.read_bytes
+        denial = {}
+
+        # Windows briefly denies reads of a record that its finishing run is removing.
+        def read(target):
+            if target == path and denial["count"]:
+                denial["count"] -= 1
+                if denial["finalized"]:
+                    target.unlink()
+                raise PermissionError(13, "Permission denied", str(target))
+            return read_bytes(target)
+
+        not_finalized = "attempt was not finalized; run `ocura-oss recover` to close it"
+        unreadable = f"invalid attempt record {name}: malformed attempt record {name}: unreadable"
+        for count, finalized, problem, abandoned in (
+            (3, False, not_finalized, (attempt.id,)),
+            (sys.maxsize, False, unreadable, ()),
+            (1, True, None, ()),
+        ):
+            denial.update(count=count, finalized=finalized)
+            with (
+                self.subTest(count=count, finalized=finalized),
+                mock.patch("ocura_oss.store._BUSY_DELAY", 0),
+                mock.patch.object(Path, "read_bytes", autospec=True, side_effect=read),
+            ):
+                report = self.store.verify_state()
+                self.assertEqual(dict(report.problems).get(f"attempts/{name}"), problem)
+                self.assertEqual(report.abandoned_attempts, abandoned)
+
     def test_stray_lock_file_is_ignored_by_verification_and_removed_by_recovery(self):
         stray = self.store.attempts_dir / f"{model.make_id('atom')}.lock"
         stray.write_bytes(b"")
@@ -617,10 +682,24 @@ class KilledRecorderTests(ProcessTestCase):
 
 class ConcurrentRecordingTests(ProcessTestCase):
     def test_runs_sharing_a_root_never_look_like_damage(self):
+        self.assert_recorders_look_healthy()
+
+    def test_compressing_runs_sharing_a_root_never_look_like_damage(self):
+        self.assert_recorders_look_healthy("--compress-min-bytes", "0")
+
+    def assert_recorders_look_healthy(self, *flags):
         command = "import time; print('x' * 4096); time.sleep(0.4)"
         recorders = [
             self.spawn(
-                "run", "--root", str(self.root), "--json", "--", sys.executable, "-c", command
+                "run",
+                "--root",
+                str(self.root),
+                "--json",
+                *flags,
+                "--",
+                sys.executable,
+                "-c",
+                command,
             )
             for _ in range(6)
         ]

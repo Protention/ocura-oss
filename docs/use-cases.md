@@ -1,15 +1,15 @@
 # Ocura OSS 0.7 example catalog
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
 The maintained `examples/0.7` branch holds the fuller demonstrations separately
-from the primary demo and history walkthrough in the
-[core 0.7 draft PR #24](https://github.com/Protention/ocura-oss/pull/24). `main` remains
-at released 0.6 until the draft stack merges. These examples show how a caller
-uses Ocura to retain execution evidence and explain a variation. They target the
-unreleased 0.7 development interfaces. Follow the [catalog setup](../README.md#install-and-try)
-to check out this branch, then install it with `python -m pip install .`, or install
-its matching built wheel and copy the relevant example directories separately.
+from the primary demo and history walkthrough on
+[`main`](https://github.com/Protention/ocura-oss/tree/main). These examples show how
+a caller uses Ocura to retain execution evidence and explain a variation. They
+use the released 0.7.0 interfaces. Follow the [catalog setup](../README.md#install-and-try)
+to check out this branch, then run `python -m pip install ocura-oss==0.7.0`.
+Its package source also matches the release, so `python -m pip install .` works
+for package development. Keep the example directories when using a separate wheel.
 Example scripts and optional frameworks are not installed with the package.
 
 | Workflow | Question it answers | Requirements |

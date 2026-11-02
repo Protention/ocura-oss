@@ -1,9 +1,9 @@
 # Dream-RSI training adaptation with Ocura OSS
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
 This experimental example belongs to the maintained [0.7 catalog](../../docs/use-cases.md)
-on `examples/0.7` and targets the unreleased 0.7 package. Use the
+on `examples/0.7` and uses the released 0.7.0 package. Use the
 [catalog setup](../../README.md#install-and-try) to obtain the matching checkout.
 The pilot and its published evidence summary remain historical 0.4.0 results;
 updating the adapter does not revalidate those results or establish a policy benefit.
@@ -38,7 +38,7 @@ Both agent requests and training jobs pass through `record_command()` in
 
 The example owns agent access, checkpoints, artifact digests, resource limits,
 replay, scoring, and policy selection. Ocura lineage identifies execution
-relationships; it does not restore model state. The example uses Ocura OSS 0.7.0.dev0
+relationships; it does not restore model state. The example uses Ocura OSS 0.7.0
 and stays outside the package distributions and runtime dependencies.
 
 ## Setup
@@ -47,10 +47,10 @@ Use a repository checkout and an activated Python 3.12 virtual environment.
 The live runner supports Windows and Linux host-capacity checks. Other operating
 systems defer when that check is unavailable. Docker and a GPU are not required.
 
-Install this development checkout from the repository root:
+Install the released package from the repository root:
 
 ```console
-python -m pip install .
+python -m pip install ocura-oss==0.7.0
 python -m unittest discover -s tests -p "test_dream_rsi_*.py" -v
 ```
 
@@ -58,8 +58,8 @@ These default tests use synthetic agents and evaluators: no remote calls, datase
 downloads, or training. The optional real training check is skipped by default.
 For a built wheel, install `PATH_TO_WHEEL` instead and separately copy both
 `examples/dream_rsi` and `examples/dream_replay` from this revision. The scripts
-are repository-only; the wheel contains the package, not these examples. Published
-0.6 does not provide the combined call used by the updated adapter.
+are repository-only; the wheel contains the package, not these examples.
+Installing this checkout with `python -m pip install .` also works.
 Reports and replay need only Ocura; training additionally needs CPU PyTorch:
 
 ```console

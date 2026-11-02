@@ -2,16 +2,15 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.7.0.dev0 - Unreleased
+## 0.7.0 - 2026-11-01
 
-- On the experimental Dream branch, update replay/RSI adapters to the descriptive
-  readers and combined branch/run operation. Add archive reads and explicit
-  original-root mapping for copied historical checkpoint evidence, retaining
-  existing result keys, budgets, verification, and historical outcomes.
-- Add a repository-only CI-report walkthrough: retain a failing baseline, explain
-  and run the correction, and inspect verified evidence without repeating work.
-  Refresh the autoregressive example for the combined 0.7 operation and retained
-  failure diagnostics, preserving its existing invocation and report fields.
+- Keep the demo and history inspection as the primary example in the core
+  repository. Move the autoregressive demonstration and its backend tests to the
+  semi-permanent `examples/0.7` branch, alongside the CI-report and Dream examples.
+  Link their setup and compatibility requirements from the use-case catalog.
+- On Windows, `verify` no longer reports an unreadable attempt when a concurrent
+  run finalizes while it reads; a read denied while the record still exists is
+  retried briefly, and one denied throughout is still reported.
 - Preserve both filenames and Windows error details when wrapping operating-system
   failures, and accept indexing-only command sequences supported by earlier callers.
 - Add `run --from BRANCH_POINT_ID --reason TEXT -- COMMAND` and Python
@@ -61,6 +60,25 @@ This file records user-visible changes to Ocura OSS.
   to read a stable copy of a ledger without creating lock files. Archive mode
   refuses every change, and refuses a ledger with unfinished attempts, saying how
   to list and recover them.
+- Add `ocura-oss logs`, `Store.open_verified_log()`, and `Store.log_info()`: a
+  run's verified original log bytes, `--offset`/`--length` excerpts, and storage
+  metadata with `--info` or `--json`.
+- Add opt-in lossless log compression. `run --compress` (or `--compress-min-bytes N`)
+  stores a run's captured logs of at least 1 MiB as gzip once it finishes, when that
+  saves at least 10%; `compress` and `decompress` convert finalized logs, and
+  `--dry-run` previews either. Logs stay raw by default. Records, IDs, digests, and
+  retained manifests do not change, and every reader returns the original bytes.
+  `run` and `show` print each log's current file, reported as `log_files` in JSON
+  and by `Store.log_files()`, so standard gzip tools can open compressed logs.
+  Ocura OSS 0.6 cannot read compressed logs: run `decompress` and `verify` before
+  opening the ledger with it.
+- Keep completed run results available when optional compression or log-path
+  reporting fails. Interrupted compression reports a storage warning and leaves
+  finalized evidence intact. Refused locks fail promptly for writes; verified
+  reads can fall back to unlocked access where locks are unavailable.
+- Support linked log directories when reporting storage paths, classify conversion
+  failures by their underlying cause, and stop log output quietly when its reader
+  closes the pipe.
 
 ## 0.6.0 - 2026-10-22
 

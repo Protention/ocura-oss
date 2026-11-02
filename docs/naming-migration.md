@@ -1,9 +1,9 @@
 # Descriptive names and compatibility
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
-This guide describes unreleased work on top of 0.6.0. Use a checkout containing
-these changes; the published 0.6.0 package exposes the legacy names.
+Ocura OSS 0.7 introduces descriptive names while preserving legacy callers and
+stored state. The 0.6.0 package exposes the legacy names.
 
 A **ledger** identifies the project-local state. A **run record** retains one
 command attempt and its outcome. A **branch point** identifies terminal evidence
@@ -82,7 +82,7 @@ rewrite JSON to adopt the Python terminology.
 
 `--json` retains its existing success and error behavior. The separate
 `--json-errors` option opts into structured failure output and implies JSON
-results. See the [CLI error contract](cli.md#structured-errors-unreleased) before
+results. See the [CLI error contract](cli.md#structured-errors) before
 changing a caller's failure handling. Neither flag makes retries idempotent.
 
 Physical gzip storage is a separate compatibility question. Unchanged record

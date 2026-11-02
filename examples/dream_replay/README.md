@@ -1,12 +1,11 @@
 # Replay a training search with Ocura OSS
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
 This experimental example is part of the maintained [0.7 catalog](../../docs/use-cases.md)
-on `examples/0.7` and targets the unreleased 0.7 interfaces. Follow the
-[catalog setup](../../README.md#install-and-try) and install this checkout or its
-matching built wheel; the published 0.6 package does not provide the new combined
-branch-to-run call used below.
+on `examples/0.7` and uses the released 0.7.0 interfaces. Follow the
+[catalog setup](../../README.md#install-and-try) for the scripts and install
+`ocura-oss==0.7.0` from PyPI. Installing this checkout also works.
 
 Which training run should get the next block of CPU time? This example records
 small GPT training segments, replays allocation policies against their saved
@@ -32,7 +31,7 @@ CPU PyTorch.
 From the repository root, in an activated virtual environment:
 
 ```console
-python -m pip install .
+python -m pip install ocura-oss==0.7.0
 python -m pip install -r examples/dream_replay/requirements.txt --index-url https://download.pytorch.org/whl/cpu
 python examples/dream_replay/experiment.py prepare --root .tmp-tests/dream-inputs --download
 ```
@@ -70,9 +69,9 @@ library; training remains optional.
 ## First run: smoke profile
 
 ```console
-python examples/dream_replay/experiment.py collect --prepared .tmp-tests/dream-inputs --root .tmp-tests/dream-history --profile smoke --seed 101 --max-seconds 120
+python examples/dream_replay/experiment.py collect --prepared .tmp-tests/dream-inputs --root .tmp-tests/dream-history --profile smoke --seed 101 --max-seconds 300
 python examples/dream_replay/experiment.py replay --root .tmp-tests/dream-history --budget-quanta 8
-python examples/dream_replay/experiment.py evaluate --history .tmp-tests/dream-history --root .tmp-tests/dream-fresh --seed 201 --budget-quanta 8 --max-seconds 120
+python examples/dream_replay/experiment.py evaluate --history .tmp-tests/dream-history --root .tmp-tests/dream-fresh --seed 201 --budget-quanta 8 --max-seconds 300
 python examples/dream_replay/experiment.py report --root .tmp-tests/dream-fresh/selected
 ```
 
@@ -80,6 +79,10 @@ Each command emits JSON to stdout; progress and diagnostics go to stderr. New
 destinations must not exist. Keep the prepared inputs and checkpoints for actual
 training continuation. The ledger alone supports score replay and reporting,
 without importing PyTorch or reading model/checkpoint files.
+
+The five-minute allowance includes starting a fresh PyTorch process for each
+segment. Startup can dominate this small workload; the training budget stays at
+two updates per segment regardless of the time allowance.
 
 For a settled copy with no writers or unfinished attempts, add `--archive` to
 `report` or `replay` to avoid even temporary log locks. This mode does not make

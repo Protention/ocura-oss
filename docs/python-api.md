@@ -1,13 +1,12 @@
 # Python API reference
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
-This draft builds on 0.6.0. Compression options, storage metadata, and conversion
-methods below are proposed branch behavior, absent from the released package.
-See [open design decisions](autocompression.md#decisions-before-merge).
+Version 0.7 adds opt-in compression, storage metadata, and conversion
+methods. See [log compression](autocompression.md).
 
 Descriptive names, discovery, structured diagnostics, and creating and running a
-variation in one call are also unreleased.
+variation in one call are also available in 0.7.
 New code uses `Ledger`, `RunRecord`, and `BranchPoint`, with `Pathway` unchanged.
 `Den`, `Atom`, and `Chokepoint` remain class aliases. Constructor field names and
 JSON serialization retain their existing spellings; descriptive properties are
@@ -34,7 +33,7 @@ Declared parameter mappings require nonempty string values. Keys must begin with
 
 Identifier parameters take full identifiers. The shortened identifiers that the CLI accepts are expanded by [`Store.resolve_id`](#storeresolve_id).
 
-Use these operations from a script or an AI agent inside its existing execution environment. The [automation guide](automation.md) describes caller responsibilities; the [training example](../examples/autoregressive/README.md) supplies PyTorch/JAX workloads with an optional local Ray executor.
+Use these operations from a script or an AI agent inside its existing execution environment. The [automation guide](automation.md) describes caller responsibilities; the [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) on the separate `examples/0.7` branch supplies PyTorch/JAX workloads with an optional local Ray executor.
 
 ## Workflow example
 
@@ -148,7 +147,7 @@ run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = True,
+    compress: bool = False,
     compression_min_bytes: int = 1_048_576,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -171,8 +170,8 @@ Run one trusted local command and record terminal evidence.
 | `parameters` | mapping of string to string, or None | `None` | Add or replace labels for this run; with `source_branch_point_id`, set the new child's parameter overrides instead. Labels do not configure the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
-| `compress` | boolean | `True` | Consider only this run's finalized captured logs once for lossless gzip storage |
-| `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size for automatic compression; require at least 10% savings as well |
+| `compress` | boolean | `False` | Consider only this run's finalized captured logs once for lossless gzip storage |
+| `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size to compress when `compress` is true; require at least 10% savings as well |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
 | `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with the value the run records for that key |
 | `context` | boolean | `False` | Record the platform and the git revision and dirty state at launch |
@@ -182,8 +181,8 @@ Run one trusted local command and record terminal evidence.
 
 `RunExecution` exposing the recorded `RunRecord` as `.record`, terminal
 `BranchPoint` as `.branch_point`, and
-`storage_warnings`, a tuple of post-finalization compression errors (empty on
-success). Compression warnings do not replace the command's actual outcome.
+`storage_warnings`, a tuple of post-finalization compression errors or stop requests
+(empty on success). Compression warnings do not replace the command's actual outcome.
 
 #### Raises
 
@@ -230,12 +229,11 @@ The child runs with `shell=False` and the project root as its working directory.
 
 Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned run record has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
 
-By default each captured log of at least 1 MiB is considered for gzip compression
-at level 6 after this run is finalized. It must save at least 10%; smaller or
-incompressible logs remain raw. Original bytes and hashes remain unchanged, and
-no older logs are scanned. Set `compress=False` to retain raw storage or
-`compression_min_bytes=N` to change this run's threshold. See the
-[local compression prototype](autocompression.md) for storage compatibility and
+Logs stay raw by default. With `compress=True`, each captured log of at least
+`compression_min_bytes` (1 MiB) is considered for gzip compression at level 6
+after this run is finalized. It must save at least 10%; smaller or incompressible
+logs remain raw. Original bytes and hashes remain unchanged, and no older logs are
+scanned. See [log compression](autocompression.md) for storage compatibility and
 temporary disk space requirements.
 
 Each position in `masked_arguments` must index `command`; position 0 is the executable. The attempt and run records store `<masked>` at those positions and list them. Masking does not alter output, so a command that prints a masked value still writes it to a captured log.
@@ -524,7 +522,7 @@ print(report.comparison.state.value)
 
 ## Store
 
-### Preferred readers (unreleased)
+### Preferred readers
 
 Start with these descriptive interfaces. Their validation and ordering match the
 compatible legacy methods documented in detail below.
@@ -916,6 +914,20 @@ backing path when compressed. Compressed file contents are encoded; use
 
 The returned path has passed containment checks only. Use `read_verified_log()` to consume bytes that have been checked against the stored run record; `verify_atom_evidence()` checks both logs without returning their contents.
 
+### `Store.log_files`
+
+```python
+store.log_files(atom: RunRecord) -> dict[str, str]
+```
+
+Return each captured stream's current file relative to the project root, keyed
+`stdout` and `stderr`: the recorded path, plus `.gz` when the log is stored as
+gzip. A run recorded without output capture returns an empty dictionary. Only the
+paths and the files' presence are checked; nothing is read, verified, or locked.
+`ocura-oss run --json` and `show --json` report this as `log_files`. Raises
+`StoreError` for unsafe or unreadable storage paths, including a recorded path
+that escapes the logs directory.
+
 ### `Store.read_verified_log`
 
 ```python
@@ -1020,9 +1032,8 @@ Verify one captured log and return storage metadata without returning its
 contents. `atom_id` must be a full identifier. Invalid lineage, stream, capture
 mode, or evidence raises `StoreError`, as for `read_verified_log()`.
 
-The draft defines `LogInfo` in `ocura_oss.store`, without adding it to
-`ocura_oss.__all__`. Its shape and public status remain part of the design review.
-It has these fields:
+`LogInfo` is defined in `ocura_oss.store`, without adding it to
+`ocura_oss.__all__`. It has these fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -1070,7 +1081,7 @@ replacing files.
 
 Each returned `LogStorageChange` exposes the preferred `run_id` property and contains `atom_id`, `stream`, `action`,
 `original_bytes`, `stored_bytes`, and `path` (the project-relative backing path).
-This draft result type also lives in `ocura_oss.store`, without a top-level export.
+This result type also lives in `ocura_oss.store`, without a top-level export.
 Actions are `compressed`, `would-compress`, `restored`, `would-restore`,
 `unchanged`, `small`, or `no-savings`.
 The records and original digests remain unchanged, as do retained manifests.
@@ -1091,9 +1102,9 @@ store.decompress_logs()
 assert store.verify_state().ok
 ```
 
-This local prototype extends physical storage compatibility despite retaining
-record schema 2. Older readers require decompressed logs. See
-[automatic log compression](autocompression.md).
+Compressed storage extends physical storage despite retaining record schema 2;
+Ocura OSS 0.6 and earlier require decompressed logs. See
+[log compression](autocompression.md).
 
 ### `Store.verify_atom_evidence`
 
@@ -1502,7 +1513,7 @@ Records produced by one command attempt.
 | `atom` | `RunRecord` | Compatible constructor field and property |
 | `branch_point` | `BranchPoint` | Preferred property for the terminal evidence boundary |
 | `chokepoint` | `BranchPoint` | Compatible constructor field and property |
-| `storage_warnings` | tuple of strings | Post-finalization compression errors; actual command outcome remains recorded on the run record |
+| `storage_warnings` | tuple of strings | Post-finalization compression errors or stop requests; actual command outcome remains recorded on the run record |
 
 ### `ocura_oss.RunSummary`
 
@@ -1765,10 +1776,10 @@ String enum describing evidence completeness for one comparison.
 
 ### `ocura_oss.StoreError`
 
-In this unreleased checkout, `StoreError` also exposes `code`, `execution`, `ids`,
+In 0.7, `StoreError` also exposes `code`, `execution`, `ids`,
 and `recovery` for machine-readable diagnostics. Its string remains the human
 message. Execution states and recovery hints follow the
-[CLI error contract](cli.md#structured-errors-unreleased). A caller must inspect
+[CLI error contract](cli.md#structured-errors). A caller must inspect
 `unknown` execution before deciding to repeat work; these fields do not provide
 idempotency or exactly-once execution. Ordinary `OSError` can still propagate
 from the Python API where documented.
@@ -1816,7 +1827,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. This development snapshot reports `"0.7.0.dev0"`.
+Installed package version. This release reports `"0.7.0"`.
 
 ## Typing
 

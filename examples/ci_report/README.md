@@ -1,6 +1,6 @@
 # Fix a CI job report and retain the evidence
 
-This repository-only example uses **0.7.0.dev0 (unreleased)**. It needs Python 3.11+
+This repository-only example uses **Ocura OSS 0.7.0**. It needs Python 3.11+
 with Ocura installed; the reporter and its checks use only the standard library.
 The example is copied separately and is not bundled in the wheel or source distribution.
 
@@ -18,7 +18,7 @@ recording the failure, the reason for the change, and the passing result.
 From the repository root, in a virtual environment:
 
 ```console
-python -m pip install .
+python -m pip install ocura-oss==0.7.0
 python examples/ci_report/workflow.py run --root ./ci-report-run
 python examples/ci_report/workflow.py report --root ./ci-report-run --json
 ```
@@ -130,7 +130,7 @@ destination names:
 ```powershell
 python -m pip wheel . --no-deps --wheel-dir ./dist
 python -m venv .venv-example
-.\.venv-example\Scripts\python.exe -m pip install --no-index --no-deps ./dist/ocura_oss-0.7.0.dev0-py3-none-any.whl
+.\.venv-example\Scripts\python.exe -m pip install --no-index --no-deps ./dist/ocura_oss-0.7.0-py3-none-any.whl
 Copy-Item -Recurse ./examples/ci_report ./ci-report-example
 $env:PYTHONPATH = ''
 .\.venv-example\Scripts\python.exe ./ci-report-example/workflow.py run --root ./ci-report-wheel-run

@@ -26,8 +26,8 @@ STATE_DIR_NAME = ".ocura-oss"
 
 _ENVELOPE_KEYS = {"schema_version", "kind", "payload", "checksum"}
 _HASH_CHUNK = 1024 * 1024
-_REMOVE_RETRIES = 200
-_REMOVE_DELAY = 0.01
+_BUSY_RETRIES = 200
+_BUSY_DELAY = 0.01
 _SHOWN_MATCHES = 5
 
 _T = TypeVar("_T")
@@ -743,6 +743,22 @@ class Store:
         with self._log_guard(atom.id, relative) as path:
             return logstorage.physical_path(path)
 
+    def log_files(self, atom: model.Atom) -> dict[str, str]:
+        """Return each captured log's current file, relative to the project root.
+
+        A log stored as gzip is the recorded path plus ``.gz``. Only the paths and
+        the files' presence are checked: nothing is read, verified, or locked.
+        Unsafe or unreadable paths raise StoreError.
+        """
+        files: dict[str, str] = {}
+        for stream, (relative, _size, _digest) in zip(
+            ("stdout", "stderr"), _recorded_logs(atom), strict=False
+        ):
+            with _log_failures(atom.id, relative):
+                path = self._evidence_path(atom.id, relative)
+                files[stream] = _stored_path(relative, logstorage.physical_path(path), path)
+        return files
+
     def read_verified_log(
         self,
         atom_id: str | None = None,
@@ -804,7 +820,7 @@ class Store:
     @contextlib.contextmanager
     def _log_guard(self, atom_id: str, relative: str, *, change: bool = False) -> Iterator[Path]:
         """Serialize cooperating readers and storage changes of one logical log."""
-        try:
+        with _log_failures(atom_id, relative):
             path = self._evidence_path(atom_id, relative)
             if self.archive:
                 self._check_archive()
@@ -820,21 +836,14 @@ class Store:
                             lock = locking.hold(lock_dir / f"{path.name}.lock", wait_limit=None)
                             stack.enter_context(lock)
                         except OSError as exc:
-                            denied = isinstance(exc, PermissionError) or exc.errno == errno.EROFS
+                            denied = exc.errno == errno.EROFS or isinstance(
+                                exc, (PermissionError, locking.LockUnavailable)
+                            )
                             if change or not denied:
                                 raise
-                            # Write-protected storage: read as 0.6 did; bytes are still verified.
+                            # No usable lock here: read as 0.6 did; bytes are still verified.
                             self._unlocked_reads = True
                     yield path
-        except logstorage.LogStorageError as exc:
-            raise StoreError(
-                f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
-            ) from (exc.__cause__ or exc)
-        except (OSError, ValueError, TimeoutError) as exc:
-            code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
-            raise StoreError(
-                f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
-            ) from exc
 
     def log_info(
         self,
@@ -859,7 +868,7 @@ class Store:
                 stored_bytes=physical.stat().st_size,
                 sha256=digest,
                 fingerprint=f"{stream}/{atom_id[5:13]}/sha256:{digest[:12]}",
-                path=physical.relative_to(self.root).as_posix(),
+                path=_stored_path(relative, physical, path),
             )
 
     def compress_logs(
@@ -899,11 +908,12 @@ class Store:
         self.require()
         self.load_den()
         atoms = [self.load_atom(atom_id)] if atom_id is not None else self.list_atoms()
+        # A run removes its attempt after writing its chokepoint. Checking in that
+        # order keeps a run finishing during this scan from looking incomplete.
+        finished = [atom for atom in atoms if not self._attempt_path(atom.id).exists()]
         terminal_atoms = {point.atom_id for point in self.list_chokepoints()}
         changes: list[LogStorageChange] = []
-        for listed in atoms:
-            if self._attempt_path(listed.id).exists():
-                continue
+        for listed in finished:
             atom = self.load_atom(listed.id)
             if atom.id not in terminal_atoms:
                 raise StoreError(f"atom {atom.id} has no terminal chokepoint")
@@ -945,7 +955,7 @@ class Store:
                         action=result.action,
                         original_bytes=result.original_bytes,
                         stored_bytes=result.stored_bytes,
-                        path=result.path.relative_to(self.root).as_posix(),
+                        path=_stored_path(relative, result.path, path),
                     )
                 )
         return tuple(changes)
@@ -1270,6 +1280,24 @@ class Store:
                 problems.append((path.name, str(exc)))
         return records
 
+    def _load_attempt(self, path: Path) -> model.Attempt | None:
+        """Read an attempt record, or return None if its run finalized meanwhile.
+
+        Windows can briefly deny reads of a record that its finishing run is
+        removing, so a denied read is retried while the record still exists.
+        """
+        retries = _BUSY_RETRIES
+        while True:
+            try:
+                return self._load_listed(path, "attempt", model.attempt_from_payload)
+            except StoreError as exc:
+                if not path.exists():
+                    return None
+                if exc.code != "permission_denied" or not retries:
+                    raise
+            retries -= 1
+            time.sleep(_BUSY_DELAY)
+
     def _scan_attempts(
         self, problems: list[tuple[str, str]]
     ) -> list[tuple[model.Attempt, model.AttemptState]]:
@@ -1279,11 +1307,11 @@ class Store:
             return attempts
         for path in sorted(self.attempts_dir.glob("*.json")):
             try:
-                attempt = self._load_listed(path, "attempt", model.attempt_from_payload)
+                attempt = self._load_attempt(path)
             except StoreError as exc:
-                # A record that vanished was finalized while it was being read.
-                if path.exists():
-                    problems.append((f"attempts/{path.name}", str(exc)))
+                problems.append((f"attempts/{path.name}", str(exc)))
+                continue
+            if attempt is None:
                 continue
             if locking.is_held(self._attempt_lock(attempt.id)):
                 attempts.append((attempt, model.AttemptState.RUNNING))
@@ -1472,6 +1500,27 @@ def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
     return logs
 
 
+@contextlib.contextmanager
+def _log_failures(atom_id: str, relative: str) -> Iterator[None]:
+    """Report a log's storage failures as StoreError."""
+    try:
+        yield
+    except logstorage.LogStorageError as exc:
+        raise StoreError(
+            f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
+        ) from (exc.__cause__ or exc)
+    except (OSError, ValueError, TimeoutError) as exc:
+        code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
+        raise StoreError(
+            f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
+        ) from exc
+
+
+def _stored_path(relative: str, physical: Path, path: Path) -> str:
+    """Name a log's current file from its recorded path, which a linked directory keeps."""
+    return relative if physical == path else f"{relative}.gz"
+
+
 def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:
     if stream not in ("stdout", "stderr"):
         raise StoreError("log stream must be 'stdout' or 'stderr'", code="invalid_input")
@@ -1487,12 +1536,12 @@ def _remove_file(path: Path) -> None:
     Windows refuses to remove an open file, so a reader verifying the state
     at that instant would otherwise make the removal fail.
     """
-    for _ in range(_REMOVE_RETRIES):
+    for _ in range(_BUSY_RETRIES):
         try:
             path.unlink(missing_ok=True)
             return
         except PermissionError:
-            time.sleep(_REMOVE_DELAY)
+            time.sleep(_BUSY_DELAY)
     path.unlink(missing_ok=True)
 
 

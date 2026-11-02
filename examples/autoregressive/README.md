@@ -1,6 +1,6 @@
 # Small autoregressive experiment
 
-For the unreleased Ocura OSS 0.7.0.dev0 interfaces in this checkout.
+For the released Ocura OSS 0.7.0 interfaces.
 
 This guide belongs to the maintained [0.7 example catalog](../../docs/use-cases.md)
 on `examples/0.7`. Use the [catalog setup](../../README.md#install-and-try) to obtain
@@ -37,13 +37,13 @@ From a repository checkout, use a virtual
 environment with Python 3.11 or later, subject to your framework's platform support:
 
 ```console
-python -m pip install .
+python -m pip install ocura-oss==0.7.0
 ```
 
-An ordinary `pip install ocura-oss` may install the published 0.6 release, which
-does not provide this driver's combined branch-and-run interface. Use this
-checkout or its built 0.7 development wheel. The updated driver still reads
-existing schema-2 autoregressive example ledgers without rewriting them.
+The driver uses the combined branch-and-run interface released in 0.7.0.
+Installing this checkout with `python -m pip install .` also works. The updated
+driver still reads existing schema-2 autoregressive example ledgers without
+rewriting them.
 
 Scripts and requirements live only in this repository; neither the wheel nor the
 source distribution includes them. The core package has no PyTorch, JAX, or Ray
@@ -98,7 +98,7 @@ ocura-oss compare --root ./ar-pytorch --json
 ocura-oss verify --root ./ar-pytorch --json
 ```
 
-Reporting with this driver needs Ocura OSS 0.7.0.dev0 or later and the standard
+Reporting with this driver needs Ocura OSS 0.7.0 or later and the standard
 library; PyTorch, JAX, and Ray are not imported for a report. It verifies
 the saved state, reads each run's stdout through `Store.read_verified_log()` so the
 consumed bytes match their recorded size and digest, and checks that reported

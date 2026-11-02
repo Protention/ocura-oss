@@ -225,7 +225,6 @@ class NamingCompatibilityTests(unittest.TestCase):
         execution = ocura_oss.run(
             [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 4096)"],
             root=self.root,
-            compress=False,
         )
         run_id = execution.record.id
         retained = self.store.verify_state().manifest

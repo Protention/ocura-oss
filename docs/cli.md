@@ -1,14 +1,13 @@
 # Command-line reference
 
-Version 0.7.0.dev0.
+Version 0.7.0.
 
-This draft builds on 0.6.0. Compression options and the `logs`, `compress`, and
-`decompress` commands below are proposed branch behavior, absent from the released
-package. See [open design decisions](autocompression.md#decisions-before-merge).
+Version 0.7 adds opt-in compression and the `logs`, `compress`, and
+`decompress` commands. See [log compression](autocompression.md).
 
 Discovery commands, `branch-points`, descriptive Python names, `run --from`, and
-`--json-errors` are also unreleased. A ledger contains run records and pathways; a branch point
-identifies terminal evidence for a variation. Existing JSON keys and stored IDs
+`--json-errors` are also available in 0.7. A ledger contains run records and pathways;
+a branch point identifies terminal evidence for a variation. Existing JSON keys and stored IDs
 retain their legacy spellings. See the [naming guide](naming-migration.md).
 
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
@@ -76,7 +75,7 @@ Every command accepts `--json`. JSON mode writes one result document to standard
 
 `run --json` retains child stdout and stderr in their logs without streaming them. A recorded command failure, interruption, or launch failure still returns a JSON result with its existing nonzero exit status. Invalid input or a state error returns no result document.
 
-### Structured errors (unreleased)
+### Structured errors
 
 Pass `--json-errors` before the command or among its options to opt into structured
 failures. This flag also enables normal JSON results, so it replaces `--json` for
@@ -183,7 +182,7 @@ Run one trusted local command and record terminal evidence.
 ocura-oss run [--root PATH] [--pathway ID | --from BRANCH_POINT_ID --reason TEXT]
               [--param KEY=VALUE] [--quiet] [--json] [--json-errors]
               [--no-capture] [--mask-arg POSITION] [--substitute]
-              [--no-compress] [--compress-min-bytes N]
+              [--compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
 ```
 
@@ -202,8 +201,8 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--json-errors` | flag | false | Emit JSON results and structured errors with execution state and known IDs |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
-| `--no-compress` | flag | false | Keep this run's captured logs raw after finalization |
-| `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original size for automatic gzip compression; logs must also save at least 10% |
+| `--compress` | flag | false | Store this run's captured logs as gzip after finalization when that saves at least 10% |
+| `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original log size to compress; implies `--compress` |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
 | `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
 | `--context` | flag | false | Record the platform and the git revision and dirty state at launch |
@@ -250,12 +249,12 @@ The command runs with `shell=False` and the project root as its working director
 
 Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal.
 
-After finalization, captured logs of at least 1 MiB are considered once for
+Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given.
+Then, after finalization, logs of at least 1 MiB (or `N`) are considered once for
 lossless gzip compression. Each must save at least 10%; small and incompressible
-logs remain raw. No older runs are scanned. `--no-compress` disables this step for
-the run, and `--compress-min-bytes N` changes its size threshold. Compression
-errors emit storage warnings on stderr without changing the command's recorded
-outcome. See the [local prototype's policy and compatibility limits](autocompression.md).
+logs remain raw. No older runs are scanned. Compression errors emit storage
+warnings on stderr without changing the command's recorded outcome. See
+[log compression](autocompression.md) for costs and compatibility.
 
 With `--no-capture`, no log files are written. Output still streams to the terminal unless `--quiet` or `--json` is present, and is otherwise discarded.
 
@@ -279,9 +278,10 @@ A passing command records `passed`. A nonzero return code records `failed`. A la
 
 The final text summary includes the run record, branch point, pathway, outcome, duration, log paths, and the return code or launch category when available. With `--no-capture`, it states `output: not captured` in place of the log paths. It does not repeat command arguments or parameter values; `pathways` lists a pathway's parameters and `compare` lists what each run recorded.
 
-Log paths in the run summary and run record are logical paths; compressed physical
-storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
---info` to find its current backing path. The text summary includes a read command.
+The run summary prints each log's current file. The run record keeps the logical
+path, which never changes; compressed physical storage appends `.gz`. Use `logs ID`
+to read either representation or `logs ID --info` to find its current backing path.
+The text summary includes a read command.
 
 #### JSON output
 
@@ -295,11 +295,16 @@ storage appends `.gz`. Use `logs ID` to read either representation or `logs ID
 | `return_code` | integer or null | Child exit status when available |
 | `launch_error_category` | string or null | Error category or `interrupted` |
 | `output_capture` | string | `full`, or `none` when `--no-capture` was used |
-| `stdout_log` | string or null | Project-relative stdout log path; null without capture |
-| `stderr_log` | string or null | Project-relative stderr log path; null without capture |
-| `storage_warnings` | array of strings, optional | Post-finalization compression errors, present only when nonempty; also printed on stderr |
+| `stdout_log` | string or null | Project-relative recorded stdout log path; null without capture. A compressed log is not at this path, so open files through `log_files` |
+| `stderr_log` | string or null | Project-relative recorded stderr log path; null without capture. A compressed log is not at this path, so open files through `log_files` |
+| `log_files` | object | Each captured stream's current file: the recorded path, plus `.gz` when stored as gzip; empty without capture or when lookup fails |
+| `storage_warnings` | array of strings, optional | Post-finalization compression errors or stop requests, or log-file lookup errors, present only when nonempty; also printed on stderr |
 
-Use returned IDs to continue the [automated workflow](automation.md). The [training example](../examples/autoregressive/README.md) provides an executable client.
+If log-file lookup fails, `run` preserves the recorded result, IDs, and exit status,
+returns empty `log_files`, and reports a storage warning. Text output marks the
+current log files as unavailable; the recorded logical paths remain in JSON.
+
+Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.7` branch.
 
 #### Exit status
 
@@ -348,10 +353,11 @@ attempt records, saying how to list and recover them, and assumes the storage
 remains unchanged while reading; it does not coordinate with active writers.
 
 Normal mode takes a lock for each log it reads. When the storage is write-protected
-it reads without one, as 0.6.0 did; every byte is still verified, so a concurrent
-change makes the read fail rather than return wrong data. `compress` and
-`decompress` still require the lock. Unlike archive mode, this also reads ledgers
-with unfinished attempts and lists them.
+or refuses file locks, it reads without one, as 0.6.0 did; every byte is still
+verified, so a concurrent change makes the read fail rather than return wrong data.
+`compress` and `decompress` still require the lock, so do not run them against such
+storage from another machine. Unlike archive mode, this also reads ledgers with
+unfinished attempts and lists them.
 
 Content snapshots may need writable OS temporary storage outside the archive.
 Archive mode does not introduce an export format or snapshot an active ledger.
@@ -383,12 +389,14 @@ bytes outside the range, before releasing any output.
 Only the returned window is retained. Windows of at most 1 MiB stay in memory;
 larger windows use OS temporary storage, removed on close. RAM stays bounded for
 large content reads, with one decoding pass. A short range still scans the entire
-original stream for SHA-256 verification.
+original stream for SHA-256 verification. A complete read of a large log needs free
+temporary space about that size; set `TMPDIR` to choose where, or read a range.
 
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded
-transparently. A missing log, damaged evidence, or an run recorded without
-capture returns status 2 without printing log contents. Success returns 0.
+transparently. A missing log, damaged evidence, or a run recorded without
+capture returns status 2 without printing log contents. Success returns 0, as does
+a reader that closes the pipe early, as `head` does; the output simply stops there.
 
 Metadata fields in both `--info` and `--json` are `atom_id`, `stream`, `outcome`,
 `started_at`, `encoding` (`raw` or `gzip`), `original_bytes`, `stored_bytes`,
@@ -436,8 +444,8 @@ over the whole ledger.
 
 Use `--dry-run` to inspect older logs before an explicit pass. Conversion needs
 temporary disk headroom. Earlier readers do not support gzip backing despite
-the unchanged record schema; use this branch's `decompress` and `verify` before
-returning to one. See [automatic log compression](autocompression.md).
+the unchanged record schema; use `decompress` and `verify` before returning to
+one. See [log compression](autocompression.md).
 
 ## `runs` and `show`
 
@@ -473,9 +481,12 @@ its last page. Otherwise, list again once they finish or `recover` closes them.
 This relies on the system clock not stepping backward.
 
 `show` selects one run record, validates its record and lineage, and returns `atom`,
-`pathway`, `chokepoint`, `children`, and
+`pathway`, `chokepoint`, `children`, `log_files`, and
 `verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
+`log_files` gives each captured stream's current file, as for `run`. If that
+lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
+still succeeds, because the run record itself is valid.
 The pathway includes the reason and source relationship. `chokepoint` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
 pathways branched from it, oldest first. Finding them scans the branch point and
@@ -531,7 +542,7 @@ The listing is fail-closed. A malformed or misnamed record causes exit status 2 
 ## `branch-points` (legacy alias: `chokepoints`)
 
 Both command names accept the same arguments and retain the existing success
-JSON shape. `branch-points` is the descriptive spelling in this unreleased checkout.
+JSON shape. `branch-points` is the descriptive spelling introduced in 0.7.
 
 List structurally valid terminal branch point records in reverse creation order, newest first.
 

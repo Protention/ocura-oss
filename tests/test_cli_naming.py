@@ -36,7 +36,6 @@ class CliNamingTests(unittest.TestCase):
         return run(
             [sys.executable, "-c", "print('saved evidence' * 1024)"],
             root=self.root,
-            compress=False,
         ).atom
 
     def state_bytes(self):
