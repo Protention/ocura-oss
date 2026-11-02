@@ -1,6 +1,6 @@
 # Ocura OSS
 
-Version 0.7.0.
+Version 0.7.1.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -15,9 +15,9 @@ provides JSON output throughout the workflow; the Python API returns typed resul
 ## New in 0.7.0
 
 Version 0.7 adds descriptive Python names, `runs` and `show` for history
-discovery, bounded verified log reads, and opt-in `--json-errors` for structured
-failures. It also adds `run --from ID --reason TEXT` to create and execute a
-variation in one call. The
+discovery, bounded verified log reads, opt-in [log compression](autocompression.md), and
+opt-in `--json-errors` for structured failures. It also adds
+`run --from ID --reason TEXT` to create and execute a variation in one call. The
 [history example](../examples/history/README.md) starts with only a project root, retains failed
 retries and empty variations, and returns verified excerpts with stable references.
 The [naming guide](naming-migration.md) maps descriptive names to compatible legacy names
@@ -141,6 +141,13 @@ the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
 `ocura-oss run`, stops the command and records an interrupted attempt; a second
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
+Logs stay raw unless you ask for lossless gzip storage: `run --compress` stores
+that run's logs of at least 1 MiB as gzip when this saves at least 10%, and
+`compress --dry-run` previews a pass over older logs; `decompress` restores raw
+files. `ocura-oss logs <run-id>` prints the verified original bytes either way,
+and `--info` shows sizes, the storage path, and a readable fingerprint. Ocura OSS
+0.6 cannot read compressed logs; see [log compression](autocompression.md).
+
 ## When to use something else
 
 Ocura OSS records what ran, how runs relate, and whether those records are still
@@ -160,16 +167,18 @@ adopt than a tracking platform.
 
 ## Primary example: record and inspect
 
-From this checkout, after `python -m pip install .`, create a small demonstration
-and inspect its retained history:
+The inspection script lives in the repository and is not installed with the package.
+With Ocura OSS installed, clone the repository, create a small demonstration, and
+inspect its retained history:
 
 ```console
+git clone https://github.com/Protention/ocura-oss.git
 ocura-oss demo --root ./ocura-oss-demo
-python examples/history/inspect_history.py --root ./ocura-oss-demo --archive
+python ocura-oss/examples/history/inspect_history.py --root ./ocura-oss-demo --archive
 ```
 
 Use a new destination for the demo; if it already exists from an earlier run,
-run only the inspection command. The [history guide](../examples/history/README.md)
+skip that command. The [history guide](../examples/history/README.md)
 explains the JSON report and how to inspect your own ledger. No optional dependencies
 are needed.
 
@@ -205,11 +214,12 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [CLI reference](cli.md): every command, JSON fields, and exit codes
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
+- [Log compression](autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
 - [Examples](use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
-Repository references describe this checkout and remain readable directly on GitHub.
-The documentation for the published release is also [available online](https://protention.dev/).
+The documentation for the published release is at [protention.dev](https://protention.dev/).
+The repository's `docs/` directory follows `main`.
 
 ## Local state and operating model
 

@@ -2,6 +2,18 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.7.1 - 2026-11-02
+
+This documentation release changes no code or record formats.
+
+- Use full URLs for README links so they resolve on PyPI. The release check now
+  reports relative links in a built package description.
+- Show how to fetch the history inspector after installing from PyPI; the script
+  is not in the distributions.
+- Introduce opt-in log compression in the overview.
+- Replace pre-release wording in the example guide that shipped in the 0.7.0 source
+  distribution.
+
 ## 0.7.0 - 2026-11-01
 
 - Keep the demo and history inspection as the primary example in the core

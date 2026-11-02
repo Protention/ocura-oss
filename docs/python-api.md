@@ -1,6 +1,6 @@
 # Python API reference
 
-Version 0.7.0.
+Version 0.7.1.
 
 Version 0.7 adds opt-in compression, storage metadata, and conversion
 methods. See [log compression](autocompression.md).

@@ -30,6 +30,7 @@ _VERSION_LINE = re.compile(r'^__version__ = "([^"]+)"$', re.MULTILINE)
 _CHANGELOG_HEADING = re.compile(r"^## (\S+) - (\S+)$", re.MULTILINE)
 _DOCUMENT_VERSION = re.compile(r"^Version (\S+)\.$", re.MULTILINE)
 _DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+_RELATIVE_LINK = re.compile(r"\]\((?!https?://|#)([^)\s]+)\)")
 
 
 class ReleaseError(Exception):
@@ -151,7 +152,7 @@ def _contains_migration_tools(names: Sequence[str]) -> bool:
 
 
 def _metadata_problems(label: str, metadata: email.message.Message, version: str) -> list[str]:
-    """Check one distribution's core metadata for the version and for dependencies."""
+    """Check one distribution's core metadata: version, dependencies, description links."""
     problems: list[str] = []
     if metadata["Version"] != version:
         problems.append(
@@ -159,6 +160,8 @@ def _metadata_problems(label: str, metadata: email.message.Message, version: str
         )
     if metadata.get_all("Requires-Dist"):
         problems.append(f"{label} metadata declares runtime dependencies")
+    for target in _RELATIVE_LINK.findall(str(metadata.get_payload())):
+        problems.append(f"{label} description links to {target}, which breaks on PyPI")
     return problems
 
 
