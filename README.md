@@ -69,6 +69,22 @@ combined branch-to-run call while preserving existing ledgers and callers.
 - [CLI reference](docs/cli.md): commands, JSON fields, and error handling
 - [Published documentation](https://protention.dev/): the released package reference
 
+The [comparison walkthrough](docs/index.md#compare-two-runs) records a `count=1`
+baseline and a `count=2` variation. For those runs, `ocura-oss compare` shows:
+
+```text
+comparison: ready
+source branch point: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
+source pathway: pathway-1378d1d28cb54987b9e80d59d61aec74
+source run: passed 0.056063s
+child pathway: pathway-ce4c71137dd449398fe2b4e0198c83c3
+  reason: try count 2
+  parameters: added count=2
+  source run: passed 0.056063s
+  child run: passed 0.061312s
+  run parameters: changed count (1 -> 2)
+```
+
 The [0.6.0 example snapshot](https://github.com/Protention/ocura-oss/tree/v0.6.0/examples/autoregressive)
 remains available for the previous release.
 
