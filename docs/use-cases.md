@@ -23,20 +23,23 @@ how to inspect your own ledger. No optional dependencies are needed.
 
 ## Fuller demonstrations
 
-These examples retain their own **0.7.0.dev0 package snapshot**. Use a separate checkout
+These examples use the released **Ocura OSS 0.7.0**. Use a separate checkout
 so you can run them without switching your core development checkout:
 
 ```console
 git clone --branch examples/0.7 --single-branch https://github.com/Protention/ocura-oss.git ocura-oss-examples
 cd ocura-oss-examples
-python -m pip install .
+python -m pip install ocura-oss==0.7.0
 ```
 
 Run the install in an activated virtual environment, then follow the selected
-guide. Install this branch's checkout or matching wheel; published 0.6.0 does not
-provide all the interfaces these examples use. The branch's CI checks its own
-package snapshot, not every later core change. Record the checked-out commit when
-retaining results you need to reproduce.
+guide for any optional dependencies. The branch's package source also matches
+0.7.0, so `python -m pip install .` works for package development.
+
+The examples branch has its own CI checks, including PyTorch and JAX CPU workflows.
+Record the checked-out commit when retaining results you need to reproduce.
+The [0.6.0 example snapshot](https://github.com/Protention/ocura-oss/tree/v0.6.0/examples/autoregressive)
+remains available for work using the previous release.
 
 | Workflow | What it demonstrates | Additional requirements |
 | --- | --- | --- |
@@ -45,7 +48,6 @@ retaining results you need to reproduce.
 | [Dream replay](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/dream_replay/README.md) | Checkpointed training and policy replay over recorded branches | CPU PyTorch for training; no remote agent |
 | [Dream RSI](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/dream_rsi/README.md) | Experimental agent-directed training exploration and policy revision | CPU PyTorch and a signed-in Codex CLI for live agent calls |
 
-Each application owns its source copies, checkpoints, metrics, and replay policy;
-Ocura supplies execution records, lineage, and verified logs. Historical Dream
-pilot results remain historical. Refreshing the examples for 0.7 does not establish
-new learning-quality improvements or compute savings.
+Dream replay and Dream RSI are experimental examples of what callers can build
+with Ocura. Each application owns its source copies, checkpoints, metrics, and
+replay policy; Ocura supplies execution records, lineage, and verified logs.
