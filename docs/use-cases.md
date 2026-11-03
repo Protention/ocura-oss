@@ -1,6 +1,6 @@
 # Choose an example
 
-Version 0.7.1.
+Version 0.7.2.
 
 The core repository keeps one primary example: record a small demonstration, then
 inspect its retained history. The fuller demonstrations live together on the

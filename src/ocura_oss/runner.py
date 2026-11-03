@@ -315,12 +315,8 @@ def _execute(
             thread.start()
 
     try:
-        while not finished:
-            try:
-                return_code = process.wait(timeout=0.05)
-                finished = True
-            except subprocess.TimeoutExpired:
-                continue
+        return_code = _wait_for(process)
+        finished = True
     except KeyboardInterrupt:
         # Stop requests can arrive between wait calls or inside the timeout
         # handler, not only while wait() itself is running.
@@ -339,6 +335,19 @@ def _execute(
                     stream.close()
 
     return return_code, None, interrupted
+
+
+def _wait_for(process: subprocess.Popen) -> int:
+    """Poll until the process exits, in short waits so a stop request is noticed.
+
+    This loop keeps its own frame because Python 3.11 and 3.12 can miss a handler in
+    the same function when an interrupt lands on the jump back to the loop's start.
+    """
+    while True:
+        try:
+            return process.wait(timeout=0.05)
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def _stop_process(process: subprocess.Popen) -> None:

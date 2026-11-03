@@ -1,6 +1,6 @@
 # State and verification
 
-Version 0.7.1.
+Version 0.7.2.
 
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
 

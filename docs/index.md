@@ -1,6 +1,6 @@
 # Ocura OSS
 
-Version 0.7.1.
+Version 0.7.2.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
