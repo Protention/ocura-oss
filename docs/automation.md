@@ -1,10 +1,9 @@
 # Scripts and AI agents
 
-Version 0.7.2.
+Version 0.8.0.
 
-Discovery, descriptive Python names, bounded readers, `run --from`, and
-`--json-errors` are available in 0.7. See the
-[naming and compatibility guide](naming-migration.md).
+Version 0.8 renamed stored IDs and JSON keys; the [naming guide](naming-migration.md)
+maps the names used before 0.8.
 
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
 command tool. Use it when you want a durable record connecting a baseline to later
@@ -14,7 +13,7 @@ variations, with reasons, outputs, and verification.
 
 1. Call `init --json` once and retain the project root and default pathway ID.
 2. Execute the baseline through `run --json`; retain its branch point ID, returned
-   under the compatible JSON key `chokepoint_id`.
+   under the JSON key `branch_point_id`.
 3. Call `run --from ID --reason TEXT --json-errors` with the proposed parameter
    labels and `-- COMMAND`. This creates a child pathway and runs there; retain
    its `pathway_id` and the usual run result.
@@ -26,7 +25,7 @@ variations, with reasons, outputs, and verification.
 For example, with the baseline's branch point ID:
 
 ```console
-ocura-oss run --root ./experiment --from <chokepoint-id> --reason "increase batch" --param batch=4 --json-errors -- python train.py --batch 4
+ocura-oss run --root ./experiment --from <branch-point-id> --reason "increase batch" --param batch=4 --json-errors -- python train.py --batch 4
 ```
 
 `--from` requires a nonblank `--reason` and cannot be combined with `--pathway`.
@@ -69,8 +68,8 @@ Descriptive names coexist with the existing JSON fields and ID prefixes:
 
 | Returned field | Meaning | Use it for |
 | --- | --- | --- |
-| `atom_id` | This run record | `logs ID` or `show ID` |
-| `chokepoint_id` | This run's terminal branch point | `run --from ID --reason TEXT` or `compare --from ID` |
+| `run_id` | This run record | `logs ID` or `show ID` |
+| `branch_point_id` | This run's terminal branch point | `run --from ID --reason TEXT` or `compare --from ID` |
 | `pathway_id` | The pathway containing this run | A later `run --pathway ID` on that same line of work |
 | `outcome` | The recorded execution outcome | Decide what evidence to inspect before continuing |
 
@@ -78,8 +77,8 @@ With JSON output enabled, workload output is retained in logs. For example,
 Python's unittest runner writes its results to stderr:
 
 ```console
-ocura-oss logs <atom-id> --root ./experiment --stream stderr
-ocura-oss show <atom-id> --root ./experiment --command --json
+ocura-oss logs <run-id> --root ./experiment --stream stderr
+ocura-oss show <run-id> --root ./experiment --command --json
 ```
 
 A nonzero workload exit can still return a complete run result with these IDs.
@@ -97,7 +96,7 @@ import json
 from ocura_oss import Store
 
 store = Store("experiment")
-raw = store.read_verified_log(run_id="atom-<id>")
+raw = store.read_verified_log(run_id="run-<id>")
 metrics = json.loads(raw.decode("utf-8"))  # For a workload that emits UTF-8 JSON.
 ```
 

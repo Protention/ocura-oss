@@ -69,7 +69,8 @@ class RunFromTests(unittest.TestCase):
         child = self.store.load_pathway(combined.record.pathway_id)
         self.assertIs(type(combined), RunExecution)
         self.assertEqual(
-            [field.name for field in fields(combined)], ["atom", "chokepoint", "storage_warnings"]
+            [field.name for field in fields(combined)],
+            ["record", "branch_point", "storage_warnings"],
         )
         self.assertEqual(child.parent_pathway_id, self.parent.id)
         self.assertEqual(child.source_branch_point_id, self.source_id)
@@ -157,7 +158,7 @@ class RunFromTests(unittest.TestCase):
             api.run(
                 [sys.executable, "-c", "pass"],
                 root=self.root,
-                source_branch_point_id="chokepoint-" + "0" * 32,
+                source_branch_point_id="branch-point-" + "0" * 32,
                 reason="missing source",
             )
         self.assertEqual(missing.exception.code, "record_not_found")
@@ -244,7 +245,10 @@ class RunFromTests(unittest.TestCase):
         self.assertTrue(self.store.verify_state().ok)
 
     def test_post_launch_failure_preserves_unknown_or_recorded_and_does_not_retry(self):
-        for method, execution in (("_save_chokepoint", "unknown"), ("_remove_attempt", "recorded")):
+        for method, execution in (
+            ("_save_branch_point", "unknown"),
+            ("_remove_attempt", "recorded"),
+        ):
             with self.subTest(method=method):
                 marker = self.root / method
                 command = [

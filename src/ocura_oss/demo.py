@@ -65,11 +65,11 @@ def run_demo(root: Path) -> DemoReport:
     stage = "initialize"
     try:
         store = Store(destination)
-        den, pathway = store.initialize_state(name="demo")
+        ledger, pathway = store.initialize_state(name="demo")
         steps.append(
             DemoStep(
                 "initialize",
-                f"ledger {den.id}; baseline pathway {pathway.id}",
+                f"ledger {ledger.id}; baseline pathway {pathway.id}",
             )
         )
 
@@ -80,33 +80,33 @@ def run_demo(root: Path) -> DemoReport:
             argv=[sys.executable, "-c", "print('batch=1 run complete')"],
             declared_parameters={"batch": "1"},
         )
-        if baseline.atom.outcome is not model.Outcome.PASSED:
+        if baseline.record.outcome is not model.Outcome.PASSED:
             raise DemoError(
                 "baseline-run",
-                f"baseline ended in outcome {baseline.atom.outcome.value}",
+                f"baseline ended in outcome {baseline.record.outcome.value}",
             )
         steps.append(
             DemoStep(
                 "baseline-run",
-                f"run {baseline.atom.id} passed with declared batch=1",
+                f"run {baseline.record.id} passed with declared batch=1",
             )
         )
 
-        stage = "chokepoint"
-        chokepoint, _atom, source_pathway = branching.load_verified_source(
-            store, baseline.chokepoint.id
+        stage = "branch_point"
+        branch_point, _run, source_pathway = branching.load_verified_source(
+            store, baseline.branch_point.id
         )
         steps.append(
             DemoStep(
-                "chokepoint",
-                f"terminal evidence boundary {chokepoint.id} (outcome passed)",
+                "branch-point",
+                f"terminal evidence boundary {branch_point.id} (outcome passed)",
             )
         )
 
         stage = "branch"
         child = branching.create_child_pathway(
             store,
-            source_chokepoint=chokepoint,
+            source_branch_point=branch_point,
             source_pathway=source_pathway,
             reason="hypothesis: batch=4 changes the result",
             overrides={"batch": "4"},
@@ -125,15 +125,15 @@ def run_demo(root: Path) -> DemoReport:
             argv=[sys.executable, "-c", "print('batch=4 run complete')"],
             declared_parameters={"batch": "4"},
         )
-        if rerun.atom.outcome is not model.Outcome.PASSED:
+        if rerun.record.outcome is not model.Outcome.PASSED:
             raise DemoError(
                 "rerun",
-                f"rerun ended in outcome {rerun.atom.outcome.value}",
+                f"rerun ended in outcome {rerun.record.outcome.value}",
             )
         steps.append(
             DemoStep(
                 "rerun",
-                f"run {rerun.atom.id} passed on pathway {child.id} with batch=4",
+                f"run {rerun.record.id} passed on pathway {child.id} with batch=4",
             )
         )
 
@@ -145,12 +145,13 @@ def run_demo(root: Path) -> DemoReport:
         steps.append(
             DemoStep(
                 "verify",
-                f"verified {verification.atoms} runs; every record matches its recorded checksum",
+                f"verified {verification.run_records} runs;"
+                " every record matches its recorded checksum",
             )
         )
 
         stage = "compare"
-        result = branching.compare(store, baseline.chokepoint.id)
+        result = branching.compare(store, baseline.branch_point.id)
         if result.state is not model.ComparisonState.READY:
             raise DemoError("compare", f"comparison ended in state {result.state.value}")
         run_delta = result.children[0].run_parameters

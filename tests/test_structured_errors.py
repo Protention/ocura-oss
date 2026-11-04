@@ -116,8 +116,8 @@ class StructuredErrorTests(unittest.TestCase):
 
     def test_success_and_workload_failures_remain_normal_results(self):
         expected_fields = {
-            "atom_id",
-            "chokepoint_id",
+            "run_id",
+            "branch_point_id",
             "pathway_id",
             "outcome",
             "duration_seconds",
@@ -186,9 +186,9 @@ class StructuredErrorTests(unittest.TestCase):
             "--json-errors",
         )
         self.assertEqual((code, stderr), (0, ""))
-        self.assertIn("run: atom-", stdout)
-        atom = Store(self.root).list_atoms()[0]
-        self.assertEqual(Store(self.root).read_verified_log(atom.id).strip(), b"--json-errors")
+        self.assertIn("run: run-", stdout)
+        record = Store(self.root).list_run_records()[0]
+        self.assertEqual(Store(self.root).read_verified_log(record.id).strip(), b"--json-errors")
 
     def test_source_diagnostics_preserve_ids_and_execution_uncertainty(self):
         for execution, expected, recovery in (
@@ -201,7 +201,7 @@ class StructuredErrorTests(unittest.TestCase):
                 "sentinel source failure",
                 code="io_error",
                 execution=execution,
-                ids={"atom_id": "atom-" + "a" * 32},
+                ids={"run_id": "run-" + "a" * 32},
             )
             with (
                 self.subTest(execution=execution),
@@ -247,7 +247,7 @@ class StructuredErrorTests(unittest.TestCase):
         for original in originals:
             with self.subTest(original=original):
                 with (
-                    patch.object(Store, "_save_atom", side_effect=original),
+                    patch.object(Store, "_save_run", side_effect=original),
                     self.assertRaises(StoreError) as failure,
                 ):
                     api.run([sys.executable, "-c", "pass"], root=self.root)
@@ -275,7 +275,7 @@ class StructuredErrorTests(unittest.TestCase):
             17 if sys.platform == "win32" else None,
             "record.json",
         )
-        with patch.object(Store, "_save_atom", side_effect=original):
+        with patch.object(Store, "_save_run", side_effect=original):
             code, stdout, stderr = self.invoke(
                 "run",
                 "--root",
@@ -296,7 +296,7 @@ class StructuredErrorTests(unittest.TestCase):
 
     def test_finalization_failure_reports_known_ids_without_inviting_rerun(self):
         for method, execution, recovery in (
-            ("_save_chokepoint", "unknown", "inspect_attempts_and_runs"),
+            ("_save_branch_point", "unknown", "inspect_attempts_and_runs"),
             ("_remove_attempt", "recorded", "inspect_recorded_run"),
         ):
             script = f"from pathlib import Path; Path('{method}').open('a').write('started\\n')"
@@ -324,7 +324,7 @@ class StructuredErrorTests(unittest.TestCase):
             self.assertEqual(error["recovery"], recovery)
             self.assertEqual(set(error["ids"]), {"run_id", "branch_point_id", "pathway_id"})
             state = Store(self.root)
-            self.assertEqual(state.load_atom(error["ids"]["run_id"]).outcome.value, "passed")
+            self.assertEqual(state.load_run(error["ids"]["run_id"]).outcome.value, "passed")
             state.recover()
             self.assertTrue(state.verify_state().ok)
             self.assertEqual((self.root / method).read_text(), "started\n")

@@ -1,37 +1,37 @@
 # State and verification
 
-Version 0.7.2.
+Version 0.8.0.
 
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
 
 The descriptive names are **ledger**, **run record**, and **branch point**.
-Their Python types are `Ledger`, `RunRecord`, and `BranchPoint`; `Den`, `Atom`, and
-`Chokepoint` remain aliases. The directory layout, record kinds, ID prefixes, JSON
-keys, and manifest entries below retain their original spellings. Adopting the
-new names requires no state migration. See the [naming guide](naming-migration.md).
+Their Python types are `Ledger`, `RunRecord`, and `BranchPoint`, and since 0.8 the
+directory layout, record kinds, ID prefixes, JSON keys, and manifest entries below
+use the same names. The [naming guide](naming-migration.md) maps the names used
+before 0.8.
 
 ## Directory layout
 
 ```text
 .ocura-oss/
-  den.json
+  ledger.json
   pathways/
     <pathway-id>.json
-  atoms/
-    <atom-id>.json
-  chokepoints/
-    <chokepoint-id>.json
+  runs/
+    <run-id>.json
+  branch-points/
+    <branch-point-id>.json
   attempts/
-    <atom-id>.json
-    <atom-id>.lock
+    <run-id>.json
+    <run-id>.lock
   log-locks/
-    <atom-id>.stdout.log.lock
-    <atom-id>.stderr.log.lock
+    <run-id>.stdout.log.lock
+    <run-id>.stderr.log.lock
   logs/
-    <atom-id>.stdout.log
-    <atom-id>.stderr.log
-    <atom-id>.stdout.log.gz
-    <atom-id>.stderr.log.gz
+    <run-id>.stdout.log
+    <run-id>.stderr.log
+    <run-id>.stdout.log.gz
+    <run-id>.stderr.log.gz
 ```
 
 `attempts/` holds one entry for each run that has started and is not yet finalized. It is empty when nothing is running and nothing was abandoned.
@@ -53,8 +53,8 @@ Each JSON record contains an envelope:
 
 ```json
 {
-  "schema_version": 2,
-  "kind": "atom",
+  "schema_version": 3,
+  "kind": "run",
   "payload": {},
   "checksum": {
     "algorithm": "sha256",
@@ -67,7 +67,7 @@ The checksum covers the schema version, kind, and canonical payload. It provides
 
 ## Format compatibility
 
-Records carry schema version 2. This release reads schema 2 only. State written by Ocura OSS 0.4 and earlier carries schema 1 and is rejected; see [upgrading from 0.4](#upgrading-from-04).
+Records carry schema version 3. This release reads schema 3 only. State written by Ocura OSS 0.5 to 0.7 carries schema 2, and state from 0.4 and earlier carries schema 1; both are rejected, see [upgrading from earlier versions](#upgrading-from-earlier-versions).
 
 Within one schema version, a record changes only by gaining optional fields:
 
@@ -75,17 +75,14 @@ Within one schema version, a record changes only by gaining optional fields:
 - An added field must be safe to ignore. A field that changes the meaning of existing fields, a new required field, a removed or renamed field, a changed type, or a new enumeration value requires a new schema version.
 - The envelope's four keys are fixed.
 
-The repository keeps a small ledger written by 0.5.0 as a test fixture. Every later release that keeps schema 2 must verify it unchanged.
+The repository keeps a small ledger in the 0.8.0 layout as a test fixture. Every later release that keeps schema 3 must verify it unchanged.
 
-This describes how the format changes. It is not a commitment that schema 2 is final: the 0.x status in the [overview](index.md#project-status) still applies.
+This describes how the format changes. It is not a commitment that schema 3 is final: the 0.x status in the [overview](index.md#project-status) still applies.
 
 ### Compressed-storage extension
 
-Optional log compression keeps JSON records and schema 2 unchanged. It extends
-physical log storage: Ocura OSS 0.6 and earlier cannot read compressed `.log.gz`
-backing files even though they can parse the unchanged records. Before returning
-to an older version, run `ocura-oss decompress` and `ocura-oss verify`. A ledger
-that never uses compression stays directly readable by those versions.
+Optional log compression changes only physical log storage; JSON records and the
+schema version stay the same.
 
 `run --compress` considers only that run's own finalized captured logs, once, at
 1 MiB or larger, with gzip level 6 and a minimum 10% saving. A manual `compress`
@@ -95,33 +92,25 @@ compress active streams or enforce a disk quota, and needs room for temporary
 storage alongside the source file. JSON records and workload artifacts are never
 compressed.
 
-### Upgrading from 0.4
+### Upgrading from earlier versions
 
-Versions 0.5 and later cannot read a `.ocura-oss/` directory written by 0.4 or earlier, and they do not convert one. Every command pointed at such a directory, including `verify`, stops with exit status 2 and a message naming the cause:
+Version 0.8 renamed the stored names (see the [naming guide](naming-migration.md)), so versions 0.8 and later cannot read a `.ocura-oss/` directory written by 0.7 or earlier, and they do not convert one. Every command pointed at such a directory, including `verify`, stops with exit status 2 and a message naming the cause:
 
 ```text
-error: unsupported schema version 1 in den record den.json; Ocura OSS 0.4 and earlier wrote this state, and this version cannot read or convert it. Keep using "ocura-oss<0.5" for it, or move .ocura-oss aside and run `ocura-oss init`
+error: unsupported schema version 2 in ledger record den.json; Ocura OSS 0.5 to 0.7 wrote this state, and this version cannot read or convert it. Keep using "ocura-oss<0.8" for it, or move .ocura-oss aside and run `ocura-oss init`
 ```
 
-The old directory is never modified. Decide per project before upgrading:
+State from 0.4 and earlier gets the same message with schema version 1 and `"ocura-oss<0.5"`. The old directory is never modified. Decide per project before upgrading:
 
 | You want to | Do this |
 | --- | --- |
-| Keep working with the existing records | Stay on 0.4 for that project: `python -m pip install "ocura-oss<0.5"` in its environment. 0.4 reads and extends the directory as before |
-| Carry complete 0.4 records into schema 2 | Use the optional [repository-only migration script](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md). It verifies the input and creates a separate copy with a migration receipt, retaining IDs, history, and log bytes. It is excluded from both pip distributions |
-| Start recording with a current version in the same project | Move the old directory aside, then run `ocura-oss init`. For example `mv .ocura-oss .ocura-oss-0.4`, or in PowerShell `Rename-Item .ocura-oss .ocura-oss-0.4` |
-| Look at old records after upgrading | The logs under the moved directory's `logs/` are plain files, and the records are plain JSON. To use 0.4's commands on them again, move the directory back to `.ocura-oss` in an environment that has 0.4 |
+| Keep working with the existing records | Stay on the release line that wrote them: `python -m pip install "ocura-oss<0.8"` in its environment, or `"ocura-oss<0.5"` for 0.4 state. It reads and extends the directory as before |
+| Start recording with a current version in the same project | Move the old directory aside, then run `ocura-oss init`. For example `mv .ocura-oss .ocura-oss-0.7`, or in PowerShell `Rename-Item .ocura-oss .ocura-oss-0.7` |
+| Look at old records after upgrading | The logs under the moved directory's `logs/` are plain files, and the records are plain JSON. To use the old commands on them again, move the directory back to `.ocura-oss` in an environment that has the old version |
 
-A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old branch point as its source: record the baseline again under 0.5 before branching from it.
+A new state directory starts empty. Identifiers from the old one are unknown to it, so a branch cannot name an old branch point as its source: record the baseline again before branching from it. If you need comparisons or listings from the old records later, save them with the old version first, for example `ocura-oss compare --json --from ID` and `ocura-oss branch-points --json`.
 
-A migrated copy instead retains the old identifiers and branch relationships, so
-it can use those records as branch sources. The optional script never activates
-the converted ledger in the original project, deletes old state, copies workload
-files, or executes recorded commands. Follow its guide to inspect and activate
-the result after verification. Incomplete or inconsistent 0.4 state needs
-separate inspection; migration does not reconstruct missing evidence.
-
-If you need comparisons or listings from the old records later, save them with 0.4 first, for example `ocura-oss compare --json --from ID` and `ocura-oss chokepoints --json`.
+The optional [repository-only migration script](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md) converts complete 0.4 state to schema 2, for use with 0.5 to 0.7. There is no conversion to schema 3.
 
 ## Record relationships
 
@@ -139,7 +128,7 @@ A branch records lineage metadata only. A later run must name the child pathway 
 
 A run is journaled before its command launches, so an attempt stays visible even when the process recording it never gets to finish:
 
-1. `run` takes an operating-system lock on `attempts/<atom-id>.lock`, then writes `attempts/<atom-id>.json`. That attempt record holds the pathway, the identifiers reserved for the run record and branch point, the start time, the recorded command, and the declared parameters.
+1. `run` takes an operating-system lock on `attempts/<run-id>.lock`, then writes `attempts/<run-id>.json`. That attempt record holds the pathway, the identifiers reserved for the run record and branch point, the start time, the recorded command, and the declared parameters.
 2. The command runs.
 3. `run` writes the run record, then the branch point, then removes the attempt record and releases the lock.
 
@@ -154,7 +143,7 @@ The operating system releases the lock when the recording process exits for any 
 
 | The recorder had written | Action | Result |
 | --- | --- | --- |
-| Only the attempt record | `abandoned` | An run record with outcome `abandoned` and its terminal branch point |
+| Only the attempt record | `abandoned` | A run record with outcome `abandoned` and its terminal branch point |
 | The run record | `completed` | The missing branch point, carrying the run record's recorded outcome |
 | The run record and branch point | `cleared` | Nothing new; the leftover attempt record is removed |
 
@@ -226,7 +215,7 @@ When the state is intact, verification also produces a manifest and a digest:
 - The manifest has one `KIND ID CHECKSUM` line for every verified record, sorted. `ocura-oss manifest` prints it, and `StateVerification.manifest` holds it.
 - The digest is the SHA-256 of those lines, each terminated by a newline. `verify` reports it, and `StateVerification.digest` holds it.
 
-An run record's checksum covers its recorded log sizes and digests, and verification has just matched the logs to them, so a manifest line for an run record also pins that run's output.
+A run record's checksum covers its recorded log sizes and digests, and verification has just matched the logs to them, so a manifest line for a run record also pins that run's output.
 
 Checksums stored inside `.ocura-oss/` cannot show that a record was rewritten by someone able to write there. A manifest kept elsewhere can. Save it where this state's writers cannot change it, such as a commit in another repository or a build artifact, then pass it back:
 
@@ -241,7 +230,7 @@ The protection is exactly as strong as the place the manifest is kept. A manifes
 
 ## Reading verified output
 
-`Store.read_verified_log(atom_id, stream="stdout")` loads and validates the stored
+`Store.read_verified_log(run_id, stream="stdout")` loads and validates the stored
 run record and its lineage, checks the selected log's containment, and verifies the exact
 bytes it returns against the run record's recorded byte count and SHA-256 digest. Pass
 `stream="stderr"` for the other stream. Both streams can be read for failed attempts.
@@ -257,12 +246,12 @@ unrelated records, or the whole ledger. Continue to use `verify()` or
 `Store.verify_state()` for a complete check. Local advisory locks coordinate
 readers with compression and decompression, without providing an atomic snapshot
 of the ledger; returned bytes remain unchanged if the file changes afterward.
-An run recorded without output capture has no log, and the read raises `StoreError`.
+A run recorded without output capture has no log, and the read raises `StoreError`.
 See the [Python API](python-api.md#storeread_verified_log) for usage and errors.
 
 ## Stored information
 
-Atoms retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters. An unfinished attempt retains the same command arguments and declared parameters as the run record it becomes.
+Run records retain command arguments, outcomes, timing, return codes, declared parameters, log paths, byte counts, and log digests. Logs retain command output. Pathways retain branch reasons and effective declared parameters. An unfinished attempt retains the same command arguments and declared parameters as the run record it becomes.
 
 Environment values are inherited by the child process but are not serialized. Dependency versions, workspace contents, process memory, network activity, and external-system state are not recorded. The source revision is recorded only when [launch context](#optional-launch-context) is requested.
 

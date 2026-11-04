@@ -1,14 +1,14 @@
 # Command-line reference
 
-Version 0.7.2.
+Version 0.8.0.
 
 Version 0.7 adds opt-in compression and the `logs`, `compress`, and
 `decompress` commands. See [log compression](autocompression.md).
 
-Discovery commands, `branch-points`, descriptive Python names, `run --from`, and
-`--json-errors` are also available in 0.7. A ledger contains run records and pathways;
-a branch point identifies terminal evidence for a variation. Existing JSON keys and stored IDs
-retain their legacy spellings. See the [naming guide](naming-migration.md).
+A ledger contains run records and pathways; a branch point identifies terminal
+evidence for a variation. Version 0.8 renamed stored IDs and JSON keys and removed
+the `chokepoints` command and `--atom` option; the [naming guide](naming-migration.md)
+maps the names used before 0.8.
 
 The `ocura-oss` command records trusted local command attempts, creates metadata branches, compares branch evidence, and verifies project-local state.
 
@@ -27,7 +27,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `runs` | Page recorded run metadata, including failed retries |
 | `show` | Inspect one run, its branch point, and its branches without reading logs |
 | `pathways` | List pathway lineage and evidence status |
-| `branch-points` (`chokepoints`) | List terminal evidence boundaries |
+| `branch-points` | List terminal evidence boundaries |
 | `branch` | Create a metadata-only child pathway |
 | `compare` | Compare a source run with runs on its child pathways |
 | `verify` | Recheck records, relationships, and referenced logs |
@@ -51,9 +51,9 @@ Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --versi
 
 ### Identifiers
 
-Every record has an identifier made of its kind and 32 hexadecimal characters, such as `chokepoint-447ca3002f0b4d7c9a1e5b6c7d8e9f01`. Output, JSON results, and records always carry the full identifier.
+Every record has an identifier made of its kind and 32 hexadecimal characters, such as `branch-point-447ca3002f0b4d7c9a1e5b6c7d8e9f01`. Output, JSON results, and records always carry the full identifier.
 
-`branch --from`, `compare --from`, `run --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `chokepoint-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run. The compatible `compress --atom` and `decompress --atom` selectors use the same resolution.
+`branch --from`, `compare --from`, `run --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run` also accept a prefix: at least four of the identifier's leading hexadecimal characters, with or without the kind word, such as `447c` or `branch-point-447ca3`. A prefix must match exactly one stored record of that kind. One that matches several is rejected with the matching identifiers listed, and one that matches none is rejected, both with exit status 2 and before anything is written or run.
 
 Prefixes are for typing by hand. A script or agent already holds the full identifier and should pass it, because a prefix that is unique today can match a second record later.
 
@@ -158,7 +158,7 @@ The text response identifies the ledger, default pathway, and state directory.
 | --- | --- | --- |
 | `root` | string | Resolved project root |
 | `state_dir` | string | Resolved `.ocura-oss` directory |
-| `den_id` | string | Persisted ledger identifier |
+| `ledger_id` | string | Persisted ledger identifier |
 | `default_pathway_id` | string | Persisted default pathway identifier |
 
 #### Exit status
@@ -215,7 +215,7 @@ Use an explicit source branch point and reason to create a child pathway and
 record its first command in one call:
 
 ```console
-ocura-oss run --from chokepoint-<id> --reason "increase batch" --param batch=4 --json-errors -- python train.py --batch 4
+ocura-oss run --from branch-point-<id> --reason "increase batch" --param batch=4 --json-errors -- python train.py --batch 4
 ```
 
 This verifies the source using the same checks as `branch`, creates the child,
@@ -287,8 +287,8 @@ The text summary includes a read command.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `atom_id` | string | Recorded command attempt |
-| `chokepoint_id` | string | Terminal evidence for branching |
+| `run_id` | string | Recorded command attempt |
+| `branch_point_id` | string | Terminal evidence for branching |
 | `pathway_id` | string | Pathway containing the run |
 | `outcome` | string | `passed`, `failed`, `interrupted`, or `launch_failed` |
 | `duration_seconds` | number | Recorded elapsed command time |
@@ -345,7 +345,7 @@ ocura-oss run --no-capture --mask-arg 3 -- python upload.py --token <value>
 
 ## Stable archives
 
-`--archive` is available on `pathways`, `chokepoints`, `runs`, `show`,
+`--archive` is available on `pathways`, `branch-points`, `runs`, `show`,
 `compare`, `verify`, `manifest`, `attempts`, and `logs`. It reads without creating
 ledger lock files and refuses every change. Stop all writers and finalize or recover
 unfinished attempts before making the archive. The mode rejects archives containing
@@ -398,7 +398,7 @@ transparently. A missing log, damaged evidence, or a run recorded without
 capture returns status 2 without printing log contents. Success returns 0, as does
 a reader that closes the pipe early, as `head` does; the output simply stops there.
 
-Metadata fields in both `--info` and `--json` are `atom_id`, `stream`, `outcome`,
+Metadata fields in both `--info` and `--json` are `run_id`, `stream`, `outcome`,
 `started_at`, `encoding` (`raw` or `gzip`), `original_bytes`, `stored_bytes`,
 `sha256`, `fingerprint`, and `path`. The path is the project-relative physical
 backing path. The fingerprint identifies the stream, short run record ID, and a prefix
@@ -406,8 +406,8 @@ of the original digest; it is a readable reference, not a summary of the log.
 Neither metadata mode includes commands or log contents.
 
 ```console
-ocura-oss logs atom-<id> --stream stderr
-ocura-oss logs atom-<id> --info
+ocura-oss logs run-<id> --stream stderr
+ocura-oss logs run-<id> --info
 ```
 
 ## `compress` and `decompress`
@@ -422,18 +422,13 @@ ocura-oss decompress [--run ID] [--dry-run] [--json] [--root PATH]
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `--run ID` | all finalized run records | Preferred selector for one full run record ID or unique prefix |
-| `--atom ID` | all finalized run records | Compatible alias of `--run` |
+| `--run ID` | all finalized run records | One full run record ID or unique prefix |
 | `--min-bytes N` | `1048576` | `compress` only: minimum original size, as a nonnegative integer; require at least 10% savings as well |
 | `--dry-run` | false | Verify and preview prospective changes without replacing files |
 | `--json` | false | Emit `{"dry_run": false, "changes": [...]}` instead of text |
 | `--root PATH` | current directory | Project root containing initialized state |
 
-If both `--run` and `--atom` are supplied, they must resolve to the same full ID.
-A full ID and its unique prefix are accepted together. Different resolved IDs
-are rejected before any storage change, with `invalid_input` under `--json-errors`.
-
-Each change entry contains `atom_id`, `stream`, `action`, `original_bytes`,
+Each change entry contains `run_id`, `stream`, `action`, `original_bytes`,
 `stored_bytes`, and project-relative physical `path`. Actions are `compressed`,
 `would-compress`, `restored`, `would-restore`, `unchanged`, `small`, or
 `no-savings`. Active attempts and run records
@@ -443,9 +438,7 @@ can finish earlier conversions before a later log fails; it is not a transaction
 over the whole ledger.
 
 Use `--dry-run` to inspect older logs before an explicit pass. Conversion needs
-temporary disk headroom. Earlier readers do not support gzip backing despite
-the unchanged record schema; use `decompress` and `verify` before returning to
-one. See [log compression](autocompression.md).
+temporary disk headroom. See [log compression](autocompression.md).
 
 ## `runs` and `show`
 
@@ -456,13 +449,13 @@ ocura-oss show ID [--command] [--json] [--root PATH]
 ```
 
 `runs` lists finalized runs by terminal record timestamp, then ID, including earlier
-failed attempts on a pathway. Each entry carries the run record ID and the `chokepoint_id`
+failed attempts on a pathway. Each entry carries the run record ID and the `branch_point_id`
 to pass to `branch --from`. `--limit` defaults to 100 and accepts 1 through 1000;
 `--all` returns every match instead. `--pathway` selects one pathway; `--outcome`
 accepts the recorded outcomes listed under `run`. `--after` resumes strictly after
 a branch point, normally the previous page's `next_after`.
 
-JSON contains `runs` (the run summaries used by `compare`, plus `chokepoint_id`),
+JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id`),
 `next_after` (the last returned branch point ID when more matches exist, otherwise
 null), `unfinished_attempts`, and `verification: {"scope": "records", "logs_checked": 0}`.
 Every branch point record's envelope and fields must validate, even when filters
@@ -480,14 +473,14 @@ every page reports `unfinished_attempts: 0` lists every run that finished before
 its last page. Otherwise, list again once they finish or `recover` closes them.
 This relies on the system clock not stepping backward.
 
-`show` selects one run record, validates its record and lineage, and returns `atom`,
-`pathway`, `chokepoint`, `children`, `log_files`, and
+`show` selects one run record, validates its record and lineage, and returns `run`,
+`pathway`, `branch_point`, `children`, `log_files`, and
 `verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
 `log_files` gives each captured stream's current file, as for `run`. If that
 lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
 still succeeds, because the run record itself is valid.
-The pathway includes the reason and source relationship. `chokepoint` is the run's
+The pathway includes the reason and source relationship. `branch_point` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
 pathways branched from it, oldest first. Finding them scans the branch point and
 pathway records. Command arguments and masking positions are omitted unless
@@ -520,7 +513,7 @@ Each entry contains:
 | --- | --- | --- |
 | `id` | string | Pathway identifier |
 | `parent_pathway_id` | string or null | Parent pathway for a branch |
-| `source_chokepoint_id` | string or null | Chokepoint from which the branch was created |
+| `source_branch_point_id` | string or null | Branch point from which the branch was created |
 | `created_at` | string | UTC ISO 8601 timestamp |
 | `reason` | string | Branch reason; `default pathway` for the default pathway |
 | `parameters` | object | Effective declared pathway parameters |
@@ -537,12 +530,7 @@ The listing is fail-closed. A malformed or misnamed record causes exit status 2 
 | 0 | The validated list was emitted |
 | 2 | State was missing, malformed, inconsistent, or unreadable |
 
-<a id="chokepoints"></a>
-
-## `branch-points` (legacy alias: `chokepoints`)
-
-Both command names accept the same arguments and retain the existing success
-JSON shape. `branch-points` is the descriptive spelling introduced in 0.7.
+## `branch-points`
 
 List structurally valid terminal branch point records in reverse creation order, newest first.
 
@@ -563,14 +551,14 @@ Each entry contains:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `id` | string | Chokepoint identifier |
+| `id` | string | Branch point identifier |
 | `pathway_id` | string | Pathway that owns the source run record |
-| `atom_id` | string | Recorded command attempt |
+| `run_id` | string | Recorded command attempt |
 | `outcome` | string | `passed`, `failed`, `launch_failed`, `interrupted`, or `abandoned` |
 | `created_at` | string | UTC ISO 8601 timestamp |
 | `branchable` | boolean | Whether the branch point can serve as a branch source |
 
-JSON mode returns `{"chokepoints": [...]}`. Command arguments and log contents are not included.
+JSON mode returns `{"branch_points": [...]}`. Command arguments and log contents are not included.
 
 The listing is fail-closed. A malformed or misnamed record causes exit status 2. This command does not verify run record relationships or logs; use `verify` for complete state verification.
 
@@ -586,14 +574,14 @@ The listing is fail-closed. A malformed or misnamed record causes exit status 2.
 Create a metadata-only child pathway from verified terminal evidence.
 
 ```text
-ocura-oss branch --from CHOKEPOINT_ID --reason TEXT [--param KEY=VALUE] [--root PATH] [--json]
+ocura-oss branch --from BRANCH_POINT_ID --reason TEXT [--param KEY=VALUE] [--root PATH] [--json]
 ```
 
 #### Arguments and options
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--from CHOKEPOINT_ID` | branch point ID or unique prefix | required | Terminal branchable source branch point |
+| `--from BRANCH_POINT_ID` | branch point ID or unique prefix | required | Terminal branchable source branch point |
 | `--reason TEXT` | string | required | Nonblank explanation recorded on the child pathway |
 | `--param KEY=VALUE` | string pair | none | Override applied to the parent's effective parameters; repeatable |
 | `--root PATH` | path | current directory | Project root containing the source |
@@ -608,7 +596,7 @@ The child inherits the parent's effective parameters and applies the supplied ov
 It does not copy a workspace, process, memory image, checkpoint, artifact, source run record, or external state. It does not run a command. Use `run --pathway CHILD_ID` to attach later evidence; that run records the child's effective parameters.
 
 To create the child and immediately run its first command, use
-[`run --from CHOKEPOINT_ID --reason TEXT`](#create-and-run-a-variation).
+[`run --from BRANCH_POINT_ID --reason TEXT`](#create-and-run-a-variation).
 
 #### JSON output
 
@@ -624,7 +612,7 @@ JSON mode returns the fields documented for a pathway listing. `has_terminal_evi
 #### Example
 
 ```console
-ocura-oss branch --from chokepoint-<id> --reason "increase batch" --param batch=4
+ocura-oss branch --from branch-point-<id> --reason "increase batch" --param batch=4
 ```
 
 ## `compare`
@@ -632,14 +620,14 @@ ocura-oss branch --from chokepoint-<id> --reason "increase batch" --param batch=
 Compare one verified source run with the newest recorded run on each child pathway created from its branch point.
 
 ```text
-ocura-oss compare [--from CHOKEPOINT_ID] [--root PATH] [--json]
+ocura-oss compare [--from BRANCH_POINT_ID] [--root PATH] [--json]
 ```
 
 #### Options
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `--from CHOKEPOINT_ID` | branch point ID or unique prefix | newest branched source, or newest terminal source when no branches exist | Explicit source for targeted verification |
+| `--from BRANCH_POINT_ID` | branch point ID or unique prefix | newest branched source, or newest terminal source when no branches exist | Explicit source for targeted verification |
 | `--root PATH` | path | current directory | Project root containing initialized state |
 | `--json` | flag | false | Emit a structured comparison document |
 
@@ -670,7 +658,7 @@ The top-level document contains:
 | Field | Type | Description |
 | --- | --- | --- |
 | `state` | string | `ready`, `partial`, or `no_branch` |
-| `source_chokepoint_id` | string | Selected source branch point |
+| `source_branch_point_id` | string | Selected source branch point |
 | `source_pathway_id` | string | Pathway containing the source run |
 | `source_run` | object | Reduced source run record summary |
 | `children` | array | One comparison for each child pathway |
@@ -725,12 +713,12 @@ Verification may run while other processes record runs under the same root. An a
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `den` | string | Den identifier |
+| `ledger` | string | Ledger identifier |
 | `status` | string | `ok` or `failed` |
 | `digest` | string or null | SHA-256 of the manifest when the state is intact; null otherwise |
 | `counts.pathways` | integer | Pathway records found |
-| `counts.atoms` | integer | Atom records found |
-| `counts.chokepoints` | integer | Chokepoint records found |
+| `counts.runs` | integer | Run records found |
+| `counts.branch_points` | integer | Branch point records found |
 | `counts.logs_checked` | integer | Referenced logs that passed verification |
 | `attempts.running` | array | Identifiers of attempts a live process is still recording |
 | `attempts.abandoned` | array | Identifiers of attempts whose recorder stopped; each is also a problem |
@@ -764,7 +752,7 @@ ocura-oss manifest [--root PATH] [--json]
 
 #### Output
 
-Each line is `KIND ID CHECKSUM`, where `KIND` is `den`, `pathway`, `atom`, or `chokepoint` and `CHECKSUM` is that record's stored SHA-256. Lines are sorted. JSON mode returns `{"digest": "...", "entries": [...]}`; the digest is the SHA-256 of the lines, each terminated by a newline.
+Each line is `KIND ID CHECKSUM`, where `KIND` is `ledger`, `pathway`, `run`, or `branch_point` and `CHECKSUM` is that record's stored SHA-256. Lines are sorted. JSON mode returns `{"digest": "...", "entries": [...]}`; the digest is the SHA-256 of the lines, each terminated by a newline.
 
 Keep the output where this state's writers cannot change it and pass it to `verify --against` later. See [retained manifests](state-and-verification.md#retained-manifests) for what that detects and its limits.
 
@@ -803,7 +791,7 @@ Each entry contains:
 | `started_at` | string | UTC ISO 8601 timestamp |
 | `state` | string | `running` while a live process is recording it; `abandoned` once that process has stopped |
 
-JSON mode returns `{"attempts": [...]}`. Command arguments and log contents are not included. A finalized run is an run record and is not listed, so the list is empty when nothing is running and nothing was abandoned.
+JSON mode returns `{"attempts": [...]}`. Command arguments and log contents are not included. A finalized run is a run record and is not listed, so the list is empty when nothing is running and nothing was abandoned.
 
 #### Exit status
 
@@ -833,7 +821,7 @@ Each abandoned attempt is closed according to how far its recorder got:
 
 | Action | When | Result |
 | --- | --- | --- |
-| `abandoned` | No outcome had been recorded | An run record with outcome `abandoned` and its terminal branch point |
+| `abandoned` | No outcome had been recorded | A run record with outcome `abandoned` and its terminal branch point |
 | `completed` | The run record existed without its branch point | The missing branch point, with the run record's recorded outcome |
 | `cleared` | The run record and branch point both existed | The leftover attempt entry is removed |
 
@@ -847,8 +835,8 @@ JSON mode returns `{"recovered": [...]}`. Each entry contains:
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `atom_id` | string | Atom the attempt was closed as |
-| `chokepoint_id` | string | That run record's terminal branch point |
+| `run_id` | string | Run record the attempt was closed as |
+| `branch_point_id` | string | That run record's terminal branch point |
 | `pathway_id` | string | Pathway containing the run record |
 | `action` | string | `abandoned`, `completed`, or `cleared` |
 

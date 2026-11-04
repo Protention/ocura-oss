@@ -184,23 +184,23 @@ class CliTests(unittest.TestCase):
                     os.environ[name] = previous
 
         self.assertEqual(code, 0)
-        atom_id = next(
+        run_id = next(
             line.removeprefix("run:").strip()
             for line in run_summary.splitlines()
             if line.startswith("run:")
         )
-        chokepoint_id = next(
+        branch_point_id = next(
             line.removeprefix("branch point:").strip()
             for line in run_summary.splitlines()
             if line.startswith("branch point:")
         )
-        atom_path = self.root / ".ocura-oss" / "atoms" / f"{atom_id}.json"
-        atom_text = atom_path.read_text("utf-8")
-        atom_payload = json.loads(atom_text)["payload"]
-        self.assertIn(argument_marker, atom_payload["command"])
-        self.assertNotIn(environment_marker, atom_text)
-        self.assertNotIn(log_marker, atom_text)
-        stdout_log = (self.root / atom_payload["stdout_log"]).read_text("utf-8")
+        run_path = self.root / ".ocura-oss" / "runs" / f"{run_id}.json"
+        run_text = run_path.read_text("utf-8")
+        run_payload = json.loads(run_text)["payload"]
+        self.assertIn(argument_marker, run_payload["command"])
+        self.assertNotIn(environment_marker, run_text)
+        self.assertNotIn(log_marker, run_text)
+        stdout_log = (self.root / run_payload["stdout_log"]).read_text("utf-8")
         self.assertIn(log_marker, stdout_log)
         self.assertNotIn(environment_marker, stdout_log)
 
@@ -208,14 +208,14 @@ class CliTests(unittest.TestCase):
         summary_commands = (
             ("pathways", "--root", str(self.root)),
             ("pathways", "--root", str(self.root), "--json"),
-            ("chokepoints", "--root", str(self.root)),
-            ("chokepoints", "--root", str(self.root), "--json"),
+            ("branch-points", "--root", str(self.root)),
+            ("branch-points", "--root", str(self.root), "--json"),
             (
                 "branch",
                 "--root",
                 str(self.root),
                 "--from",
-                chokepoint_id,
+                branch_point_id,
                 "--reason",
                 "summary boundary",
             ),
@@ -224,13 +224,13 @@ class CliTests(unittest.TestCase):
                 "--root",
                 str(self.root),
                 "--from",
-                chokepoint_id,
+                branch_point_id,
                 "--reason",
                 "JSON summary boundary",
                 "--json",
             ),
-            ("compare", "--root", str(self.root), "--from", chokepoint_id),
-            ("compare", "--root", str(self.root), "--from", chokepoint_id, "--json"),
+            ("compare", "--root", str(self.root), "--from", branch_point_id),
+            ("compare", "--root", str(self.root), "--from", branch_point_id, "--json"),
             ("verify", "--root", str(self.root)),
             ("verify", "--root", str(self.root), "--json"),
         )
@@ -264,10 +264,10 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(code, 0)
 
-        code, listing, _ = self._run("chokepoints", "--root", str(self.root))
+        code, listing, _ = self._run("branch-points", "--root", str(self.root))
         self.assertEqual(code, 0)
 
-        code, listing, _ = self._run("chokepoints", "--root", str(self.root), "--json")
+        code, listing, _ = self._run("branch-points", "--root", str(self.root), "--json")
         self.assertEqual(code, 0)
         self.assertNotIn("command", listing)
 
@@ -290,16 +290,16 @@ class CliTests(unittest.TestCase):
             "run", "--root", str(self.root), "--", sys.executable, "-c", "print('base')"
         )
         self.assertEqual(code, 0)
-        chokepoint_id = None
+        branch_point_id = None
         for line in run_text.splitlines():
             if line.startswith("branch point:"):
-                chokepoint_id = line.split(":", 1)[1].strip()
-        self.assertTrue(chokepoint_id)
+                branch_point_id = line.split(":", 1)[1].strip()
+        self.assertTrue(branch_point_id)
 
         code, branch_text, _ = self._run_in_root(
             "branch",
             "--from",
-            chokepoint_id,
+            branch_point_id,
             "--reason",
             "try batch two",
             "--param",
@@ -313,7 +313,7 @@ class CliTests(unittest.TestCase):
         self.assertTrue(child_id)
 
         code, compare_text, _ = self._run(
-            "compare", "--root", str(self.root), "--from", chokepoint_id
+            "compare", "--root", str(self.root), "--from", branch_point_id
         )
         self.assertEqual(code, 0)
         self.assertIn("comparison: partial", compare_text)
@@ -336,7 +336,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
         code, compare_text, _ = self._run(
-            "compare", "--root", str(self.root), "--from", chokepoint_id
+            "compare", "--root", str(self.root), "--from", branch_point_id
         )
         self.assertEqual(code, 0)
         self.assertIn("comparison: ready", compare_text)
@@ -344,7 +344,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("run parameters:", compare_text)
 
         code, compare_json, _ = self._run(
-            "compare", "--root", str(self.root), "--from", chokepoint_id, "--json"
+            "compare", "--root", str(self.root), "--from", branch_point_id, "--json"
         )
         self.assertEqual(code, 0)
         payload = json.loads(compare_json)
@@ -355,26 +355,30 @@ class CliTests(unittest.TestCase):
         code, automatic_ready, _ = self._run("compare", "--root", str(self.root))
         self.assertEqual(code, 0)
         self.assertIn("comparison: ready", automatic_ready)
-        self.assertIn(f"source branch point: {chokepoint_id}", automatic_ready)
+        self.assertIn(f"source branch point: {branch_point_id}", automatic_ready)
 
     def test_branch_requires_reason_and_valid_source(self):
-        code, _text, _err = self._run("branch", "--from", "chokepoint-" + "0" * 32, "--reason", "x")
+        code, _text, _err = self._run(
+            "branch", "--from", "branch-point-" + "0" * 32, "--reason", "x"
+        )
         self.assertEqual(code, 2)
 
         code, run_text, _ = self._run(
             "run", "--root", str(self.root), "--", sys.executable, "-c", "print('base')"
         )
-        chokepoint_id = [
+        branch_point_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
             if line.startswith("branch point:")
         ][0]
 
         with self.assertRaises(SystemExit) as ctx, contextlib.chdir(str(self.root)):
-            cli.main(["branch", "--from", chokepoint_id])
+            cli.main(["branch", "--from", branch_point_id])
         self.assertEqual(ctx.exception.code, 2)
 
-        code, _text, _err = self._run_in_root("branch", "--from", chokepoint_id, "--reason", "   ")
+        code, _text, _err = self._run_in_root(
+            "branch", "--from", branch_point_id, "--reason", "   "
+        )
         self.assertEqual(code, 2)
 
     def test_demo_completes_retains_state_and_refuses_reuse(self):
@@ -384,14 +388,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("demo completed", text)
         self.assertIn("comparison: ready", text)
         self.assertIn("verify:", text)
-        self.assertTrue((destination / ".ocura-oss" / "den.json").is_file())
+        self.assertTrue((destination / ".ocura-oss" / "ledger.json").is_file())
         self.assertTrue((destination / ".ocura-oss" / "logs").is_dir())
 
-        before = (destination / ".ocura-oss" / "den.json").read_bytes()
+        before = (destination / ".ocura-oss" / "ledger.json").read_bytes()
         code, _text, stderr = self._run("demo", "--root", str(destination))
         self.assertEqual(code, 2)
         self.assertIn("already exists", stderr)
-        after = (destination / ".ocura-oss" / "den.json").read_bytes()
+        after = (destination / ".ocura-oss" / "ledger.json").read_bytes()
         self.assertEqual(before, after)
 
     def test_demo_json_mode(self):
@@ -407,7 +411,7 @@ class CliTests(unittest.TestCase):
             [
                 "initialize",
                 "baseline-run",
-                "chokepoint",
+                "branch-point",
                 "branch",
                 "rerun",
                 "verify",
@@ -422,10 +426,10 @@ class CliTests(unittest.TestCase):
         from ocura_oss.runner import RunExecution
 
         digest = hashlib.sha256(b"").hexdigest()
-        atom_id = "atom-" + "c" * 32
+        run_id = "run-" + "c" * 32
         failing = RunExecution(
-            atom=model.Atom(
-                id=atom_id,
+            record=model.RunRecord(
+                id=run_id,
                 pathway_id="pathway-" + "0" * 32,
                 started_at="2026-01-01T00:00:00.000000+00:00",
                 finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -442,10 +446,10 @@ class CliTests(unittest.TestCase):
                 stdout_sha256=digest,
                 stderr_sha256=digest,
             ),
-            chokepoint=model.Chokepoint(
-                id="chokepoint-" + "0" * 32,
+            branch_point=model.BranchPoint(
+                id="branch-point-" + "0" * 32,
                 pathway_id="pathway-" + "0" * 32,
-                atom_id=atom_id,
+                run_id=run_id,
                 created_at="2026-01-01T00:00:01.000000+00:00",
                 kind="terminal",
                 outcome=model.Outcome.FAILED,
@@ -462,7 +466,7 @@ class CliTests(unittest.TestCase):
 
     def test_commands_require_existing_state(self):
         missing = self.parent / "missing"
-        code, _text, stderr = self._run("chokepoints", "--root", str(missing))
+        code, _text, stderr = self._run("branch-points", "--root", str(missing))
         self.assertEqual(code, 2)
         self.assertIn("error:", stderr)
 
@@ -507,7 +511,7 @@ class CliTests(unittest.TestCase):
         with contextlib.chdir(str(self.parent)):
             code, _text, _err = self._run("init", "--root", "relproj")
         self.assertEqual(code, 0)
-        self.assertTrue((self.parent / "relproj" / ".ocura-oss" / "den.json").is_file())
+        self.assertTrue((self.parent / "relproj" / ".ocura-oss" / "ledger.json").is_file())
 
     def test_invalid_parameter_keys_are_rejected(self):
         for token in ("1bad=2", "bad key=2", "=value"):
@@ -523,11 +527,11 @@ class CliTests(unittest.TestCase):
                 "print('never')",
             )
             self.assertEqual(code, 2, token)
-        self.assertEqual(self.store_atom_count(), 0)
+        self.assertEqual(self.store_run_count(), 0)
 
-    def store_atom_count(self):
-        atoms = self.root / ".ocura-oss" / "atoms"
-        return len(list(atoms.glob("*.json")))
+    def store_run_count(self):
+        records = self.root / ".ocura-oss" / "runs"
+        return len(list(records.glob("*.json")))
 
     def test_parameter_value_with_equals_round_trips(self):
         code, _text, _err = self._run(
@@ -542,14 +546,14 @@ class CliTests(unittest.TestCase):
             "print('eq')",
         )
         self.assertEqual(code, 0)
-        atoms = sorted((self.root / ".ocura-oss" / "atoms").glob("*.json"))
-        payload = json.loads(atoms[-1].read_text("utf-8"))["payload"]
+        records = sorted((self.root / ".ocura-oss" / "runs").glob("*.json"))
+        payload = json.loads(records[-1].read_text("utf-8"))["payload"]
         self.assertEqual(payload["declared_parameters"], {"eq": "a=b"})
 
     def test_json_listings_are_deterministic(self):
         self._run("run", "--root", str(self.root), "--", sys.executable, "-c", "print('one')")
-        first = self._run("chokepoints", "--root", str(self.root), "--json")
-        second = self._run("chokepoints", "--root", str(self.root), "--json")
+        first = self._run("branch-points", "--root", str(self.root), "--json")
+        second = self._run("branch-points", "--root", str(self.root), "--json")
         self.assertEqual(first[0], 0)
         self.assertEqual(first[1], second[1])
         pathways_first = self._run("pathways", "--root", str(self.root), "--json")
@@ -569,7 +573,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("baseline-run", stderr)
         self.assertIn("boom", stderr)
         self.assertTrue(destination.is_dir())
-        self.assertTrue((destination / ".ocura-oss" / "den.json").is_file())
+        self.assertTrue((destination / ".ocura-oss" / "ledger.json").is_file())
 
         with mock.patch(
             "ocura_oss.demo.runner.run_command",
@@ -584,7 +588,7 @@ class CliTests(unittest.TestCase):
             "run", "--root", str(self.root), "--", sys.executable, "-c", "print('base')"
         )
         self.assertEqual(code, 0)
-        chokepoint_id = [
+        branch_point_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
             if line.startswith("branch point:")
@@ -592,7 +596,7 @@ class CliTests(unittest.TestCase):
         code, branch_json, _ = self._run_in_root(
             "branch",
             "--from",
-            chokepoint_id,
+            branch_point_id,
             "--reason",
             "json purity",
             "--param",
@@ -624,17 +628,17 @@ class CliTests(unittest.TestCase):
             "run", "--root", str(self.root), "--", sys.executable, "-c", "print('v')"
         )
         self.assertEqual(code, 0)
-        atom_id = [
+        run_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
             if line.startswith("run:")
         ][0]
-        (self.root / ".ocura-oss" / "logs" / f"{atom_id}.stdout.log").unlink()
+        (self.root / ".ocura-oss" / "logs" / f"{run_id}.stdout.log").unlink()
 
         code, text, _ = self._run("verify", "--root", str(self.root))
         self.assertEqual(code, 2)
         self.assertIn("integrity: failed", text)
-        self.assertIn(f"{atom_id}.json", text)
+        self.assertIn(f"{run_id}.json", text)
 
         code, verify_json, _ = self._run("verify", "--root", str(self.root), "--json")
         self.assertEqual(code, 2)
@@ -666,7 +670,7 @@ class CliTests(unittest.TestCase):
             "run", "--root", str(self.root), "--", sys.executable, "-c", "print('base')"
         )
         self.assertEqual(code, 0)
-        chokepoint_id = [
+        branch_point_id = [
             line.split(":", 1)[1].strip()
             for line in run_text.splitlines()
             if line.startswith("branch point:")
@@ -678,7 +682,7 @@ class CliTests(unittest.TestCase):
             code, branch_text, _err = self._run(
                 "branch",
                 "--from",
-                chokepoint_id,
+                branch_point_id,
                 "--reason",
                 "explicit root",
                 "--root",
@@ -694,20 +698,20 @@ class CliTests(unittest.TestCase):
         self.assertIn(f"{child_id}.json", {p.name for p in pathways_dir.iterdir()})
         self.assertEqual(list(elsewhere.iterdir()), [])
 
-    def test_verify_json_names_atom_with_broken_reference(self):
+    def test_verify_json_names_run_with_broken_reference(self):
         from ocura_oss import model
         from ocura_oss.store import Store
 
-        root = self.parent / "broken-atom"
+        root = self.parent / "broken-run"
         store = Store(root)
         store.initialize_state(name="broken ref")
         empty_digest = hashlib.sha256(b"").hexdigest()
-        atom_id = model.make_id("atom")
+        run_id = model.make_id("run")
         for suffix in ("stdout", "stderr"):
-            (store.logs_dir / f"{atom_id}.{suffix}.log").write_bytes(b"")
-        store._save_atom(
-            model.Atom(
-                id=atom_id,
+            (store.logs_dir / f"{run_id}.{suffix}.log").write_bytes(b"")
+        store._save_run(
+            model.RunRecord(
+                id=run_id,
                 pathway_id="pathway-" + "f" * 32,
                 started_at="2026-01-01T00:00:00.000000+00:00",
                 finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -717,8 +721,8 @@ class CliTests(unittest.TestCase):
                 launch_error_category=None,
                 declared_parameters={},
                 command=("x",),
-                stdout_log=f".ocura-oss/logs/{atom_id}.stdout.log",
-                stderr_log=f".ocura-oss/logs/{atom_id}.stderr.log",
+                stdout_log=f".ocura-oss/logs/{run_id}.stdout.log",
+                stderr_log=f".ocura-oss/logs/{run_id}.stderr.log",
                 stdout_bytes=0,
                 stderr_bytes=0,
                 stdout_sha256=empty_digest,
@@ -729,7 +733,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         payload = json.loads(verify_json)
         self.assertEqual(payload["status"], "failed")
-        named = [item for item in payload["problems"] if item["record"] == f"{atom_id}.json"]
+        named = [item for item in payload["problems"] if item["record"] == f"{run_id}.json"]
         self.assertTrue(named)
         self.assertIn("pathway", named[0]["problem"])
 

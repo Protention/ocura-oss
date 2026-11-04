@@ -1,17 +1,13 @@
 # Python API reference
 
-Version 0.7.2.
+Version 0.8.0.
 
 Version 0.7 adds opt-in compression, storage metadata, and conversion
 methods. See [log compression](autocompression.md).
 
-Descriptive names, discovery, structured diagnostics, and creating and running a
-variation in one call are also available in 0.7.
-New code uses `Ledger`, `RunRecord`, and `BranchPoint`, with `Pathway` unchanged.
-`Den`, `Atom`, and `Chokepoint` remain class aliases. Constructor field names and
-JSON serialization retain their existing spellings; descriptive properties are
-listed below. See the [complete naming map](naming-migration.md) for compatibility
-and transition policy.
+Version 0.8 uses `Ledger`, `RunRecord`, and `BranchPoint` and their field names
+throughout and removes the older names; the [naming guide](naming-migration.md)
+maps them.
 
 The `ocura_oss` package exposes typed workflow functions, read-oriented state access, frozen result and record types, enums, and public exceptions.
 
@@ -113,7 +109,6 @@ Create one ledger and one default pathway under a project root.
 #### Returns
 
 `Initialization` containing the resolved root, created `.ledger`, and default pathway.
-The `.den` property spelling remains supported.
 
 #### Raises
 
@@ -267,9 +262,8 @@ assert execution.record.outcome is Outcome.PASSED
 
 ```python
 branch(
-    source_chokepoint_id: str | None = None,
+    source_branch_point_id: str,
     *,
-    source_branch_point_id: str | None = None,
     reason: str,
     root: os.PathLike[str] | str | None = None,
     parameters: Mapping[str, str] | None = None,
@@ -282,8 +276,7 @@ Create a metadata-only child pathway from verified terminal evidence.
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
-| `source_branch_point_id` | string or None | `None` | Preferred keyword for a terminal, branchable source; supply this or the legacy argument |
-| `source_chokepoint_id` | string or None | `None` | Compatible positional argument or legacy keyword; conflicting aliases are rejected |
+| `source_branch_point_id` | string | required | Terminal, branchable source branch point |
 | `reason` | string | required | Nonblank branch reason stored on the child pathway |
 | `root` | path-like, string, or None | `None` | Project root containing the source evidence |
 | `parameters` | mapping of string to string, or None | `None` | Overrides applied to the parent pathway's effective parameters |
@@ -310,7 +303,7 @@ Leading and trailing whitespace is removed from `reason` before storage. The res
 from ocura_oss import branch
 
 child = branch(
-    "chokepoint-<id>",
+    "branch-point-<id>",
     root="experiment",
     reason="increase batch",
     parameters={"batch": "4"},
@@ -321,9 +314,8 @@ child = branch(
 
 ```python
 compare(
-    source_chokepoint_id: str | None = None,
-    *,
     source_branch_point_id: str | None = None,
+    *,
     root: os.PathLike[str] | str | None = None,
 ) -> ComparisonResult
 ```
@@ -334,8 +326,7 @@ Compare a verified source run with the newest run on each child pathway created 
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
-| `source_branch_point_id` | string or None | `None` | Preferred source keyword; conflicting aliases are rejected |
-| `source_chokepoint_id` | string or None | `None` | Compatible positional argument or legacy keyword; `None` selects the newest branch point referenced by a child pathway after full-state verification, or the newest terminal branch point when no branches exist |
+| `source_branch_point_id` | string or None | `None` | Source branch point; `None` selects the newest branch point referenced by a child pathway after full-state verification, or the newest terminal branch point when no branches exist |
 | `root` | path-like, string, or None | `None` | Project root containing initialized state |
 
 #### Returns
@@ -363,7 +354,7 @@ Parameter deltas contain inherited, added, and changed values.
 ```python
 from ocura_oss import ComparisonState, compare
 
-result = compare("chokepoint-<id>", root="experiment")
+result = compare("branch-point-<id>", root="experiment")
 if result.state is ComparisonState.PARTIAL:
     missing = [child.pathway_id for child in result.children if child.missing_evidence]
 ```
@@ -460,7 +451,7 @@ What recovery writes depends on how far the recorder got:
 
 | `RecoveredAttempt.action` | When | Result |
 | --- | --- | --- |
-| `RecoveryAction.ABANDONED` | No outcome had been recorded | An run record with `Outcome.ABANDONED` and its terminal branch point |
+| `RecoveryAction.ABANDONED` | No outcome had been recorded | A run record with `Outcome.ABANDONED` and its terminal branch point |
 | `RecoveryAction.COMPLETED` | The run record existed without its branch point | The missing branch point, with the run record's recorded outcome |
 | `RecoveryAction.CLEARED` | The run record and branch point both existed | The leftover attempt record is removed |
 
@@ -474,7 +465,7 @@ Attempts that a live process is still recording are left alone, so recovery is s
 from ocura_oss import recover, verify
 
 for closed in recover("experiment"):
-    print(closed.atom_id, closed.action.value)
+    print(closed.run_id, closed.action.value)
 
 assert verify("experiment").ok
 ```
@@ -509,7 +500,7 @@ Run the complete retained demonstration in a new directory.
 
 The directory is retained on success and failure. Both demonstration commands must pass and the final state must verify before a report is returned.
 
-Stages are `initialize`, `baseline-run`, `chokepoint`, `branch`, `rerun`, `verify`, and `compare`.
+Stages are `initialize`, `baseline-run`, `branch-point`, `branch`, `rerun`, `verify`, and `compare`.
 
 #### Example
 
@@ -522,32 +513,9 @@ print(report.comparison.state.value)
 
 ## Store
 
-### Preferred readers
-
-Start with these descriptive interfaces. Their validation and ordering match the
-compatible legacy methods documented in detail below.
-
-```python
-store.load_ledger() -> Ledger
-store.load_run(run_id: str) -> RunRecord
-store.load_branch_point(branch_point_id: str) -> BranchPoint
-store.list_run_records() -> list[RunRecord]
-store.list_branch_points() -> list[BranchPoint]
-store.verify_run_evidence(record: RunRecord) -> None
-```
-
-These correspond to `load_den`, `load_atom`, `load_chokepoint`, `list_atoms`,
-`list_chokepoints`, and `verify_atom_evidence`. `list_runs()` is the higher-level
-discovery interface for finalized runs, branch points, filtering, and unfinished
-attempt counts; `list_run_records()` lists all retained run records in start order.
-Neither metadata list verifies log contents.
-
-`inspect_run`, `read_verified_log`, `open_verified_log`, and `log_info` accept the
-preferred `run_id=ID` keyword alongside their compatible positional argument and
-`atom_id=ID` keyword. `compress_logs` and `decompress_logs` accept `run_id` too.
-Equal aliases are accepted; conflicting aliases raise `StoreError` with code
-`invalid_input`. `Store.resolve_id()` accepts kinds `run` and `branch_point`,
-returning unchanged `atom-...` and `chokepoint-...` IDs.
+`list_runs()` is the discovery interface for finalized runs, branch points,
+filtering, and unfinished attempt counts; `list_run_records()` lists all retained
+run records in start order. Neither metadata list verifies log contents.
 
 The [history example](../examples/history/README.md) demonstrates a fresh caller
 discovering every observed attempt and reading bounded, verified excerpts from an
@@ -581,11 +549,11 @@ The documented constructor, attributes, loading methods, listing methods, initia
 | `root` | `pathlib.Path` | Resolved project root |
 | `state_dir` | `pathlib.Path` | Resolved `.ocura-oss/` directory |
 | `pathways_dir` | `pathlib.Path` | Pathway record directory |
-| `atoms_dir` | `pathlib.Path` | RunRecord record directory |
-| `chokepoints_dir` | `pathlib.Path` | BranchPoint record directory |
+| `runs_dir` | `pathlib.Path` | Run record directory |
+| `branch_points_dir` | `pathlib.Path` | Branch point record directory |
 | `attempts_dir` | `pathlib.Path` | Unfinished attempt records and their lock files |
 | `logs_dir` | `pathlib.Path` | Recorded log directory |
-| `den_path` | `pathlib.Path` | Ledger record path |
+| `ledger_path` | `pathlib.Path` | Ledger record path |
 
 Constructing a `Store` resolves paths only. `exists()`, `require()`, and `initialize_state()` provide the state-presence operations.
 
@@ -596,7 +564,7 @@ from ocura_oss import Store
 
 store = Store("experiment")
 if store.exists():
-    print(store.load_den().name)
+    print(store.load_ledger().name)
 ```
 
 ### `Store.exists`
@@ -627,9 +595,9 @@ Require an initialized ledger under the project root.
 
 | Exception | Condition |
 | --- | --- |
-| `StoreError` | `den.json` is not a file |
+| `StoreError` | `ledger.json` is not a file |
 
-This method checks `den.json` presence only. `load_den()` parses the ledger, and `verify_state()` performs complete verification.
+This method checks `ledger.json` presence only. `load_ledger()` parses the ledger, and `verify_state()` performs complete verification.
 
 When the root has no `.ocura-oss/` directory, the message names `ocura-oss init`. When a directory above the root holds state, the message names the nearest one instead.
 
@@ -638,7 +606,7 @@ When the root has no `.ocura-oss/` directory, the message names `ocura-oss init`
 ```python
 store.resolve_id(
     value: str,
-    kind: Literal["pathway", "atom", "chokepoint"],
+    kind: Literal["pathway", "run", "branch_point"],
 ) -> str
 ```
 
@@ -649,7 +617,7 @@ Return the full identifier that a full or shortened identifier names.
 | Name | Type | Description |
 | --- | --- | --- |
 | `value` | string | A full identifier, or at least four of its leading hexadecimal characters with or without the kind word |
-| `kind` | string | Record kind to search: `pathway`, `atom`, or `chokepoint` |
+| `kind` | string | Record kind to search: `pathway`, `run`, or `branch_point` |
 
 #### Returns
 
@@ -661,12 +629,12 @@ The full identifier. A full identifier is returned as given, without checking th
 | --- | --- |
 | `StoreError` | `value` is neither a full identifier nor a valid prefix, or the prefix matches no stored record or more than one |
 
-A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, `run --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run`. The legacy `--atom` storage selector also remains supported.
+A prefix is matched against record file names only; no record is read. The error for an ambiguous prefix lists up to five matching identifiers. The CLI calls this method for `branch --from`, `compare --from`, `run --from`, `run --pathway`, `logs ID`, `compress --run`, and `decompress --run`.
 
-### `Store.load_den`
+### `Store.load_ledger`
 
 ```python
-store.load_den() -> Ledger
+store.load_ledger() -> Ledger
 ```
 
 Load and validate the ledger record.
@@ -710,21 +678,21 @@ The parsed `Pathway`.
 
 Child pathways must set parent and source fields together, and their source branch point must belong to the parent pathway.
 
-### `Store.load_atom`
+### `Store.load_run`
 
 ```python
-store.load_atom(
-    atom_id: str,
+store.load_run(
+    run_id: str,
 ) -> RunRecord
 ```
 
-Load an run record and validate its pathway reference.
+Load a run record and validate its pathway reference.
 
 #### Parameters
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `atom_id` | string | Identifier of the run record to load |
+| `run_id` | string | Identifier of the run record to load |
 
 #### Returns
 
@@ -736,13 +704,13 @@ The parsed `RunRecord`.
 | --- | --- |
 | `StoreError` | The identifier, record, payload, outcome invariants, or referenced pathway is invalid |
 
-This method validates the run record and its log metadata fields. `verify_atom_evidence()` reads and verifies the referenced files.
+This method validates the run record and its log metadata fields. `verify_run_evidence()` reads and verifies the referenced files.
 
-### `Store.load_chokepoint`
+### `Store.load_branch_point`
 
 ```python
-store.load_chokepoint(
-    chokepoint_id: str,
+store.load_branch_point(
+    branch_point_id: str,
 ) -> BranchPoint
 ```
 
@@ -752,7 +720,7 @@ Load a branch point and validate its run record, pathway, and outcome.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `chokepoint_id` | string | Identifier of the branch point record to load |
+| `branch_point_id` | string | Identifier of the branch point record to load |
 
 #### Returns
 
@@ -764,7 +732,7 @@ The parsed `BranchPoint`.
 | --- | --- |
 | `StoreError` | The identifier or record is invalid; the run record or pathway is invalid; or run record and branch point fields disagree |
 
-`verify_atom_evidence()` provides the corresponding log-file verification.
+`verify_run_evidence()` provides the corresponding log-file verification.
 
 ### `Store.list_pathways`
 
@@ -786,10 +754,10 @@ A list sorted by `created_at`, then `id`.
 
 The method fails closed instead of skipping an invalid record. Use `load_pathway()` or `verify_state()` when reference validation is required.
 
-### `Store.list_atoms`
+### `Store.list_run_records`
 
 ```python
-store.list_atoms() -> list[RunRecord]
+store.list_run_records() -> list[RunRecord]
 ```
 
 Return run records in deterministic start order.
@@ -804,7 +772,7 @@ A list sorted by `started_at`, then `id`.
 | --- | --- |
 | `StoreError` | Any listed JSON record has an invalid envelope, checksum, payload, outcome invariants, kind, or filename-to-ID relationship |
 
-`load_atom()` adds pathway validation. `verify_state()` adds complete relationship and log verification.
+`load_run()` adds pathway validation. `verify_state()` adds complete relationship and log verification.
 
 ### `Store.list_runs` and `Store.inspect_run`
 
@@ -813,17 +781,14 @@ store.list_runs(
     *, pathway_id: str | None = None, outcome: Outcome | None = None,
     after: str | None = None, limit: int | None = 100,
 ) -> RunPage
-store.inspect_run(atom_id: str | None = None, *, run_id: str | None = None) -> RunInspection
+store.inspect_run(run_id: str) -> RunInspection
 ```
 
 `RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`, and
-`unfinished_attempts: int`. Each `ListedRun` holds `chokepoint_id: str` and
-`run: RunSummary`. `RunInspection` contains `atom: RunRecord`, `pathway: Pathway`,
-`chokepoint: BranchPoint | None`, and `children: tuple[Pathway, ...]`. These result
-types live in `ocura_oss.store`. Descriptive properties are `ListedRun.branch_point_id`,
-`RunInspection.record`, and `RunInspection.branch_point`; their legacy constructor
-fields and JSON keys remain unchanged. Their
-`to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
+`unfinished_attempts: int`. Each `ListedRun` holds `branch_point_id: str` and
+`run: RunSummary`. `RunInspection` contains `record: RunRecord`, `pathway: Pathway`,
+`branch_point: BranchPoint | None`, and `children: tuple[Pathway, ...]`. These result
+types live in `ocura_oss.store`. Their `to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
 includes command arguments, which are omitted by default.
 
 Listing orders runs by branch point timestamp and ID, checks every scanned branch point record,
@@ -835,10 +800,10 @@ completeness, filters and failure behavior follow the [CLI contract](cli.md#runs
 supply full IDs and `Outcome` values. Invalid limits, selectors or records raise
 `StoreError`.
 
-### `Store.list_chokepoints`
+### `Store.list_branch_points`
 
 ```python
-store.list_chokepoints() -> list[BranchPoint]
+store.list_branch_points() -> list[BranchPoint]
 ```
 
 Return branch point records in reverse deterministic creation order.
@@ -853,7 +818,7 @@ A list sorted by `created_at`, then `id`, both descending.
 | --- | --- |
 | `StoreError` | Any listed JSON record has an invalid envelope, checksum, payload, kind, or filename-to-ID relationship |
 
-`load_chokepoint()` adds run record relationship validation. `verify_state()` adds complete relationship and log verification.
+`load_branch_point()` adds run record relationship validation. `verify_state()` adds complete relationship and log verification.
 
 ### `Store.has_terminal_evidence`
 
@@ -885,7 +850,7 @@ The result reflects run record membership only. Pathway loading and log verifica
 
 ```python
 store.resolve_log_path(
-    atom: RunRecord,
+    record: RunRecord,
     stream: Literal["stdout", "stderr"],
 ) -> pathlib.Path
 ```
@@ -896,7 +861,7 @@ Resolve one recorded log path after containment checks.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `atom` | `RunRecord` | RunRecord whose recorded log path is resolved |
+| `record` | `RunRecord` | Run record whose recorded log path is resolved |
 | `stream` | `stdout` or `stderr` | Selects the corresponding log field |
 
 #### Returns
@@ -912,12 +877,12 @@ backing path when compressed. Compressed file contents are encoded; use
 | --- | --- |
 | `StoreError` | `stream` is invalid; the run record was recorded without output capture; or the recorded path is empty, absolute, escaping, or outside the direct logs directory |
 
-The returned path has passed containment checks only. Use `read_verified_log()` to consume bytes that have been checked against the stored run record; `verify_atom_evidence()` checks both logs without returning their contents.
+The returned path has passed containment checks only. Use `read_verified_log()` to consume bytes that have been checked against the stored run record; `verify_run_evidence()` checks both logs without returning their contents.
 
 ### `Store.log_files`
 
 ```python
-store.log_files(atom: RunRecord) -> dict[str, str]
+store.log_files(record: RunRecord) -> dict[str, str]
 ```
 
 Return each captured stream's current file relative to the project root, keyed
@@ -932,9 +897,8 @@ that escapes the logs directory.
 
 ```python
 store.read_verified_log(
-    atom_id: str | None = None,
+    run_id: str,
     *,
-    run_id: str | None = None,
     stream: Literal["stdout", "stderr"] = "stdout",
 ) -> bytes
 ```
@@ -945,8 +909,7 @@ Read one complete recorded log and verify the exact bytes returned. Added in 0.4
 
 | Name | Type | Default | Description |
 | --- | --- | --- | --- |
-| `run_id` | string or None | `None` | Preferred keyword identifying the run whose output is read |
-| `atom_id` | string or None | `None` | Compatible positional argument or legacy keyword |
+| `run_id` | string | required | Full ID of the run whose output is read |
 | `stream` | `stdout` or `stderr` | `stdout` | Selects the recorded output stream; keyword-only |
 
 #### Returns
@@ -981,17 +944,17 @@ import json
 from ocura_oss import Store
 
 store = Store("experiment")
-raw = store.read_verified_log("atom-<id>", stream="stdout")
+raw = store.read_verified_log("run-<id>", stream="stdout")
 metrics = json.loads(raw.decode("utf-8"))  # For a workload that emits UTF-8 JSON.
 
-diagnostics = store.read_verified_log("atom-<id>", stream="stderr")
+diagnostics = store.read_verified_log("run-<id>", stream="stderr")
 ```
 
 ### `Store.open_verified_log`
 
 ```python
 with store.open_verified_log(
-    run_id=run_id,
+    run_id,
     stream="stdout",
     offset=0,
     length=None,
@@ -1021,15 +984,14 @@ and mutation operations. This mode assumes there are no concurrent writers; see
 
 ```python
 store.log_info(
-    atom_id: str | None = None,
+    run_id: str,
     *,
-    run_id: str | None = None,
     stream: Literal["stdout", "stderr"] = "stdout",
 ) -> LogInfo
 ```
 
 Verify one captured log and return storage metadata without returning its
-contents. `atom_id` must be a full identifier. Invalid lineage, stream, capture
+contents. `run_id` must be a full identifier. Invalid lineage, stream, capture
 mode, or evidence raises `StoreError`, as for `read_verified_log()`.
 
 `LogInfo` is defined in `ocura_oss.store`, without adding it to
@@ -1037,8 +999,7 @@ mode, or evidence raises `StoreError`, as for `read_verified_log()`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `run_id` | string | Preferred property for the full run ID |
-| `atom_id` | string | Compatible constructor field for the full run ID |
+| `run_id` | string | Full run ID |
 | `stream` | string | `stdout` or `stderr` |
 | `outcome` | string | Recorded outcome |
 | `started_at` | string | Recorded UTC start time |
@@ -1046,7 +1007,7 @@ mode, or evidence raises `StoreError`, as for `read_verified_log()`.
 | `original_bytes` | integer | Recorded original byte count |
 | `stored_bytes` | integer | Current physical byte count |
 | `sha256` | string | Full SHA-256 of the verified original bytes |
-| `fingerprint` | string | Readable stream/short atom/digest-prefix reference |
+| `fingerprint` | string | Readable stream/short run ID/digest-prefix reference |
 | `path` | string | Project-relative physical backing path |
 
 The fingerprint remains stable across conversion. It identifies the log; it
@@ -1058,7 +1019,6 @@ command arguments nor log contents are included in this metadata.
 ```python
 store.compress_logs(
     *,
-    atom_id: str | None = None,
     run_id: str | None = None,
     min_bytes: int = 1_048_576,
     dry_run: bool = False,
@@ -1066,20 +1026,19 @@ store.compress_logs(
 
 store.decompress_logs(
     *,
-    atom_id: str | None = None,
     run_id: str | None = None,
     dry_run: bool = False,
 ) -> tuple[LogStorageChange, ...]
 ```
 
 Convert finalized captured logs after verifying their original bytes. `None`
-selects finalized run records across the ledger; a supplied `atom_id` must be full.
+selects finalized run records across the ledger; a supplied `run_id` must be full.
 Active attempts and run records without capture are not converted. `min_bytes` is a
 nonnegative original byte threshold. Compression uses gzip level 6 and requires
 at least 10% savings. `dry_run=True` calculates prospective changes without
 replacing files.
 
-Each returned `LogStorageChange` exposes the preferred `run_id` property and contains `atom_id`, `stream`, `action`,
+Each returned `LogStorageChange` contains `run_id`, `stream`, `action`,
 `original_bytes`, `stored_bytes`, and `path` (the project-relative backing path).
 This result type also lives in `ocura_oss.store`, without a top-level export.
 Actions are `compressed`, `would-compress`, `restored`, `would-restore`,
@@ -1096,21 +1055,19 @@ from ocura_oss import Store
 store = Store("experiment")
 preview = store.compress_logs(dry_run=True)
 changes = store.compress_logs()
-info = store.log_info("atom-<id>")
-assert len(store.read_verified_log(info.atom_id)) == info.original_bytes
+info = store.log_info("run-<id>")
+assert len(store.read_verified_log(info.run_id)) == info.original_bytes
 store.decompress_logs()
 assert store.verify_state().ok
 ```
 
-Compressed storage extends physical storage despite retaining record schema 2;
-Ocura OSS 0.6 and earlier require decompressed logs. See
-[log compression](autocompression.md).
+See [log compression](autocompression.md).
 
-### `Store.verify_atom_evidence`
+### `Store.verify_run_evidence`
 
 ```python
-store.verify_atom_evidence(
-    atom: RunRecord,
+store.verify_run_evidence(
+    record: RunRecord,
 ) -> None
 ```
 
@@ -1120,11 +1077,11 @@ Verify the log files referenced by one run record.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `atom` | `RunRecord` | RunRecord containing stdout and stderr paths, byte counts, and SHA-256 digests |
+| `record` | `RunRecord` | Run record containing stdout and stderr paths, byte counts, and SHA-256 digests |
 
 #### Returns
 
-`None` when both logs pass verification. An run recorded without output capture has no logs and passes.
+`None` when both logs pass verification. A run recorded without output capture has no logs and passes.
 
 #### Raises
 
@@ -1153,7 +1110,7 @@ Create one ledger and one default pathway.
 
 #### Returns
 
-A `(den, pathway)` tuple.
+A `(ledger, pathway)` tuple.
 
 #### Raises
 
@@ -1200,7 +1157,7 @@ Return unfinished attempts with their state, ordered by start time and then iden
 
 #### Returns
 
-A list of `(attempt, state)` pairs. The state is `AttemptState.RUNNING` while a live process is recording the attempt and `AttemptState.ABANDONED` once that process has stopped without finalizing it. A finalized attempt is an run record and is not listed.
+A list of `(attempt, state)` pairs. The state is `AttemptState.RUNNING` while a live process is recording the attempt and `AttemptState.ABANDONED` once that process has stopped without finalizing it. A finalized attempt is a run record and is not listed.
 
 #### Raises
 
@@ -1227,8 +1184,6 @@ Public records and results are frozen dataclasses. Their fields cannot be reassi
 The dataclasses describe values returned by workflows and `Store`. Direct construction creates an in-memory value only; workflow functions and `Store` loading provide persistence and validation.
 
 Identifiers use a kind prefix followed by 32 lowercase hexadecimal characters. Timestamps are normalized UTC ISO 8601 strings with offsets.
-
-<a id="ocura_ossden"></a>
 
 ### `ocura_oss.Ledger`
 
@@ -1257,10 +1212,10 @@ Project-local state identity and default pathway.
 ```python
 Pathway(
     id: str,
-    den_id: str,
+    ledger_id: str,
     created_at: str,
     parent_pathway_id: str | None,
-    source_chokepoint_id: str | None,
+    source_branch_point_id: str | None,
     reason: str,
     parameters: Mapping[str, str],
 )
@@ -1273,18 +1228,14 @@ One lineage of declared parameters and recorded evidence.
 | Name | Type | Description |
 | --- | --- | --- |
 | `id` | string | Pathway identifier |
-| `ledger_id` | string | Preferred property for the owning ledger identifier |
-| `den_id` | string | Owning ledger identifier |
+| `ledger_id` | string | Owning ledger identifier |
 | `created_at` | string | UTC ISO 8601 creation timestamp |
 | `parent_pathway_id` | string or None | Parent for a branch; `None` on the default pathway |
-| `source_branch_point_id` | string or None | Preferred property for the source boundary |
-| `source_chokepoint_id` | string or None | Source boundary for a branch; `None` on the default pathway |
+| `source_branch_point_id` | string or None | Source boundary for a branch; `None` on the default pathway |
 | `reason` | string | Branch reason or `default pathway` |
 | `parameters` | mapping of string to string | Effective pathway parameters after inheritance and overrides |
 
 Parent and source fields are either both set or both `None`.
-
-<a id="ocura_ossatom"></a>
 
 ### `ocura_oss.RunRecord`
 
@@ -1348,7 +1299,7 @@ The six log fields are all set when `output_capture` is `OutputCapture.FULL` and
 Attempt(
     id: str,
     pathway_id: str,
-    chokepoint_id: str,
+    branch_point_id: str,
     started_at: str,
     declared_parameters: Mapping[str, str],
     command: tuple[str, ...],
@@ -1369,8 +1320,7 @@ One run that has started and is not yet finalized, as returned by `Store.list_at
 | `id` | string | Identifier of the run record this attempt becomes when finalized |
 | `run_id` | string | Descriptive property for `id` |
 | `pathway_id` | string | Pathway the run was started on |
-| `branch_point_id` | string | Preferred property for the reserved terminal boundary |
-| `chokepoint_id` | string | Identifier reserved for the run record's terminal branch point |
+| `branch_point_id` | string | Identifier reserved for the run record's terminal branch point |
 | `started_at` | string | UTC ISO 8601 start timestamp |
 | `declared_parameters` | mapping of string to string | Labels recorded for this run: its pathway's effective parameters with the run's own declarations laid over them |
 | `command` | tuple of strings | Executable and argument tokens, with `<masked>` at each masked position |
@@ -1421,8 +1371,8 @@ Size and lowercase SHA-256 digest of one file named for context capture.
 
 ```python
 RecoveredAttempt(
-    atom_id: str,
-    chokepoint_id: str,
+    run_id: str,
+    branch_point_id: str,
     pathway_id: str,
     action: RecoveryAction,
 )
@@ -1434,14 +1384,10 @@ One unfinished attempt closed by `recover()`.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `run_id` | string | Preferred property for the finalized run identifier |
-| `atom_id` | string | Compatible constructor field for the run identifier |
-| `branch_point_id` | string | Preferred property for the terminal boundary identifier |
-| `chokepoint_id` | string | That run record's terminal branch point |
+| `run_id` | string | Finalized run identifier |
+| `branch_point_id` | string | That run record's terminal branch point |
 | `pathway_id` | string | Pathway containing the run record |
 | `action` | `RecoveryAction` | What closing the attempt had to do |
-
-<a id="ocura_osschokepoint"></a>
 
 ### `ocura_oss.BranchPoint`
 
@@ -1449,7 +1395,7 @@ One unfinished attempt closed by `recover()`.
 BranchPoint(
     id: str,
     pathway_id: str,
-    atom_id: str,
+    run_id: str,
     created_at: str,
     kind: str,
     outcome: Outcome,
@@ -1463,12 +1409,11 @@ Terminal evidence boundary that can serve as a branch source.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `id` | string | BranchPoint identifier |
+| `id` | string | Branch point identifier |
 | `pathway_id` | string | Pathway shared with the source run record |
-| `run_id` | string | Preferred property for the source run identifier |
-| `atom_id` | string | Source run record identifier |
+| `run_id` | string | Source run record identifier |
 | `created_at` | string | UTC ISO 8601 creation timestamp |
-| `kind` | string | `terminal` in schema version 2 |
+| `kind` | string | `terminal` in schema version 3 |
 | `outcome` | `Outcome` | Outcome that must agree with the source run record |
 | `branchable` | boolean | Whether branching may use this boundary |
 
@@ -1477,7 +1422,7 @@ Terminal evidence boundary that can serve as a branch source.
 ```python
 Initialization(
     root: pathlib.Path,
-    den: Ledger,
+    ledger: Ledger,
     pathway: Pathway,
 )
 ```
@@ -1489,16 +1434,15 @@ State created by `initialize()`.
 | Name | Type | Description |
 | --- | --- | --- |
 | `root` | `pathlib.Path` | Resolved project root |
-| `ledger` | `Ledger` | Preferred property for the created ledger |
-| `den` | `Ledger` | Compatible constructor field and property |
+| `ledger` | `Ledger` | Created ledger |
 | `pathway` | `Pathway` | Created default pathway |
 
 ### `ocura_oss.RunExecution`
 
 ```python
 RunExecution(
-    atom: RunRecord,
-    chokepoint: BranchPoint,
+    record: RunRecord,
+    branch_point: BranchPoint,
     storage_warnings: tuple[str, ...] = (),
 )
 ```
@@ -1509,10 +1453,8 @@ Records produced by one command attempt.
 
 | Name | Type | Description |
 | --- | --- | --- |
-| `record` | `RunRecord` | Preferred property for the recorded attempt and log metadata |
-| `atom` | `RunRecord` | Compatible constructor field and property |
-| `branch_point` | `BranchPoint` | Preferred property for the terminal evidence boundary |
-| `chokepoint` | `BranchPoint` | Compatible constructor field and property |
+| `record` | `RunRecord` | Recorded attempt and log metadata |
+| `branch_point` | `BranchPoint` | Terminal evidence boundary |
 | `storage_warnings` | tuple of strings | Post-finalization compression errors or stop requests; actual command outcome remains recorded on the run record |
 
 ### `ocura_oss.RunSummary`
@@ -1580,7 +1522,7 @@ Removed source keys are outside the parameter-delta representation.
 ChildComparison(
     pathway_id: str,
     reason: str,
-    source_chokepoint_id: str,
+    source_branch_point_id: str,
     parameters: ParameterDelta,
     source_run: RunSummary,
     child_run: RunSummary | None,
@@ -1597,11 +1539,11 @@ Comparison of one child pathway with its source run.
 | --- | --- | --- |
 | `pathway_id` | string | Child pathway identifier |
 | `reason` | string | Recorded branch reason |
-| `source_chokepoint_id` | string | Shared source branch point |
+| `source_branch_point_id` | string | Shared source branch point |
 | `parameters` | `ParameterDelta` | Parent-to-child pathway parameter delta |
 | `source_run` | `RunSummary` | Source run record summary |
 | `child_run` | `RunSummary` or None | Newest child run record summary, or `None` when evidence is missing |
-| `run_parameters` | `ParameterDelta` or None | Source-atom-to-child-atom parameter delta when child evidence exists |
+| `run_parameters` | `ParameterDelta` or None | Source-run-to-child-run parameter delta when child evidence exists |
 | `missing_evidence` | boolean | Whether the child has no run record |
 
 #### Methods
@@ -1613,7 +1555,7 @@ Comparison of one child pathway with its source run.
 ```python
 ComparisonResult(
     state: ComparisonState,
-    source_chokepoint_id: str,
+    source_branch_point_id: str,
     source_pathway_id: str,
     source_run: RunSummary,
     children: tuple[ChildComparison, ...],
@@ -1627,7 +1569,7 @@ Comparison state and every child associated with one source branch point.
 | Name | Type | Description |
 | --- | --- | --- |
 | `state` | `ComparisonState` | Evidence completeness across children |
-| `source_chokepoint_id` | string | Selected source boundary |
+| `source_branch_point_id` | string | Selected source boundary |
 | `source_pathway_id` | string | Pathway containing the source run record |
 | `source_run` | `RunSummary` | Source run record summary |
 | `children` | tuple of `ChildComparison` | Child comparisons in creation order |
@@ -1641,8 +1583,8 @@ Comparison state and every child associated with one source branch point.
 ```python
 StateVerification(
     pathways: int,
-    atoms: int,
-    chokepoints: int,
+    run_records: int,
+    branch_points: int,
     logs_checked: int,
     problems: tuple[tuple[str, str], ...],
     running_attempts: tuple[str, ...] = (),
@@ -1659,10 +1601,8 @@ Result of verifying records and referenced logs under one state directory.
 | Name | Type | Description |
 | --- | --- | --- |
 | `pathways` | integer | Valid pathway records collected by the scan |
-| `run_records` | integer | Preferred property for valid run records collected by the scan |
-| `atoms` | integer | Compatible constructor field for the same count |
-| `branch_points` | integer | Preferred property for valid branch point records collected by the scan |
-| `chokepoints` | integer | Compatible constructor field for the same count |
+| `run_records` | integer | Valid run records collected by the scan |
+| `branch_points` | integer | Valid branch point records collected by the scan |
 | `logs_checked` | integer | Individual referenced logs that passed verification |
 | `problems` | tuple of pairs | `(record, problem)` entries collected during verification |
 | `running_attempts` | tuple of strings | Attempts a live process is still recording; not problems |
@@ -1827,7 +1767,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. This release reports `"0.7.0"`.
+Installed package version. This release reports `"0.8.0"`.
 
 ## Typing
 

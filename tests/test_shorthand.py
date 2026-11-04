@@ -47,7 +47,7 @@ class MissingStateTests(ShorthandTestCase):
     def test_every_state_command_names_init(self):
         empty = self.parent / "empty"
         empty.mkdir()
-        for command in ("pathways", "chokepoints", "compare", "verify", "manifest", "attempts"):
+        for command in ("pathways", "branch-points", "compare", "verify", "manifest", "attempts"):
             with self.subTest(command=command):
                 code, stdout, stderr = self.invoke(command, root=empty)
                 self.assertEqual(code, 2)
@@ -75,7 +75,7 @@ class MissingStateTests(ShorthandTestCase):
     def test_a_subdirectory_is_pointed_at_the_state_above_it(self):
         nested = self.root / "src" / "package"
         nested.mkdir(parents=True)
-        code, _stdout, stderr = self.invoke("chokepoints", root=nested)
+        code, _stdout, stderr = self.invoke("branch-points", root=nested)
         self.assertEqual(code, 2)
         self.assertIn(f"there is state under {self.root.resolve()}:", stderr)
         self.assertIn("use that as the root", stderr)
@@ -85,7 +85,7 @@ class MissingStateTests(ShorthandTestCase):
         Store(inner).initialize_state(name="inner")
         nested = inner / "deeper"
         nested.mkdir()
-        _code, _stdout, stderr = self.invoke("chokepoints", root=nested)
+        _code, _stdout, stderr = self.invoke("branch-points", root=nested)
         self.assertIn(f"there is state under {inner.resolve()}:", stderr)
 
     def test_an_incomplete_state_directory_is_not_answered_with_init(self):
@@ -93,7 +93,7 @@ class MissingStateTests(ShorthandTestCase):
         (broken / ".ocura-oss").mkdir(parents=True)
         code, _stdout, stderr = self.invoke("verify", root=broken)
         self.assertEqual(code, 2)
-        self.assertIn("exists but has no den record", stderr)
+        self.assertIn("exists but has no ledger record", stderr)
         self.assertNotIn("ocura-oss init", stderr)
 
     def test_the_python_api_raises_the_same_message(self):
@@ -107,43 +107,43 @@ class IdentifierPrefixTests(ShorthandTestCase):
     def setUp(self):
         super().setUp()
         self.baseline = self.run_json("--param", "count=1")
-        self.chokepoint = self.baseline["chokepoint_id"]
-        self.hex = self.chokepoint.removeprefix("chokepoint-")
+        self.branch_point = self.baseline["branch_point_id"]
+        self.hex = self.branch_point.removeprefix("branch-point-")
 
     def test_branch_accepts_bare_and_kind_word_prefixes(self):
-        for source in (self.hex[:4], self.hex[:12], f"chokepoint-{self.hex[:6]}", self.hex):
+        for source in (self.hex[:4], self.hex[:12], f"branch-point-{self.hex[:6]}", self.hex):
             with self.subTest(source=source):
                 child = self.invoke_json("branch", "--from", source, "--reason", "prefix")
-                self.assertEqual(child["source_chokepoint_id"], self.chokepoint)
+                self.assertEqual(child["source_branch_point_id"], self.branch_point)
 
     def test_run_accepts_a_pathway_prefix_and_records_the_full_id(self):
-        child = self.invoke_json("branch", "--from", self.chokepoint, "--reason", "prefix")
+        child = self.invoke_json("branch", "--from", self.branch_point, "--reason", "prefix")
         short = child["id"].removeprefix("pathway-")[:8]
         for pathway in (short, f"pathway-{short}"):
             with self.subTest(pathway=pathway):
                 result = self.run_json("--pathway", pathway)
                 self.assertEqual(result["pathway_id"], child["id"])
-                self.assertEqual(self.store.load_atom(result["atom_id"]).pathway_id, child["id"])
+                self.assertEqual(self.store.load_run(result["run_id"]).pathway_id, child["id"])
 
     def test_compare_accepts_a_prefix(self):
-        self.invoke_json("branch", "--from", self.chokepoint, "--reason", "prefix")
+        self.invoke_json("branch", "--from", self.branch_point, "--reason", "prefix")
         comparison = self.invoke_json("compare", "--from", self.hex[:8])
-        self.assertEqual(comparison["source_chokepoint_id"], self.chokepoint)
+        self.assertEqual(comparison["source_branch_point_id"], self.branch_point)
         self.assertEqual(comparison["state"], "partial")
 
     def test_text_output_shows_the_full_id(self):
         code, stdout, _stderr = self.invoke("branch", "--from", self.hex[:8], "--reason", "prefix")
         self.assertEqual(code, 0)
-        self.assertIn(f"source branch point: {self.chokepoint}", stdout)
+        self.assertIn(f"source branch point: {self.branch_point}", stdout)
 
     def test_too_short_or_malformed_prefixes_are_rejected_before_any_write(self):
         other_kind = self.baseline["pathway_id"]
-        for source in (self.hex[:3], "", self.hex[:8].upper() + "G", "chokepoint-", other_kind):
+        for source in (self.hex[:3], "", self.hex[:8].upper() + "G", "branch-point-", other_kind):
             with self.subTest(source=source):
                 code, stdout, stderr = self.invoke("branch", "--from", source, "--reason", "no")
                 self.assertEqual(code, 2)
                 self.assertEqual(stdout, "")
-                self.assertIn("malformed chokepoint identifier", stderr)
+                self.assertIn("malformed branch point identifier", stderr)
                 self.assertIn("at least 4 of its leading hexadecimal characters", stderr)
         self.assertEqual(len(self.store.list_pathways()), 1)
 
@@ -151,23 +151,23 @@ class IdentifierPrefixTests(ShorthandTestCase):
         absent = "0000" if not self.hex.startswith("0000") else "1111"
         code, _stdout, stderr = self.invoke("compare", "--from", absent)
         self.assertEqual(code, 2)
-        self.assertIn(f"no chokepoint identifier starts with chokepoint-{absent}", stderr)
+        self.assertIn(f"no branch point identifier starts with branch-point-{absent}", stderr)
 
     def test_a_pathway_prefix_that_matches_nothing_launches_nothing(self):
         absent = "0000" if not self.baseline["pathway_id"].startswith("pathway-0000") else "1111"
         code, _stdout, stderr = self.invoke("run", "--pathway", absent, "--", *PASS)
         self.assertEqual(code, 2)
         self.assertIn(f"no pathway identifier starts with pathway-{absent}", stderr)
-        self.assertEqual(len(self.store.list_atoms()), 1)
+        self.assertEqual(len(self.store.list_run_records()), 1)
 
     def test_files_that_are_not_records_do_not_count_as_matches(self):
-        stray = self.store.chokepoints_dir / f"chokepoint-{self.hex[:8]}-copy.json"
+        stray = self.store.branch_points_dir / f"branch-point-{self.hex[:8]}-copy.json"
         stray.write_text("{}", encoding="utf-8")
-        self.assertEqual(self.store.resolve_id(self.hex[:8], "chokepoint"), self.chokepoint)
+        self.assertEqual(self.store.resolve_id(self.hex[:8], "branch_point"), self.branch_point)
 
     def test_a_full_id_is_returned_without_looking_it_up(self):
-        unknown = "chokepoint-" + "0" * 32
-        self.assertEqual(self.store.resolve_id(unknown, "chokepoint"), unknown)
+        unknown = "branch-point-" + "0" * 32
+        self.assertEqual(self.store.resolve_id(unknown, "branch_point"), unknown)
         code, _stdout, stderr = self.invoke("branch", "--from", unknown, "--reason", "no")
         self.assertEqual(code, 2)
         self.assertNotIn("starts with", stderr)
@@ -178,34 +178,34 @@ class AmbiguousPrefixTests(ShorthandTestCase):
         numbers = itertools.count(1)
 
         def shared_prefix(kind):
-            return f"{kind}-abcd{next(numbers):028x}"
+            return f"{model.ID_PREFIXES[kind]}-abcd{next(numbers):028x}"
 
         with mock.patch.object(model, "make_id", side_effect=shared_prefix):
-            return [self.run_json()["chokepoint_id"] for _ in range(count)]
+            return [self.run_json()["branch_point_id"] for _ in range(count)]
 
     def test_an_ambiguous_prefix_lists_its_matches_and_writes_nothing(self):
         first, second = self.record_runs(2)
         code, stdout, stderr = self.invoke("branch", "--from", "abcd", "--reason", "no")
         self.assertEqual(code, 2)
         self.assertEqual(stdout, "")
-        self.assertIn("chokepoint identifier prefix chokepoint-abcd is ambiguous", stderr)
+        self.assertIn("branch point identifier prefix branch-point-abcd is ambiguous", stderr)
         self.assertIn(f"it matches 2 records: {first}, {second}", stderr)
         self.assertEqual(len(self.store.list_pathways()), 1)
 
     def test_a_longer_prefix_settles_it(self):
         first, second = self.record_runs(2)
-        for chokepoint in (first, second):
+        for branch_point in (first, second):
             child = self.invoke_json(
-                "branch", "--from", chokepoint.removeprefix("chokepoint-"), "--reason", "exact"
+                "branch", "--from", branch_point.removeprefix("branch-point-"), "--reason", "exact"
             )
-            self.assertEqual(child["source_chokepoint_id"], chokepoint)
+            self.assertEqual(child["source_branch_point_id"], branch_point)
 
     def test_a_long_list_of_matches_is_cut_short(self):
-        chokepoints = self.record_runs(7)
-        _code, _stdout, stderr = self.invoke("compare", "--from", "chokepoint-abcd")
+        branch_points = self.record_runs(7)
+        _code, _stdout, stderr = self.invoke("compare", "--from", "branch-point-abcd")
         self.assertIn("it matches 7 records:", stderr)
-        self.assertIn(", ".join(chokepoints[:5]) + ", and 2 more", stderr)
-        self.assertNotIn(chokepoints[5], stderr)
+        self.assertIn(", ".join(branch_points[:5]) + ", and 2 more", stderr)
+        self.assertNotIn(branch_points[5], stderr)
 
 
 class InheritedParameterTests(ShorthandTestCase):
@@ -215,7 +215,7 @@ class InheritedParameterTests(ShorthandTestCase):
         self.child = self.invoke_json(
             "branch",
             "--from",
-            self.baseline["chokepoint_id"],
+            self.baseline["branch_point_id"],
             "--reason",
             "try count 2",
             "--param",
@@ -225,7 +225,7 @@ class InheritedParameterTests(ShorthandTestCase):
         )
 
     def labels(self, result):
-        return dict(self.store.load_atom(result["atom_id"]).declared_parameters)
+        return dict(self.store.load_run(result["run_id"]).declared_parameters)
 
     def test_a_run_on_a_branch_records_the_branch_parameters(self):
         result = self.run_json("--pathway", self.child["id"])
@@ -256,7 +256,7 @@ class InheritedParameterTests(ShorthandTestCase):
         grandchild = self.invoke_json(
             "branch",
             "--from",
-            child_run["chokepoint_id"],
+            child_run["branch_point_id"],
             "--reason",
             "deeper",
             "--param",
@@ -269,7 +269,7 @@ class InheritedParameterTests(ShorthandTestCase):
         marked = self.invoke_json(
             "branch",
             "--from",
-            self.baseline["chokepoint_id"],
+            self.baseline["branch_point_id"],
             "--reason",
             "marked",
             "--param",
@@ -287,17 +287,17 @@ class InheritedParameterTests(ShorthandTestCase):
         execution = ocura_oss.run(
             list(PASS), root=self.root, pathway_id=self.child["id"], parameters={"rate": "0.5"}
         )
-        self.assertEqual(execution.atom.declared_parameters, {"count": "2", "rate": "0.5"})
+        self.assertEqual(execution.record.declared_parameters, {"count": "2", "rate": "0.5"})
 
     def test_an_unfinished_attempt_carries_the_inherited_parameters(self):
         seen = {}
-        original = Store._save_atom
+        original = Store._save_run
 
-        def capture(store, atom):
+        def capture(store, record):
             seen.update(store.list_attempts()[0][0].declared_parameters)
-            return original(store, atom)
+            return original(store, record)
 
-        with mock.patch.object(Store, "_save_atom", capture):
+        with mock.patch.object(Store, "_save_run", capture):
             self.run_json("--pathway", self.child["id"])
         self.assertEqual(seen, {"count": "2", "rate": "0.1"})
 

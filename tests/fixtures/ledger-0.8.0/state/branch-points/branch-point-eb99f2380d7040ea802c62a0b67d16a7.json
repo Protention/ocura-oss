@@ -1,0 +1,17 @@
+{
+  "schema_version": 3,
+  "kind": "branch_point",
+  "payload": {
+    "id": "branch-point-eb99f2380d7040ea802c62a0b67d16a7",
+    "pathway_id": "pathway-1ac386d75d104e4abb977fd43ea0bb55",
+    "run_id": "run-869bc8340bf043569f61d779a0beccfa",
+    "created_at": "2026-10-07T23:31:45.587177+00:00",
+    "kind": "terminal",
+    "outcome": "passed",
+    "branchable": true
+  },
+  "checksum": {
+    "algorithm": "sha256",
+    "value": "23976b9900c994802b2c9e69ee8002f2a7cb7d67f935b4d25e7efedab86c0b44"
+  }
+}

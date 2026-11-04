@@ -238,24 +238,26 @@ class RunningAttemptTests(JournalTestCase):
 
         ((attempt, state),) = seen["attempts"]
         self.assertIs(state, model.AttemptState.RUNNING)
-        self.assertEqual(attempt.id, execution.atom.id)
-        self.assertEqual(attempt.chokepoint_id, execution.chokepoint.id)
+        self.assertEqual(attempt.id, execution.record.id)
+        self.assertEqual(attempt.branch_point_id, execution.branch_point.id)
         self.assertEqual(attempt.pathway_id, self.pathway.id)
-        self.assertEqual(attempt.started_at, execution.atom.started_at)
+        self.assertEqual(attempt.started_at, execution.record.started_at)
         self.assertEqual(attempt.command, (model.MASKED_ARGUMENT,))
         self.assertEqual(attempt.masked_arguments, (0,))
         self.assertEqual(attempt.declared_parameters, {"label": "value"})
-        self.assertEqual(attempt.stdout_log, execution.atom.stdout_log)
+        self.assertEqual(attempt.stdout_log, execution.record.stdout_log)
 
         report = seen["report"]
         self.assertTrue(report.ok, report.problems)
-        self.assertEqual(report.running_attempts, (execution.atom.id,))
+        self.assertEqual(report.running_attempts, (execution.record.id,))
         self.assertEqual(report.abandoned_attempts, ())
-        self.assertEqual(report.atoms, 0)
+        self.assertEqual(report.run_records, 0)
         self.assertEqual(report.logs_checked, 0)
 
         self.assertEqual(seen["recovered"], (), "a running attempt must be left alone")
-        self.assertEqual(seen["files"], [f"{execution.atom.id}.json", f"{execution.atom.id}.lock"])
+        self.assertEqual(
+            seen["files"], [f"{execution.record.id}.json", f"{execution.record.id}.lock"]
+        )
 
     def test_finalized_run_leaves_no_journal_entry(self):
         execution = self.run_command([sys.executable, "-c", "print('done')"])
@@ -265,7 +267,7 @@ class RunningAttemptTests(JournalTestCase):
         self.assertTrue(report.ok, report.problems)
         self.assertEqual((report.running_attempts, report.abandoned_attempts), ((), ()))
         self.assertEqual(self.store.recover(), ())
-        self.assertEqual(self.store.load_atom(execution.atom.id), execution.atom)
+        self.assertEqual(self.store.load_run(execution.record.id), execution.record)
 
     def test_log_creation_failure_leaves_no_attempt(self):
         self.store.logs_dir.rmdir()
@@ -274,7 +276,7 @@ class RunningAttemptTests(JournalTestCase):
             self.run_command([sys.executable, "-c", "pass"])
         self.assertIn("cannot create log files", str(ctx.exception))
         self.assertEqual(self.attempt_files(), [])
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
 
 
 class AbandonedAttemptTests(JournalTestCase):
@@ -340,7 +342,7 @@ class AbandonedAttemptTests(JournalTestCase):
             (recovered,) = self.store.recover()
         finally:
             timer.join()
-        self.assertEqual(recovered.atom_id, attempt.id)
+        self.assertEqual(recovered.run_id, attempt.id)
         self.assertIs(recovered.action, model.RecoveryAction.ABANDONED)
         self.assertEqual(self.attempt_files(), [])
         self.assertTrue(self.store.verify_state().ok)
@@ -351,36 +353,36 @@ class AbandonedAttemptTests(JournalTestCase):
             self.assertEqual(self.store.recover(), ())
             self.assertEqual(self.store.verify_state().abandoned_attempts, (attempt.id,))
         (recovered,) = self.store.recover()
-        self.assertEqual(recovered.atom_id, attempt.id)
+        self.assertEqual(recovered.run_id, attempt.id)
 
-    def test_recovery_records_an_abandoned_atom_without_inventing_an_outcome(self):
+    def test_recovery_records_an_abandoned_run_without_inventing_an_outcome(self):
         attempt = self.abandon(output=b"partial output\n")
         (recovered,) = self.store.recover()
         self.assertIs(recovered.action, model.RecoveryAction.ABANDONED)
-        self.assertEqual(recovered.atom_id, attempt.id)
-        self.assertEqual(recovered.chokepoint_id, attempt.chokepoint_id)
+        self.assertEqual(recovered.run_id, attempt.id)
+        self.assertEqual(recovered.branch_point_id, attempt.branch_point_id)
         self.assertEqual(recovered.pathway_id, self.pathway.id)
 
-        atom = self.store.load_atom(attempt.id)
-        self.assertIs(atom.outcome, model.Outcome.ABANDONED)
-        self.assertIsNone(atom.finished_at)
-        self.assertIsNone(atom.duration_seconds)
-        self.assertIsNone(atom.return_code)
-        self.assertIsNone(atom.launch_error_category)
-        self.assertEqual(atom.started_at, attempt.started_at)
-        self.assertEqual(atom.command, attempt.command)
-        self.assertEqual(atom.declared_parameters, {"label": "value"})
-        self.assertEqual(self.store.read_verified_log(atom.id), b"partial output\n")
-        self.assertEqual(self.store.read_verified_log(atom.id, stream="stderr"), b"")
+        record = self.store.load_run(attempt.id)
+        self.assertIs(record.outcome, model.Outcome.ABANDONED)
+        self.assertIsNone(record.finished_at)
+        self.assertIsNone(record.duration_seconds)
+        self.assertIsNone(record.return_code)
+        self.assertIsNone(record.launch_error_category)
+        self.assertEqual(record.started_at, attempt.started_at)
+        self.assertEqual(record.command, attempt.command)
+        self.assertEqual(record.declared_parameters, {"label": "value"})
+        self.assertEqual(self.store.read_verified_log(record.id), b"partial output\n")
+        self.assertEqual(self.store.read_verified_log(record.id, stream="stderr"), b"")
 
-        chokepoint = self.store.load_chokepoint(attempt.chokepoint_id)
-        self.assertIs(chokepoint.outcome, model.Outcome.ABANDONED)
-        self.assertTrue(chokepoint.branchable)
+        branch_point = self.store.load_branch_point(attempt.branch_point_id)
+        self.assertIs(branch_point.outcome, model.Outcome.ABANDONED)
+        self.assertTrue(branch_point.branchable)
 
         self.assertEqual(self.attempt_files(), [])
         report = self.store.verify_state()
         self.assertTrue(report.ok, report.problems)
-        self.assertEqual((report.atoms, report.chokepoints, report.logs_checked), (1, 1, 2))
+        self.assertEqual((report.run_records, report.branch_points, report.logs_checked), (1, 1, 2))
         self.assertEqual(self.store.recover(), ())
 
     def test_recovery_creates_logs_the_recorder_never_opened(self):
@@ -388,29 +390,29 @@ class AbandonedAttemptTests(JournalTestCase):
         for relative in (attempt.stdout_log, attempt.stderr_log):
             (self.store.root / relative).unlink()
         self.store.recover()
-        atom = self.store.load_atom(attempt.id)
-        self.assertEqual((atom.stdout_bytes, atom.stderr_bytes), (0, 0))
+        record = self.store.load_run(attempt.id)
+        self.assertEqual((record.stdout_bytes, record.stderr_bytes), (0, 0))
         self.assertTrue(self.store.verify_state().ok)
 
     def test_recovery_of_an_uncaptured_attempt_records_no_logs(self):
         attempt = self.abandon(capture=False)
         self.assertIsNone(attempt.stdout_log)
         self.store.recover()
-        atom = self.store.load_atom(attempt.id)
-        self.assertIs(atom.outcome, model.Outcome.ABANDONED)
-        self.assertIs(atom.output_capture, model.OutputCapture.NONE)
-        self.assertIsNone(atom.stdout_sha256)
+        record = self.store.load_run(attempt.id)
+        self.assertIs(record.outcome, model.Outcome.ABANDONED)
+        self.assertIs(record.output_capture, model.OutputCapture.NONE)
+        self.assertIsNone(record.stdout_sha256)
         self.assertEqual(list(self.store.logs_dir.iterdir()), [])
         self.assertTrue(self.store.verify_state().ok)
 
     def test_abandoned_run_can_be_branched_and_compared(self):
         baseline = self.run_command([sys.executable, "-c", "pass"])
-        child = ocura_oss.branch(baseline.chokepoint.id, root=self.store.root, reason="try again")
+        child = ocura_oss.branch(baseline.branch_point.id, root=self.store.root, reason="try again")
         self.pathway = child
         self.abandon()
         self.store.recover()
 
-        comparison = ocura_oss.compare(baseline.chokepoint.id, root=self.store.root)
+        comparison = ocura_oss.compare(baseline.branch_point.id, root=self.store.root)
         self.assertIs(comparison.state, model.ComparisonState.READY)
         child_run = comparison.children[0].child_run
         self.assertIs(child_run.outcome, model.Outcome.ABANDONED)
@@ -420,25 +422,25 @@ class AbandonedAttemptTests(JournalTestCase):
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             code = cli.main(
-                ["compare", "--root", str(self.store.root), "--from", baseline.chokepoint.id]
+                ["compare", "--root", str(self.store.root), "--from", baseline.branch_point.id]
             )
         self.assertEqual(code, 0)
         self.assertIn("child run: abandoned (duration unknown)", stdout.getvalue())
 
         retry = ocura_oss.branch(
-            self.store.list_chokepoints()[0].id, root=self.store.root, reason="after abandonment"
+            self.store.list_branch_points()[0].id, root=self.store.root, reason="after abandonment"
         )
         self.assertEqual(retry.parent_pathway_id, child.id)
 
-    def test_recorder_stopped_between_atom_and_chokepoint_is_completed(self):
+    def test_recorder_stopped_between_run_and_branch_point_is_completed(self):
         with (
-            mock.patch.object(Store, "_save_chokepoint", side_effect=KeyboardInterrupt),
+            mock.patch.object(Store, "_save_branch_point", side_effect=KeyboardInterrupt),
             self.assertRaises(KeyboardInterrupt),
         ):
             self.run_command([sys.executable, "-c", "import sys; sys.exit(4)"])
         ((attempt, state),) = self.store.list_attempts()
         self.assertIs(state, model.AttemptState.ABANDONED)
-        self.assertEqual(self.store.load_atom(attempt.id).return_code, 4)
+        self.assertEqual(self.store.load_run(attempt.id).return_code, 4)
 
         report = self.store.verify_state()
         self.assertEqual(
@@ -447,26 +449,26 @@ class AbandonedAttemptTests(JournalTestCase):
 
         (recovered,) = self.store.recover()
         self.assertIs(recovered.action, model.RecoveryAction.COMPLETED)
-        atom = self.store.load_atom(attempt.id)
-        self.assertIs(atom.outcome, model.Outcome.FAILED, "the recorded outcome must be kept")
-        chokepoint = self.store.load_chokepoint(attempt.chokepoint_id)
-        self.assertIs(chokepoint.outcome, model.Outcome.FAILED)
-        self.assertEqual(chokepoint.created_at, atom.finished_at)
+        record = self.store.load_run(attempt.id)
+        self.assertIs(record.outcome, model.Outcome.FAILED, "the recorded outcome must be kept")
+        branch_point = self.store.load_branch_point(attempt.branch_point_id)
+        self.assertIs(branch_point.outcome, model.Outcome.FAILED)
+        self.assertEqual(branch_point.created_at, record.finished_at)
         self.assertTrue(self.store.verify_state().ok)
 
-    def test_recorder_stopped_after_the_chokepoint_is_cleared(self):
+    def test_recorder_stopped_after_the_branch_point_is_cleared(self):
         with (
             mock.patch.object(Store, "_remove_attempt", side_effect=KeyboardInterrupt),
             self.assertRaises(KeyboardInterrupt),
         ):
             self.run_command([sys.executable, "-c", "pass"])
         ((attempt, _state),) = self.store.list_attempts()
-        before = self.store.load_chokepoint(attempt.chokepoint_id)
+        before = self.store.load_branch_point(attempt.branch_point_id)
 
         (recovered,) = self.store.recover()
         self.assertIs(recovered.action, model.RecoveryAction.CLEARED)
-        self.assertEqual(self.store.load_chokepoint(attempt.chokepoint_id), before)
-        self.assertIs(self.store.load_atom(attempt.id).outcome, model.Outcome.PASSED)
+        self.assertEqual(self.store.load_branch_point(attempt.branch_point_id), before)
+        self.assertIs(self.store.load_run(attempt.id).outcome, model.Outcome.PASSED)
         self.assertEqual(self.attempt_files(), [])
         self.assertTrue(self.store.verify_state().ok)
 
@@ -523,7 +525,7 @@ class AbandonedAttemptTests(JournalTestCase):
                 self.assertEqual(report.abandoned_attempts, abandoned)
 
     def test_stray_lock_file_is_ignored_by_verification_and_removed_by_recovery(self):
-        stray = self.store.attempts_dir / f"{model.make_id('atom')}.lock"
+        stray = self.store.attempts_dir / f"{model.make_id('run')}.lock"
         stray.write_bytes(b"")
         self.assertTrue(self.store.verify_state().ok)
         self.assertEqual(self.store.list_attempts(), [])
@@ -535,30 +537,30 @@ class AbandonedAttemptTests(JournalTestCase):
             Store(Path(self._temporary.name) / "elsewhere").recover()
 
 
-class ChokepointCompletenessTests(JournalTestCase):
-    def test_atom_without_a_chokepoint_is_a_problem(self):
+class BranchPointCompletenessTests(JournalTestCase):
+    def test_run_without_a_branch_point_is_a_problem(self):
         execution = self.run_command([sys.executable, "-c", "pass"])
-        (self.store.chokepoints_dir / f"{execution.chokepoint.id}.json").unlink()
+        (self.store.branch_points_dir / f"{execution.branch_point.id}.json").unlink()
         report = self.store.verify_state()
         self.assertEqual(
-            report.problems, ((f"{execution.atom.id}.json", "atom has no terminal chokepoint"),)
+            report.problems, ((f"{execution.record.id}.json", "run has no terminal branch point"),)
         )
 
-    def test_atom_with_two_chokepoints_is_a_problem(self):
+    def test_run_with_two_branch_points_is_a_problem(self):
         execution = self.run_command([sys.executable, "-c", "pass"])
-        duplicate = model.Chokepoint(
-            id=model.make_id("chokepoint"),
-            pathway_id=execution.chokepoint.pathway_id,
-            atom_id=execution.atom.id,
-            created_at=execution.chokepoint.created_at,
+        duplicate = model.BranchPoint(
+            id=model.make_id("branch_point"),
+            pathway_id=execution.branch_point.pathway_id,
+            run_id=execution.record.id,
+            created_at=execution.branch_point.created_at,
             kind=model.TERMINAL_KIND,
-            outcome=execution.chokepoint.outcome,
+            outcome=execution.branch_point.outcome,
             branchable=True,
         )
-        self.store._save_chokepoint(duplicate)
+        self.store._save_branch_point(duplicate)
         report = self.store.verify_state()
         self.assertEqual(
-            report.problems, ((f"{execution.atom.id}.json", "atom has 2 chokepoints"),)
+            report.problems, ((f"{execution.record.id}.json", "run has 2 branch points"),)
         )
 
 
@@ -665,17 +667,17 @@ class KilledRecorderTests(ProcessTestCase):
             {
                 "recovered": [
                     {
-                        "atom_id": attempt.id,
-                        "chokepoint_id": attempt.chokepoint_id,
+                        "run_id": attempt.id,
+                        "branch_point_id": attempt.branch_point_id,
                         "pathway_id": attempt.pathway_id,
                         "action": "abandoned",
                     }
                 ]
             },
         )
-        atom = self.store.load_atom(attempt.id)
-        self.assertIs(atom.outcome, model.Outcome.ABANDONED)
-        self.assertEqual(int(self.store.read_verified_log(atom.id)), command_pid)
+        record = self.store.load_run(attempt.id)
+        self.assertIs(record.outcome, model.Outcome.ABANDONED)
+        self.assertEqual(int(self.store.read_verified_log(record.id)), command_pid)
         self.assertEqual(self.invoke("verify", "--json").returncode, 0)
         self.assertEqual(self.invoke("recover").stdout, "recovered: 0\n")
 
@@ -714,13 +716,13 @@ class ConcurrentRecordingTests(ProcessTestCase):
             self.assertTrue(report.ok, report.problems)
         self.assertTrue(any(report.running_attempts for report in reports))
         self.assertEqual([recorder.returncode for recorder in recorders], [0] * 6)
-        atom_ids = {json.loads(stdout)["atom_id"] for stdout, _stderr in results}
-        self.assertEqual(len(atom_ids), 6)
+        run_ids = {json.loads(stdout)["run_id"] for stdout, _stderr in results}
+        self.assertEqual(len(run_ids), 6)
 
         final = self.store.verify_state()
         self.assertTrue(final.ok, final.problems)
         self.assertEqual(
-            (final.atoms, final.chokepoints, final.logs_checked, final.running_attempts),
+            (final.run_records, final.branch_points, final.logs_checked, final.running_attempts),
             (6, 6, 12, ()),
         )
         self.assertEqual(list(self.store.attempts_dir.iterdir()), [])
@@ -732,7 +734,7 @@ class ConcurrentRecordingTests(ProcessTestCase):
         codes = sorted(item.returncode for item in initializers)
         self.assertEqual(codes, [0, 2, 2, 2], results)
         (winner,) = [json.loads(out) for out, _err in results if out.strip()]
-        self.assertEqual(Store(root).load_den().id, winner["den_id"])
+        self.assertEqual(Store(root).load_ledger().id, winner["ledger_id"])
         self.assertTrue(Store(root).verify_state().ok)
 
 

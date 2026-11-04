@@ -48,8 +48,8 @@ class StateVerification:
     """
 
     pathways: int
-    atoms: int
-    chokepoints: int
+    run_records: int
+    branch_points: int
     logs_checked: int
     problems: tuple[tuple[str, str], ...]
     running_attempts: tuple[str, ...] = ()
@@ -61,54 +61,34 @@ class StateVerification:
     def ok(self) -> bool:
         return not self.problems
 
-    @property
-    def run_records(self) -> int:
-        return self.atoms
-
-    @property
-    def branch_points(self) -> int:
-        return self.chokepoints
-
 
 @dataclass(frozen=True)
 class RecoveredAttempt:
     """One unfinished attempt closed by :meth:`Store.recover`."""
 
-    atom_id: str
-    chokepoint_id: str
+    run_id: str
+    branch_point_id: str
     pathway_id: str
     action: model.RecoveryAction
-
-    @property
-    def run_id(self) -> str:
-        return self.atom_id
-
-    @property
-    def branch_point_id(self) -> str:
-        return self.chokepoint_id
 
 
 @dataclass(frozen=True)
 class LogStorageChange:
     """The result of considering one finalized stream for a storage change."""
 
-    atom_id: str
+    run_id: str
     stream: str
     action: str
     original_bytes: int
     stored_bytes: int
     path: str
 
-    @property
-    def run_id(self) -> str:
-        return self.atom_id
-
 
 @dataclass(frozen=True)
 class LogInfo:
     """Verified content identity and readable metadata, without log contents."""
 
-    atom_id: str
+    run_id: str
     stream: str
     outcome: str
     started_at: str
@@ -119,24 +99,16 @@ class LogInfo:
     fingerprint: str
     path: str
 
-    @property
-    def run_id(self) -> str:
-        return self.atom_id
-
 
 @dataclass(frozen=True)
 class ListedRun:
-    """One finalized run and the terminal chokepoint a branch can start from."""
+    """One finalized run and the terminal branch point a branch can start from."""
 
-    chokepoint_id: str
+    branch_point_id: str
     run: model.RunSummary
 
-    @property
-    def branch_point_id(self) -> str:
-        return self.chokepoint_id
-
     def to_dict(self) -> dict:
-        return {**self.run.to_dict(), "chokepoint_id": self.chokepoint_id}
+        return {**self.run.to_dict(), "branch_point_id": self.branch_point_id}
 
 
 @dataclass(frozen=True)
@@ -163,31 +135,23 @@ class RunPage:
 
 @dataclass(frozen=True)
 class RunInspection:
-    """One validated run, its pathway and chokepoint, and the branches made from it."""
+    """One validated run, its pathway and branch point, and the branches made from it."""
 
-    atom: model.Atom
+    record: model.RunRecord
     pathway: model.Pathway
-    chokepoint: model.Chokepoint | None
+    branch_point: model.BranchPoint | None
     children: tuple[model.Pathway, ...]
 
-    @property
-    def record(self) -> model.RunRecord:
-        return self.atom
-
-    @property
-    def branch_point(self) -> model.BranchPoint | None:
-        return self.chokepoint
-
     def to_dict(self, *, include_command: bool = False) -> dict:
-        payload = model.atom_to_payload(self.atom)
+        payload = model.run_to_payload(self.record)
         if not include_command:
             payload.pop("command")
             payload.pop("masked_arguments")
-        point = self.chokepoint
+        point = self.branch_point
         return {
-            "atom": payload,
+            "run": payload,
             "pathway": model.pathway_to_payload(self.pathway),
-            "chokepoint": None if point is None else model.chokepoint_to_payload(point),
+            "branch_point": None if point is None else model.branch_point_to_payload(point),
             "children": [model.pathway_to_payload(child) for child in self.children],
             "verification": {"scope": "record_and_lineage", "logs_checked": 0},
         }
@@ -215,29 +179,34 @@ class Store:
         self._unlocked_reads = False
         self.state_dir = self.root / STATE_DIR_NAME
         self.pathways_dir = self.state_dir / "pathways"
-        self.atoms_dir = self.state_dir / "atoms"
-        self.chokepoints_dir = self.state_dir / "chokepoints"
+        self.runs_dir = self.state_dir / "runs"
+        self.branch_points_dir = self.state_dir / "branch-points"
         self.attempts_dir = self.state_dir / "attempts"
         self.logs_dir = self.state_dir / "logs"
-        self.den_path = self.state_dir / "den.json"
+        self.ledger_path = self.state_dir / "ledger.json"
 
     def exists(self) -> bool:
         """Return whether the state directory exists."""
         return self.state_dir.exists()
 
     def require(self) -> None:
-        """Require an initialized den under this project root."""
+        """Require an initialized ledger under this project root."""
         self._check_archive()
-        if self.den_path.is_file():
+        if self.ledger_path.is_file():
             return
+        old_record = self.state_dir / "den.json"
+        if old_record.is_file():
+            # Releases before 0.8 named the ledger record den.json.
+            self._read_envelope(old_record, "ledger")
         missing = f"no Ocura OSS state found under {self.root}"
         if self.state_dir.exists():
             raise StoreError(
-                f"{missing}: {STATE_DIR_NAME}/ exists but has no den record", code="invalid_state"
+                f"{missing}: {STATE_DIR_NAME}/ exists but has no ledger record",
+                code="invalid_state",
             )
         for parent in self.root.parents:
             # os.path.isfile reports an unreadable ancestor as absent on every Python.
-            if os.path.isfile(parent / STATE_DIR_NAME / "den.json"):
+            if os.path.isfile(parent / STATE_DIR_NAME / "ledger.json"):
                 raise StoreError(
                     f"{missing}; there is state under {parent}: use that as the root,"
                     " or run `ocura-oss init` to create new state here",
@@ -259,9 +228,7 @@ class Store:
         if self.archive:
             raise StoreError("archive mode does not permit ledger changes")
 
-    def resolve_id(
-        self, value: str, kind: Literal["pathway", "atom", "chokepoint", "run", "branch_point"]
-    ) -> str:
+    def resolve_id(self, value: str, kind: Literal["pathway", "run", "branch_point"]) -> str:
         """Return the full identifier that *value* names.
 
         A full identifier is returned as given, whether or not its record
@@ -269,75 +236,52 @@ class Store:
         leading hexadecimal characters, with or without the kind word, and
         must match exactly one stored record of that kind.
         """
-        storage_kind = {"run": "atom", "branch_point": "chokepoint"}.get(kind, kind)
-        if model.is_valid_id(value, storage_kind):
+        if model.is_valid_id(value, kind):
             return value
-        stem = model.id_stem(value, storage_kind)
+        stem = model.id_stem(value, kind)
         if stem is None:
             raise StoreError(
-                f"malformed {storage_kind} identifier: {value!r}; give the full id or at least"
+                f"malformed {_label(kind)} identifier: {value!r}; give the full id or at least"
                 f" {model.ID_PREFIX_MIN} of its leading hexadecimal characters",
                 code="invalid_input",
             )
         matches = sorted(
             path.stem
-            for path in self._dir_for(f"{storage_kind}s").glob(f"{stem}*.json")
-            if model.is_valid_id(path.stem, storage_kind)
+            for path in self._kind_dir(kind).glob(f"{stem}*.json")
+            if model.is_valid_id(path.stem, kind)
         )
         if len(matches) == 1:
             return matches[0]
         if not matches:
             raise StoreError(
-                f"no {storage_kind} identifier starts with {stem}", code="record_not_found"
+                f"no {_label(kind)} identifier starts with {stem}", code="record_not_found"
             )
         shown = ", ".join(matches[:_SHOWN_MATCHES])
         if len(matches) > _SHOWN_MATCHES:
             shown += f", and {len(matches) - _SHOWN_MATCHES} more"
         raise StoreError(
-            f"{storage_kind} identifier prefix {stem} is ambiguous; it matches"
+            f"{_label(kind)} identifier prefix {stem} is ambiguous; it matches"
             f" {len(matches)} records: {shown}",
             code="ambiguous_id",
         )
 
-    def load_den(self) -> model.Den:
-        """Load and validate the den record."""
-        payload = self._read_envelope(self.den_path, "den")
-        try:
-            return model.den_from_payload(payload)
-        except model.ValidationError as exc:
-            raise StoreError(f"invalid den record den.json: {exc}", code="integrity_error") from exc
-
     def load_ledger(self) -> model.Ledger:
-        """Load the ledger identity, preserving its schema-2 representation."""
-        return self.load_den()
-
-    def load_run(self, run_id: str) -> model.RunRecord:
-        """Load a run record and validate its lineage."""
-        return self.load_atom(run_id)
-
-    def load_branch_point(self, branch_point_id: str) -> model.BranchPoint:
-        """Load a terminal evidence boundary and validate its lineage."""
-        return self.load_chokepoint(branch_point_id)
-
-    def list_run_records(self) -> list[model.RunRecord]:
-        """List run records with the same validation and order as list_atoms."""
-        return self.list_atoms()
-
-    def list_branch_points(self) -> list[model.BranchPoint]:
-        """List terminal evidence boundaries in reverse creation order."""
-        return self.list_chokepoints()
-
-    def verify_run_evidence(self, record: model.RunRecord) -> None:
-        """Verify the output streams retained by a run record."""
-        self.verify_atom_evidence(record)
+        """Load and validate the ledger record."""
+        payload = self._read_envelope(self.ledger_path, "ledger")
+        try:
+            return model.ledger_from_payload(payload)
+        except model.ValidationError as exc:
+            raise StoreError(
+                f"invalid ledger record ledger.json: {exc}", code="integrity_error"
+            ) from exc
 
     def load_pathway(self, pathway_id: str) -> model.Pathway:
-        """Load a pathway and validate its den and lineage references."""
+        """Load a pathway and validate its ledger and lineage references."""
         return self._load_pathway(pathway_id, frozenset(), {})
 
     # Each loader below takes the records already validated during the same
     # operation. A child pathway reaches its parent both directly and through
-    # its source chokepoint, so without them every generation doubles the work.
+    # its source branch point, so without them every generation doubles the work.
 
     def _load_pathway(
         self, pathway_id: str, seen_ids: frozenset[str], validated: dict[str, object]
@@ -345,105 +289,99 @@ class Store:
         known = validated.get(pathway_id)
         if isinstance(known, model.Pathway):
             return known
-        pathway = self._load_structural(
-            "pathways", pathway_id, "pathway", "pathway", model.pathway_from_payload
-        )
+        pathway = self._load_structural("pathway", pathway_id, model.pathway_from_payload)
         if pathway_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records", code="integrity_error")
         seen = seen_ids | {pathway_id}
-        den = self.load_den()
-        if pathway.den_id != den.id:
+        ledger = self.load_ledger()
+        if pathway.ledger_id != ledger.id:
             raise StoreError(
-                f"pathway {pathway_id} references an unknown den", code="integrity_error"
+                f"pathway {pathway_id} references an unknown ledger", code="integrity_error"
             )
-        if (pathway.parent_pathway_id is None) != (pathway.source_chokepoint_id is None):
+        if (pathway.parent_pathway_id is None) != (pathway.source_branch_point_id is None):
             raise StoreError(
-                f"pathway {pathway_id} must set parent pathway and source chokepoint together",
+                f"pathway {pathway_id} must set parent pathway and source branch point together",
                 code="integrity_error",
             )
         if pathway.parent_pathway_id is not None:
             self._load_pathway(pathway.parent_pathway_id, seen, validated)
-        if pathway.source_chokepoint_id is not None:
-            source = self._load_chokepoint(pathway.source_chokepoint_id, seen, validated)
+        if pathway.source_branch_point_id is not None:
+            source = self._load_branch_point(pathway.source_branch_point_id, seen, validated)
             if (
                 pathway.parent_pathway_id is not None
                 and source.pathway_id != pathway.parent_pathway_id
             ):
                 raise StoreError(
-                    f"pathway {pathway_id} source chokepoint does not belong to its parent pathway",
+                    f"pathway {pathway_id} source branch point is not on its parent pathway",
                     code="integrity_error",
                 )
         validated[pathway_id] = pathway
         return pathway
 
-    def load_atom(self, atom_id: str) -> model.Atom:
-        """Load an atom and validate its pathway reference."""
-        return self._load_atom(atom_id, frozenset(), {})
+    def load_run(self, run_id: str) -> model.RunRecord:
+        """Load a run and validate its pathway reference."""
+        return self._load_run(run_id, frozenset(), {})
 
-    def _load_atom(
-        self, atom_id: str, seen_ids: frozenset[str], validated: dict[str, object]
-    ) -> model.Atom:
-        known = validated.get(atom_id)
-        if isinstance(known, model.Atom):
+    def _load_run(
+        self, run_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.RunRecord:
+        known = validated.get(run_id)
+        if isinstance(known, model.RunRecord):
             return known
-        atom = self._load_structural("atoms", atom_id, "atom", "atom", model.atom_from_payload)
-        if atom_id in seen_ids:
+        record = self._load_structural("run", run_id, model.run_from_payload)
+        if run_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records", code="integrity_error")
-        self._load_pathway(atom.pathway_id, seen_ids | {atom_id}, validated)
-        validated[atom_id] = atom
-        return atom
+        self._load_pathway(record.pathway_id, seen_ids | {run_id}, validated)
+        validated[run_id] = record
+        return record
 
-    def load_chokepoint(self, chokepoint_id: str) -> model.Chokepoint:
-        """Load a chokepoint and validate its atom, pathway, and outcome."""
-        return self._load_chokepoint(chokepoint_id, frozenset(), {})
+    def load_branch_point(self, branch_point_id: str) -> model.BranchPoint:
+        """Load a branch point and validate its run, pathway, and outcome."""
+        return self._load_branch_point(branch_point_id, frozenset(), {})
 
-    def _load_chokepoint(
-        self, chokepoint_id: str, seen_ids: frozenset[str], validated: dict[str, object]
-    ) -> model.Chokepoint:
-        known = validated.get(chokepoint_id)
-        if isinstance(known, model.Chokepoint):
+    def _load_branch_point(
+        self, branch_point_id: str, seen_ids: frozenset[str], validated: dict[str, object]
+    ) -> model.BranchPoint:
+        known = validated.get(branch_point_id)
+        if isinstance(known, model.BranchPoint):
             return known
-        chokepoint = self._load_structural(
-            "chokepoints",
-            chokepoint_id,
-            "chokepoint",
-            "chokepoint",
-            model.chokepoint_from_payload,
+        branch_point = self._load_structural(
+            "branch_point", branch_point_id, model.branch_point_from_payload
         )
-        if chokepoint_id in seen_ids:
+        if branch_point_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records", code="integrity_error")
-        seen = seen_ids | {chokepoint_id}
-        atom = self._load_atom(chokepoint.atom_id, seen, validated)
-        if atom.pathway_id != chokepoint.pathway_id:
+        seen = seen_ids | {branch_point_id}
+        record = self._load_run(branch_point.run_id, seen, validated)
+        if record.pathway_id != branch_point.pathway_id:
             raise StoreError(
-                f"chokepoint {chokepoint_id} and its atom disagree on the pathway",
+                f"branch point {branch_point_id} and its run disagree on the pathway",
                 code="integrity_error",
             )
-        if atom.outcome is not chokepoint.outcome:
+        if record.outcome is not branch_point.outcome:
             raise StoreError(
-                f"chokepoint {chokepoint_id} outcome disagrees with its atom",
+                f"branch point {branch_point_id} outcome disagrees with its run",
                 code="integrity_error",
             )
-        validated[chokepoint_id] = chokepoint
-        return chokepoint
+        validated[branch_point_id] = branch_point
+        return branch_point
 
-    def _save_den(self, den: model.Den) -> None:
-        self._write_record(self.den_path, "den", model.den_to_payload(den))
+    def _save_ledger(self, ledger: model.Ledger) -> None:
+        self._write_record(self.ledger_path, "ledger", model.ledger_to_payload(ledger))
 
     def _save_pathway(self, pathway: model.Pathway) -> None:
         path = self._record_path(self.pathways_dir, pathway.id, "pathway")
         self._write_record(path, "pathway", model.pathway_to_payload(pathway))
 
-    def _save_atom(self, atom: model.Atom) -> None:
-        path = self._record_path(self.atoms_dir, atom.id, "atom")
-        self._write_record(path, "atom", model.atom_to_payload(atom))
+    def _save_run(self, record: model.RunRecord) -> None:
+        path = self._record_path(self.runs_dir, record.id, "run")
+        self._write_record(path, "run", model.run_to_payload(record))
 
-    def _save_chokepoint(self, chokepoint: model.Chokepoint) -> None:
-        path = self._record_path(self.chokepoints_dir, chokepoint.id, "chokepoint")
-        self._write_record(path, "chokepoint", model.chokepoint_to_payload(chokepoint))
+    def _save_branch_point(self, branch_point: model.BranchPoint) -> None:
+        path = self._record_path(self.branch_points_dir, branch_point.id, "branch_point")
+        self._write_record(path, "branch_point", model.branch_point_to_payload(branch_point))
 
     def _attempt_path(self, attempt_id: str) -> Path:
-        return self._record_path(self.attempts_dir, attempt_id, "atom")
+        return self._record_path(self.attempts_dir, attempt_id, "run")
 
     def _attempt_lock(self, attempt_id: str) -> Path:
         return self._attempt_path(attempt_id).with_suffix(".lock")
@@ -472,11 +410,11 @@ class Store:
 
         An attempt is ``running`` while a live process is recording it and
         ``abandoned`` once that process has stopped without finalizing it.
-        Finalized attempts are atoms and are not listed.
+        Finalized attempts are runs and are not listed.
         """
-        # Reading the den first rejects state this version cannot read, even
+        # Reading the ledger first rejects state this version cannot read, even
         # when no attempt record is present to reveal it.
-        self.load_den()
+        self.load_ledger()
         problems: list[tuple[str, str]] = []
         attempts = self._scan_attempts(problems)
         if problems:
@@ -490,11 +428,11 @@ class Store:
     ) -> tuple[RecoveredAttempt, ...]:
         """Close every unfinished attempt whose recording process has stopped.
 
-        An attempt with no recorded outcome becomes an ``abandoned`` atom with
-        a terminal chokepoint; whatever output it had captured is measured and
+        An attempt with no recorded outcome becomes an ``abandoned`` run with
+        a terminal branch point; whatever output it had captured is measured and
         retained. Its outcome, finish time, and duration are not known and are
-        not invented. An attempt whose atom was already written only has its
-        missing chokepoint completed or its leftover journal entry cleared.
+        not invented. An attempt whose run was already written only has its
+        missing branch point completed or its leftover journal entry cleared.
         Attempts another live process is still recording are left alone.
 
         Recover only after the command itself has stopped: a command that
@@ -502,7 +440,7 @@ class Store:
         """
         self._require_writable()
         self.require()
-        self.load_den()
+        self.load_ledger()
         clock = now or model.utc_now
         recovered: list[RecoveredAttempt] = []
         if not self.attempts_dir.is_dir():
@@ -524,44 +462,44 @@ class Store:
     def _close_attempt(
         self, attempt: model.Attempt, clock: Callable[[], datetime.datetime]
     ) -> RecoveredAttempt:
-        atom_path = self._record_path(self.atoms_dir, attempt.id, "atom")
-        chokepoint_path = self._record_path(
-            self.chokepoints_dir, attempt.chokepoint_id, "chokepoint"
+        run_path = self._record_path(self.runs_dir, attempt.id, "run")
+        branch_point_path = self._record_path(
+            self.branch_points_dir, attempt.branch_point_id, "branch_point"
         )
-        if atom_path.is_file():
-            atom = self.load_atom(attempt.id)
+        if run_path.is_file():
+            record = self.load_run(attempt.id)
             action = (
                 model.RecoveryAction.CLEARED
-                if chokepoint_path.is_file()
+                if branch_point_path.is_file()
                 else model.RecoveryAction.COMPLETED
             )
-            created_at = atom.finished_at or model.format_timestamp(clock())
+            created_at = record.finished_at or model.format_timestamp(clock())
         else:
-            atom = self._abandoned_atom(attempt)
-            self._save_atom(atom)
+            record = self._abandoned_run(attempt)
+            self._save_run(record)
             action = model.RecoveryAction.ABANDONED
             created_at = model.format_timestamp(clock())
-        if not chokepoint_path.is_file():
-            self._save_chokepoint(
-                model.Chokepoint(
-                    id=attempt.chokepoint_id,
-                    pathway_id=atom.pathway_id,
-                    atom_id=atom.id,
+        if not branch_point_path.is_file():
+            self._save_branch_point(
+                model.BranchPoint(
+                    id=attempt.branch_point_id,
+                    pathway_id=record.pathway_id,
+                    run_id=record.id,
                     created_at=created_at,
                     kind=model.TERMINAL_KIND,
-                    outcome=atom.outcome,
+                    outcome=record.outcome,
                     branchable=True,
                 )
             )
         self._remove_attempt(attempt.id)
         return RecoveredAttempt(
-            atom_id=atom.id,
-            chokepoint_id=attempt.chokepoint_id,
-            pathway_id=atom.pathway_id,
+            run_id=record.id,
+            branch_point_id=attempt.branch_point_id,
+            pathway_id=record.pathway_id,
             action=action,
         )
 
-    def _abandoned_atom(self, attempt: model.Attempt) -> model.Atom:
+    def _abandoned_run(self, attempt: model.Attempt) -> model.RunRecord:
         measured: list[tuple[int, str]] = []
         for relative in (attempt.stdout_log, attempt.stderr_log):
             if relative is None:
@@ -574,7 +512,7 @@ class Store:
             except OSError as exc:
                 raise StoreError(f"attempt {attempt.id} log is unreadable: {relative}") from exc
         captured = len(measured) == 2
-        return model.Atom(
+        return model.RunRecord(
             id=attempt.id,
             pathway_id=attempt.pathway_id,
             started_at=attempt.started_at,
@@ -602,9 +540,9 @@ class Store:
         records.sort(key=lambda item: (item.created_at, item.id))
         return records
 
-    def list_atoms(self) -> list[model.Atom]:
-        """Return validated atoms in start order."""
-        records = self._list_typed(self.atoms_dir, "atom", model.atom_from_payload)
+    def list_run_records(self) -> list[model.RunRecord]:
+        """Return validated runs in start order."""
+        records = self._list_typed(self.runs_dir, "run", model.run_from_payload)
         records.sort(key=lambda item: (item.started_at, item.id))
         return records
 
@@ -618,7 +556,7 @@ class Store:
     ) -> RunPage:
         """Page finalized runs by terminal branch point timestamp and ID.
 
-        Every chokepoint record's envelope and fields are checked, and each
+        Every branch point record's envelope and fields are checked, and each
         returned run's records and lineage; log contents are not. *after* is a
         page's ``next_after`` branch point. A run unfinished when a page is read
         can finish behind its cursor; that page counts it in
@@ -631,14 +569,12 @@ class Store:
         if outcome is not None and not isinstance(outcome, model.Outcome):
             raise StoreError("outcome must be an Outcome value", code="invalid_input")
         self.require()
-        self.load_den()
+        self.load_ledger()
         if pathway_id is not None:
             self.load_pathway(pathway_id)
         start = None
         if after is not None:
-            boundary = self._load_structural(
-                "chokepoints", after, "chokepoint", "chokepoint", model.chokepoint_from_payload
-            )
+            boundary = self._load_structural("branch_point", after, model.branch_point_from_payload)
             start = (boundary.created_at, boundary.id)
         # Read before the scan. A run this page could miss either has an attempt
         # now or is stamped at or after now, which only later pages list.
@@ -647,7 +583,7 @@ class Store:
         candidates = (
             point
             for point in self._iter_typed(
-                self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload
+                self.branch_points_dir, "branch_point", model.branch_point_from_payload
             )
             if (pathway_id is None or point.pathway_id == pathway_id)
             and (outcome is None or point.outcome is outcome)
@@ -662,88 +598,87 @@ class Store:
         validated: dict[str, object] = {}
         runs = []
         for point in shown:
-            self._load_chokepoint(point.id, frozenset(), validated)
-            atom = self._load_atom(point.atom_id, frozenset(), validated)
-            runs.append(ListedRun(chokepoint_id=point.id, run=model.run_summary_from_atom(atom)))
+            self._load_branch_point(point.id, frozenset(), validated)
+            record = self._load_run(point.run_id, frozenset(), validated)
+            runs.append(ListedRun(branch_point_id=point.id, run=model.run_summary_from_run(record)))
         return RunPage(
             runs=tuple(runs),
             next_after=shown[-1].id if more else None,
             unfinished_attempts=unfinished,
         )
 
-    def inspect_run(
-        self, atom_id: str | None = None, *, run_id: str | None = None
-    ) -> RunInspection:
-        """Load one run with its lineage, terminal chokepoint, and child pathways.
+    def inspect_run(self, run_id: str) -> RunInspection:
+        """Load one run with its lineage, terminal branch point, and child pathways.
 
-        Scans chokepoint and pathway records to find the relationships; reads no
-        logs. The chokepoint is ``None`` while the run is unfinished.
+        Scans branch point and pathway records to find the relationships; reads no
+        logs. The branch point is ``None`` while the run is unfinished.
         """
-        atom_id = _run_identifier(atom_id, run_id)
         self.require()
         validated: dict[str, object] = {}
-        atom = self._load_atom(atom_id, frozenset(), validated)
+        record = self._load_run(run_id, frozenset(), validated)
         found = next(
             (
                 point
                 for point in self._iter_typed(
-                    self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload
+                    self.branch_points_dir, "branch_point", model.branch_point_from_payload
                 )
-                if point.atom_id == atom_id
+                if point.run_id == run_id
             ),
             None,
         )
-        chokepoint = None
+        branch_point = None
         children: tuple[model.Pathway, ...] = ()
         if found is not None:
-            chokepoint = self._load_chokepoint(found.id, frozenset(), validated)
+            branch_point = self._load_branch_point(found.id, frozenset(), validated)
             children = tuple(
-                item for item in self.list_pathways() if item.source_chokepoint_id == found.id
+                item for item in self.list_pathways() if item.source_branch_point_id == found.id
             )
         return RunInspection(
-            atom=atom,
-            pathway=self._load_pathway(atom.pathway_id, frozenset(), validated),
-            chokepoint=chokepoint,
+            record=record,
+            pathway=self._load_pathway(record.pathway_id, frozenset(), validated),
+            branch_point=branch_point,
             children=children,
         )
 
-    def list_chokepoints(self) -> list[model.Chokepoint]:
-        """Return validated chokepoints in reverse creation order."""
+    def list_branch_points(self) -> list[model.BranchPoint]:
+        """Return validated branch points in reverse creation order."""
         records = self._list_typed(
-            self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload
+            self.branch_points_dir, "branch_point", model.branch_point_from_payload
         )
         records.sort(key=lambda item: (item.created_at, item.id), reverse=True)
         return records
 
     def has_terminal_evidence(self, pathway_id: str) -> bool:
-        """Return whether an atom is recorded on a pathway."""
-        return any(atom.pathway_id == pathway_id for atom in self.list_atoms())
+        """Return whether a run is recorded on a pathway."""
+        return any(record.pathway_id == pathway_id for record in self.list_run_records())
 
-    def verify_atom_evidence(self, atom: model.Atom) -> None:
-        """Verify one atom's recorded logs.
+    def verify_run_evidence(self, record: model.RunRecord) -> None:
+        """Verify one run's recorded logs.
 
         Each log must stay directly inside ``.ocura-oss/logs/``, exist on disk,
         and match the recorded byte count and SHA-256 digest. Raises
-        StoreError on the first failing log. An atom recorded without output
+        StoreError on the first failing log. A run recorded without output
         capture has no logs to verify.
         """
-        for relative, recorded_size, recorded_digest in _recorded_logs(atom):
-            self._verify_log(atom.id, relative, recorded_size, recorded_digest)
+        for relative, recorded_size, recorded_digest in _recorded_logs(record):
+            self._verify_log(record.id, relative, recorded_size, recorded_digest)
 
-    def resolve_log_path(self, atom: model.Atom, stream: Literal["stdout", "stderr"]) -> Path:
+    def resolve_log_path(
+        self, record: model.RunRecord, stream: Literal["stdout", "stderr"]
+    ) -> Path:
         """Resolve the physical raw or gzip file after containment checks.
 
-        Call :meth:`verify_atom_evidence` first when the log's recorded size and
+        Call :meth:`verify_run_evidence` first when the log's recorded size and
         digest must also be checked. Use :meth:`read_verified_log` to consume
         original bytes whose size and digest are checked as part of the same
         read. A returned ``.gz`` path contains encoded bytes.
-        Raises StoreError for an atom recorded without output capture.
+        Raises StoreError for a run recorded without output capture.
         """
-        relative = _recorded_log(atom, stream)[0]
-        with self._log_guard(atom.id, relative) as path:
+        relative = _recorded_log(record, stream)[0]
+        with self._log_guard(record.id, relative) as path:
             return logstorage.physical_path(path)
 
-    def log_files(self, atom: model.Atom) -> dict[str, str]:
+    def log_files(self, record: model.RunRecord) -> dict[str, str]:
         """Return each captured log's current file, relative to the project root.
 
         A log stored as gzip is the recorded path plus ``.gz``. Only the paths and
@@ -752,33 +687,31 @@ class Store:
         """
         files: dict[str, str] = {}
         for stream, (relative, _size, _digest) in zip(
-            ("stdout", "stderr"), _recorded_logs(atom), strict=False
+            ("stdout", "stderr"), _recorded_logs(record), strict=False
         ):
-            with _log_failures(atom.id, relative):
-                path = self._evidence_path(atom.id, relative)
+            with _log_failures(record.id, relative):
+                path = self._evidence_path(record.id, relative)
                 files[stream] = _stored_path(relative, logstorage.physical_path(path), path)
         return files
 
     def read_verified_log(
         self,
-        atom_id: str | None = None,
+        run_id: str,
         *,
         stream: Literal["stdout", "stderr"] = "stdout",
-        run_id: str | None = None,
     ) -> bytes:
         """Read one complete log and verify the exact bytes returned.
 
-        Loads the stored atom and validates its lineage, then checks the selected
+        Loads the stored run and validates its lineage, then checks the selected
         log's containment, byte count, and SHA-256 digest. Missing, unreadable, or
         inconsistent evidence raises StoreError. The other log and the rest of
         the ledger are not verified. The complete log is held in memory; decoding
-        and interpretation are left to the caller. An atom recorded without
+        and interpretation are left to the caller. A run recorded without
         output capture has no log to read and raises StoreError.
         """
-        atom_id = _run_identifier(atom_id, run_id)
-        atom = self.load_atom(atom_id)
-        relative, size, digest = _recorded_log(atom, stream)
-        with self._log_guard(atom_id, relative) as path:
+        record = self.load_run(run_id)
+        relative, size, digest = _recorded_log(record, stream)
+        with self._log_guard(run_id, relative) as path:
             _physical, data = logstorage.read_verified(path, size, digest, collect=True)
         assert data is not None
         return data
@@ -786,12 +719,11 @@ class Store:
     @contextlib.contextmanager
     def open_verified_log(
         self,
-        atom_id: str | None = None,
+        run_id: str,
         *,
         stream: Literal["stdout", "stderr"] = "stdout",
         offset: int = 0,
         length: int | None = None,
-        run_id: str | None = None,
     ) -> Iterator[BinaryIO]:
         """Open an exact verified snapshot with bounded RAM for large logs.
 
@@ -800,10 +732,9 @@ class Store:
         window. Large windows use OS temporary storage, removed on close. The
         snapshot stays valid if backing storage changes.
         """
-        atom_id = _run_identifier(atom_id, run_id)
-        atom = self.load_atom(atom_id)
-        relative, size, digest = _recorded_log(atom, stream)
-        with self._log_guard(atom_id, relative) as path:
+        record = self.load_run(run_id)
+        relative, size, digest = _recorded_log(record, stream)
+        with self._log_guard(run_id, relative) as path:
             snapshot = logstorage.verified_snapshot(
                 path, size, digest, offset=offset, length=length
             )
@@ -811,17 +742,17 @@ class Store:
             yield snapshot
 
     def _verify_log(
-        self, atom_id: str, relative: str, recorded_size: int, recorded_digest: str
+        self, run_id: str, relative: str, recorded_size: int, recorded_digest: str
     ) -> Path:
-        with self._log_guard(atom_id, relative) as path:
+        with self._log_guard(run_id, relative) as path:
             physical, _data = logstorage.read_verified(path, recorded_size, recorded_digest)
         return physical
 
     @contextlib.contextmanager
-    def _log_guard(self, atom_id: str, relative: str, *, change: bool = False) -> Iterator[Path]:
+    def _log_guard(self, run_id: str, relative: str, *, change: bool = False) -> Iterator[Path]:
         """Serialize cooperating readers and storage changes of one logical log."""
-        with _log_failures(atom_id, relative):
-            path = self._evidence_path(atom_id, relative)
+        with _log_failures(run_id, relative):
+            path = self._evidence_path(run_id, relative)
             if self.archive:
                 self._check_archive()
                 yield path
@@ -847,37 +778,34 @@ class Store:
 
     def log_info(
         self,
-        atom_id: str | None = None,
+        run_id: str,
         *,
         stream: Literal["stdout", "stderr"] = "stdout",
-        run_id: str | None = None,
     ) -> LogInfo:
         """Verify a stream and describe its physical storage and original identity."""
-        atom_id = _run_identifier(atom_id, run_id)
-        atom = self.load_atom(atom_id)
-        relative, size, digest = _recorded_log(atom, stream)
-        with self._log_guard(atom_id, relative) as path:
+        record = self.load_run(run_id)
+        relative, size, digest = _recorded_log(record, stream)
+        with self._log_guard(run_id, relative) as path:
             physical, _data = logstorage.read_verified(path, size, digest)
             return LogInfo(
-                atom_id=atom_id,
+                run_id=run_id,
                 stream=stream,
-                outcome=atom.outcome.value,
-                started_at=atom.started_at,
+                outcome=record.outcome.value,
+                started_at=record.started_at,
                 encoding="raw" if physical == path else "gzip",
                 original_bytes=size,
                 stored_bytes=physical.stat().st_size,
                 sha256=digest,
-                fingerprint=f"{stream}/{atom_id[5:13]}/sha256:{digest[:12]}",
+                fingerprint=f"{stream}/{run_id[4:12]}/sha256:{digest[:12]}",
                 path=_stored_path(relative, physical, path),
             )
 
     def compress_logs(
         self,
         *,
-        atom_id: str | None = None,
+        run_id: str | None = None,
         min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
         dry_run: bool = False,
-        run_id: str | None = None,
     ) -> tuple[LogStorageChange, ...]:
         """Losslessly compact finalized logs without rewriting evidence records.
 
@@ -886,47 +814,40 @@ class Store:
         without publishing or removing log files.
         """
         _validate_compression_min_bytes(min_bytes)
-        return self._change_log_storage(
-            _optional_run_identifier(atom_id, run_id),
-            restore=False,
-            min_bytes=min_bytes,
-            dry_run=dry_run,
-        )
+        return self._change_log_storage(run_id, restore=False, min_bytes=min_bytes, dry_run=dry_run)
 
     def decompress_logs(
-        self, *, atom_id: str | None = None, dry_run: bool = False, run_id: str | None = None
+        self, *, run_id: str | None = None, dry_run: bool = False
     ) -> tuple[LogStorageChange, ...]:
         """Restore raw logs for ordinary tools and readers without gzip support."""
-        return self._change_log_storage(
-            _optional_run_identifier(atom_id, run_id), restore=True, min_bytes=0, dry_run=dry_run
-        )
+        return self._change_log_storage(run_id, restore=True, min_bytes=0, dry_run=dry_run)
 
     def _change_log_storage(
-        self, atom_id: str | None, *, restore: bool, min_bytes: int, dry_run: bool
+        self, run_id: str | None, *, restore: bool, min_bytes: int, dry_run: bool
     ) -> tuple[LogStorageChange, ...]:
         self._require_writable()
         self.require()
-        self.load_den()
-        atoms = [self.load_atom(atom_id)] if atom_id is not None else self.list_atoms()
-        # A run removes its attempt after writing its chokepoint. Checking in that
+        self.load_ledger()
+        records = [self.load_run(run_id)] if run_id is not None else self.list_run_records()
+        # A run removes its attempt after writing its branch point. Checking in that
         # order keeps a run finishing during this scan from looking incomplete.
-        finished = [atom for atom in atoms if not self._attempt_path(atom.id).exists()]
-        terminal_atoms = {point.atom_id for point in self.list_chokepoints()}
+        finished = [record for record in records if not self._attempt_path(record.id).exists()]
+        terminal_runs = {point.run_id for point in self.list_branch_points()}
         changes: list[LogStorageChange] = []
         for listed in finished:
-            atom = self.load_atom(listed.id)
-            if atom.id not in terminal_atoms:
-                raise StoreError(f"atom {atom.id} has no terminal chokepoint")
+            record = self.load_run(listed.id)
+            if record.id not in terminal_runs:
+                raise StoreError(f"run {record.id} has no terminal branch point")
             changes.extend(
-                self._change_atom_storage(
-                    atom, restore=restore, min_bytes=min_bytes, dry_run=dry_run
+                self._change_run_storage(
+                    record, restore=restore, min_bytes=min_bytes, dry_run=dry_run
                 )
             )
         return tuple(changes)
 
-    def _change_atom_storage(
+    def _change_run_storage(
         self,
-        atom: model.Atom,
+        record: model.RunRecord,
         *,
         restore: bool = False,
         min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
@@ -935,13 +856,13 @@ class Store:
     ) -> tuple[LogStorageChange, ...]:
         self._require_writable()
         changes: list[LogStorageChange] = []
-        if atom.output_capture is model.OutputCapture.NONE:
+        if record.output_capture is model.OutputCapture.NONE:
             return ()
         for stream in ("stdout", "stderr"):
-            relative, size, digest = _recorded_log(atom, stream)
+            relative, size, digest = _recorded_log(record, stream)
             if eligible_only and size < min_bytes:
                 continue
-            with self._log_guard(atom.id, relative, change=True) as path:
+            with self._log_guard(record.id, relative, change=True) as path:
                 if restore:
                     result = logstorage.restore(path, size, digest, dry_run=dry_run)
                 else:
@@ -950,7 +871,7 @@ class Store:
                     )
                 changes.append(
                     LogStorageChange(
-                        atom_id=atom.id,
+                        run_id=record.id,
                         stream=stream,
                         action=result.action,
                         original_bytes=result.original_bytes,
@@ -961,13 +882,13 @@ class Store:
         return tuple(changes)
 
     def verify_state(self, *, against: Iterable[str] | None = None) -> StateVerification:
-        """Verify every state record and every log referenced by a valid atom.
+        """Verify every state record and every log referenced by a valid run.
 
         Also reports files under ``.ocura-oss/logs/`` that no record references,
-        atoms without exactly one terminal chokepoint, and abandoned attempts.
+        runs without exactly one terminal branch point, and abandoned attempts.
         Returns a report whose ``problems`` list is empty when the state is
         fully intact; ``logs_checked`` counts the individual logs that actually
-        passed verification. A missing or unreadable den raises StoreError,
+        passed verification. A missing or unreadable ledger raises StoreError,
         because nothing can be verified without it.
 
         Other processes may record runs under the same root while this runs.
@@ -982,24 +903,30 @@ class Store:
         """
         self._check_archive()
         retained = _parse_manifest(against)
-        den = self.load_den()
+        ledger = self.load_ledger()
         problems: list[tuple[str, str]] = []
-        manifest = [_manifest_line("den", den.id, self._read_envelope(self.den_path, "den"))]
+        manifest = [
+            _manifest_line("ledger", ledger.id, self._read_envelope(self.ledger_path, "ledger"))
+        ]
         # Shared by every lineage check below, so each record is validated once.
         validated: dict[str, object] = {}
-        # A run writes its attempt before its logs and its atom before its
-        # chokepoint, and removes the attempt last. Reading in that same order
+        # A run writes its attempt before its logs and its run before its
+        # branch point, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
         log_entries = sorted(self.logs_dir.iterdir()) if self.logs_dir.is_dir() else []
         attempts = self._scan_attempts(problems)
         pathways = self._scan_records(
             self.pathways_dir, "pathway", model.pathway_from_payload, problems, manifest
         )
-        atoms = self._scan_records(
-            self.atoms_dir, "atom", model.atom_from_payload, problems, manifest
+        records = self._scan_records(
+            self.runs_dir, "run", model.run_from_payload, problems, manifest
         )
-        chokepoints = self._scan_records(
-            self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload, problems, manifest
+        branch_points = self._scan_records(
+            self.branch_points_dir,
+            "branch_point",
+            model.branch_point_from_payload,
+            problems,
+            manifest,
         )
         for pathway in pathways:
             try:
@@ -1026,42 +953,45 @@ class Store:
                     referenced_logs.add(self._evidence_path(attempt.id, relative))
                 except StoreError as exc:
                     problems.append((label, str(exc)))
-        for atom in atoms:
+        for record in records:
             try:
-                self._load_atom(atom.id, frozenset(), validated)
+                self._load_run(record.id, frozenset(), validated)
             except StoreError as exc:
-                problems.append((f"{atom.id}.json", str(exc)))
-            for relative, size_field, digest_field in _recorded_logs(atom):
+                problems.append((f"{record.id}.json", str(exc)))
+            for relative, size_field, digest_field in _recorded_logs(record):
                 try:
-                    referenced_logs.add(self._evidence_path(atom.id, relative))
-                    self._verify_log(atom.id, relative, size_field, digest_field)
+                    referenced_logs.add(self._evidence_path(record.id, relative))
+                    self._verify_log(record.id, relative, size_field, digest_field)
                     logs_checked += 1
                 except StoreError as exc:
-                    problems.append((f"{atom.id}.json", str(exc)))
+                    problems.append((f"{record.id}.json", str(exc)))
         self._report_orphaned_logs(log_entries, referenced_logs, problems)
-        for chokepoint in chokepoints:
+        for branch_point in branch_points:
             try:
-                self._load_chokepoint(chokepoint.id, frozenset(), validated)
+                self._load_branch_point(branch_point.id, frozenset(), validated)
             except StoreError as exc:
-                problems.append((f"{chokepoint.id}.json", str(exc)))
-        self._report_missing_chokepoints(
-            atoms, chokepoints, {attempt.id for attempt, _state in attempts}, problems
+                problems.append((f"{branch_point.id}.json", str(exc)))
+        self._report_missing_branch_points(
+            records, branch_points, {attempt.id for attempt, _state in attempts}, problems
         )
-        if all(item.id != den.default_pathway_id for item in pathways):
-            problems.append(("den.json", "default pathway record is missing"))
+        if all(item.id != ledger.default_pathway_id for item in pathways):
+            problems.append(("ledger.json", "default pathway record is missing"))
         manifest.sort()
         current = set(manifest)
         for entry in retained:
             if entry not in current:
                 kind, record_id, _checksum = entry.split(" ")
                 problems.append(
-                    (f"{record_id}.json", f"retained {kind} record is missing or was changed")
+                    (
+                        f"{record_id}.json",
+                        f"retained {_label(kind)} record is missing or was changed",
+                    )
                 )
         intact = not problems
         return StateVerification(
             pathways=len(pathways),
-            atoms=len(atoms),
-            chokepoints=len(chokepoints),
+            run_records=len(records),
+            branch_points=len(branch_points),
             logs_checked=logs_checked,
             problems=tuple(problems),
             running_attempts=tuple(running),
@@ -1074,26 +1004,26 @@ class Store:
         self,
         *,
         name: str,
-    ) -> tuple[model.Den, model.Pathway]:
-        """Create one den and one default pathway; fail if state already exists."""
+    ) -> tuple[model.Ledger, model.Pathway]:
+        """Create one ledger and one default pathway; fail if state already exists."""
         self._require_writable()
         if self.exists():
             raise StoreError(f"cannot initialize: state directory already exists: {self.state_dir}")
         if not isinstance(name, str) or not name.strip():
             raise StoreError("ledger name must not be blank", code="invalid_input")
         created_at = model.format_timestamp(model.utc_now())
-        den = model.Den(
-            id=model.make_id("den"),
+        ledger = model.Ledger(
+            id=model.make_id("ledger"),
             name=name,
             created_at=created_at,
             default_pathway_id=model.make_id("pathway"),
         )
         pathway = model.Pathway(
-            id=den.default_pathway_id,
-            den_id=den.id,
+            id=ledger.default_pathway_id,
+            ledger_id=ledger.id,
             created_at=created_at,
             parent_pathway_id=None,
-            source_chokepoint_id=None,
+            source_branch_point_id=None,
             reason="default pathway",
             parameters={},
         )
@@ -1107,85 +1037,83 @@ class Store:
             ) from None
         for directory in (
             self.pathways_dir,
-            self.atoms_dir,
-            self.chokepoints_dir,
+            self.runs_dir,
+            self.branch_points_dir,
             self.attempts_dir,
             self.logs_dir,
         ):
             directory.mkdir()
-        self._save_den(den)
+        self._save_ledger(ledger)
         self._save_pathway(pathway)
-        return den, pathway
+        return ledger, pathway
 
-    def _dir_for(self, subdir: str) -> Path:
-        return self.state_dir / subdir
+    def _kind_dir(self, kind: str) -> Path:
+        dirs = {"pathway": self.pathways_dir, "run": self.runs_dir}
+        return dirs.get(kind, self.branch_points_dir)
 
     def _record_path(self, directory: Path, record_id: str, prefix: str) -> Path:
         if not model.is_valid_id(record_id, prefix):
             raise StoreError(f"malformed {prefix} identifier: {record_id!r}", code="invalid_input")
         return directory / f"{record_id}.json"
 
-    def _load_structural(
-        self,
-        subdir: str,
-        record_id: str,
-        prefix: str,
-        kind: str,
-        converter: Callable[[dict], _T],
-    ) -> _T:
-        path = self._record_path(self._dir_for(subdir), record_id, prefix)
+    def _load_structural(self, kind: str, record_id: str, converter: Callable[[dict], _T]) -> _T:
+        path = self._record_path(self._kind_dir(kind), record_id, kind)
         payload = self._read_envelope(path, kind)
         try:
             record = converter(payload)
         except model.ValidationError as exc:
             raise StoreError(
-                f"invalid {kind} record {record_id}.json: {exc}", code="integrity_error"
+                f"invalid {_label(kind)} record {record_id}.json: {exc}", code="integrity_error"
             ) from exc
         if getattr(record, "id", None) != record_id:
             raise StoreError(
-                f"{kind} record {record_id}.json payload id does not match its filename",
+                f"{_label(kind)} record {record_id}.json payload id does not match its filename",
                 code="integrity_error",
             )
         return record
 
     def _read_envelope(self, path: Path, expected_kind: str) -> dict:
         if not path.is_file():
-            raise StoreError(f"missing {expected_kind} record: {path}", code="record_not_found")
+            raise StoreError(
+                f"missing {_label(expected_kind)} record: {path}", code="record_not_found"
+            )
         try:
             raw = path.read_bytes()
             data = json.loads(raw.decode("utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             code = classify_os_error(exc) if isinstance(exc, OSError) else "integrity_error"
             raise StoreError(
-                f"malformed {expected_kind} record {path.name}: unreadable", code=code
+                f"malformed {_label(expected_kind)} record {path.name}: unreadable", code=code
             ) from exc
         if not isinstance(data, dict) or set(data) != _ENVELOPE_KEYS:
             raise StoreError(
-                f"malformed {expected_kind} record {path.name}: unexpected envelope",
+                f"malformed {_label(expected_kind)} record {path.name}: unexpected envelope",
                 code="integrity_error",
             )
         schema_version = data["schema_version"]
         if isinstance(schema_version, bool) or not isinstance(schema_version, int):
             raise StoreError(
-                f"malformed {expected_kind} record {path.name}: bad schema version",
+                f"malformed {_label(expected_kind)} record {path.name}: bad schema version",
                 code="integrity_error",
             )
         if schema_version != model.SCHEMA_VERSION:
-            hint = (
-                "; Ocura OSS 0.4 and earlier wrote this state, and this version cannot"
-                ' read or convert it. Keep using "ocura-oss<0.5" for it, or move'
-                f" {STATE_DIR_NAME} aside and run `ocura-oss init`"
-                if schema_version == 1
-                else ""
-            )
+            writers = {1: ("0.4 and earlier", "0.5"), 2: ("0.5 to 0.7", "0.8")}
+            hint = ""
+            if schema_version in writers:
+                written, below = writers[schema_version]
+                hint = (
+                    f"; Ocura OSS {written} wrote this state, and this version cannot"
+                    f' read or convert it. Keep using "ocura-oss<{below}" for it, or move'
+                    f" {STATE_DIR_NAME} aside and run `ocura-oss init`"
+                )
             raise StoreError(
-                f"unsupported schema version {schema_version} in {expected_kind} record"
+                f"unsupported schema version {schema_version} in {_label(expected_kind)} record"
                 f" {path.name}{hint}",
                 code="unsupported_schema",
             )
         if data["kind"] != expected_kind:
             raise StoreError(
-                f"kind mismatch in {expected_kind} record {path.name}: {data['kind']!r}",
+                f"kind mismatch in {_label(expected_kind)} record {path.name}: {data['kind']!r}",
                 code="integrity_error",
             )
         checksum = data["checksum"]
@@ -1195,16 +1123,18 @@ class Store:
             or checksum["algorithm"] != model.CHECKSUM_ALGORITHM
         ):
             raise StoreError(
-                f"malformed checksum in {expected_kind} record {path.name}", code="integrity_error"
+                f"malformed checksum in {_label(expected_kind)} record {path.name}",
+                code="integrity_error",
             )
         expected = model.checksum_for(schema_version, data["kind"], data["payload"])["value"]
         if checksum["value"] != expected:
             raise StoreError(
-                f"checksum mismatch in {expected_kind} record {path.name}", code="integrity_error"
+                f"checksum mismatch in {_label(expected_kind)} record {path.name}",
+                code="integrity_error",
             )
         if not isinstance(data["payload"], dict):
             raise StoreError(
-                f"malformed {expected_kind} record {path.name}: payload must be an object",
+                f"malformed {_label(expected_kind)} record {path.name}: payload must be an object",
                 code="integrity_error",
             )
         return data["payload"]
@@ -1240,7 +1170,7 @@ class Store:
             payload = self._read_envelope(path, kind)
         except StoreError as exc:
             raise StoreError(
-                f"invalid {kind} record {path.name}: {exc}",
+                f"invalid {_label(kind)} record {path.name}: {exc}",
                 code=exc.code,
                 execution=exc.execution,
                 ids=exc.ids,
@@ -1250,11 +1180,11 @@ class Store:
             record = converter(payload)
         except model.ValidationError as exc:
             raise StoreError(
-                f"invalid {kind} record {path.name}: {exc}", code="integrity_error"
+                f"invalid {_label(kind)} record {path.name}: {exc}", code="integrity_error"
             ) from exc
         if getattr(record, "id", None) != path.stem:
             raise StoreError(
-                f"{kind} record {path.name} payload id does not match its filename",
+                f"{_label(kind)} record {path.name} payload id does not match its filename",
                 code="integrity_error",
             )
         if manifest is not None:
@@ -1336,7 +1266,7 @@ class Store:
             if logical in referenced_logs:
                 continue
             # A gzip is the physical representation of the logical .log path
-            # retained in the atom. Both copies can exist across a crashed
+            # retained in the run. Both copies can exist across a crashed
             # storage transition; _verify_log checks both in that case.
             if entry.suffix == ".gz" and logical.with_suffix("") in referenced_logs:
                 continue
@@ -1346,81 +1276,73 @@ class Store:
                 problems.append(
                     (
                         f"logs/{entry.name}",
-                        "orphaned file: no atom record references this log",
+                        "orphaned file: no run record references this log",
                     )
                 )
 
-    def _report_missing_chokepoints(
+    def _report_missing_branch_points(
         self,
-        atoms: list[model.Atom],
-        chokepoints: list[model.Chokepoint],
+        records: list[model.RunRecord],
+        branch_points: list[model.BranchPoint],
         attempt_ids: set[str],
         problems: list[tuple[str, str]],
     ) -> None:
-        """Report atoms that do not have exactly one terminal chokepoint."""
+        """Report runs that do not have exactly one terminal branch point."""
         counts: dict[str, int] = {}
-        for chokepoint in chokepoints:
-            counts[chokepoint.atom_id] = counts.get(chokepoint.atom_id, 0) + 1
-        missing: list[model.Atom] = []
-        for atom in atoms:
-            count = counts.get(atom.id, 0)
+        for branch_point in branch_points:
+            counts[branch_point.run_id] = counts.get(branch_point.run_id, 0) + 1
+        missing: list[model.RunRecord] = []
+        for record in records:
+            count = counts.get(record.id, 0)
             if count > 1:
-                problems.append((f"{atom.id}.json", f"atom has {count} chokepoints"))
-            elif count == 0 and atom.id not in attempt_ids:
-                missing.append(atom)
+                problems.append((f"{record.id}.json", f"run has {count} branch points"))
+            elif count == 0 and record.id not in attempt_ids:
+                missing.append(record)
         # A run that began after the attempts were listed may sit between its
-        # atom and its chokepoint. Its attempt record is removed only once the
-        # chokepoint exists, so check the record first and the chokepoints after.
-        missing = [atom for atom in missing if not self._attempt_path(atom.id).exists()]
+        # run and its branch point. Its attempt record is removed only once the
+        # branch point exists, so check the record first and the branch points after.
+        missing = [record for record in missing if not self._attempt_path(record.id).exists()]
         if not missing:
             return
         current = {
-            chokepoint.atom_id
-            for chokepoint in self._scan_records(
-                self.chokepoints_dir, "chokepoint", model.chokepoint_from_payload, []
+            branch_point.run_id
+            for branch_point in self._scan_records(
+                self.branch_points_dir, "branch_point", model.branch_point_from_payload, []
             )
         }
-        for atom in missing:
-            if atom.id not in current:
-                problems.append((f"{atom.id}.json", "atom has no terminal chokepoint"))
+        for record in missing:
+            if record.id not in current:
+                problems.append((f"{record.id}.json", "run has no terminal branch point"))
 
-    def _evidence_path(self, atom_id: str, relative: str) -> Path:
+    def _evidence_path(self, run_id: str, relative: str) -> Path:
         """Resolve a recorded log path; reject paths outside the logs dir."""
         if not isinstance(relative, str) or not relative:
-            raise StoreError(f"atom {atom_id} has an empty log path", code="integrity_error")
+            raise StoreError(f"run {run_id} has an empty log path", code="integrity_error")
         posix = PurePosixPath(relative)
         if posix.is_absolute() or ".." in posix.parts:
             raise StoreError(
-                f"atom {atom_id} log path escapes the state directory: {relative}",
+                f"run {run_id} log path escapes the state directory: {relative}",
                 code="integrity_error",
             )
         candidate = self.root / Path(*posix.parts)
         parent = candidate.parent.resolve()
         if parent != self.logs_dir.resolve():
             raise StoreError(
-                f"atom {atom_id} log path does not point inside .ocura-oss/logs/: {relative}",
+                f"run {run_id} log path does not point inside .ocura-oss/logs/: {relative}",
                 code="integrity_error",
             )
         if candidate.is_symlink():
             raise StoreError(
-                f"atom {atom_id} log path must not be a symlink: {relative}", code="integrity_error"
+                f"run {run_id} log path must not be a symlink: {relative}", code="integrity_error"
             )
         # Never resolve the mutable final filename. Its canonical directory
         # and literal basename also give every reader/writer the same lock.
         return parent / candidate.name
 
 
-def _optional_run_identifier(atom_id: str | None, run_id: str | None) -> str | None:
-    if atom_id is not None and run_id is not None and atom_id != run_id:
-        raise StoreError("atom_id and run_id must identify the same run", code="invalid_input")
-    return run_id if run_id is not None else atom_id
-
-
-def _run_identifier(atom_id: str | None, run_id: str | None) -> str:
-    selected = _optional_run_identifier(atom_id, run_id)
-    if selected is None:
-        raise StoreError("a run_id is required", code="invalid_input")
-    return selected
+def _label(kind: str) -> str:
+    """Return a record kind as messages print it."""
+    return kind.replace("_", " ")
 
 
 def _validate_compression_min_bytes(value: int) -> None:
@@ -1484,16 +1406,16 @@ def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
     return entries
 
 
-def _finish_order(chokepoint: model.Chokepoint) -> tuple[str, str]:
-    return chokepoint.created_at, chokepoint.id
+def _finish_order(branch_point: model.BranchPoint) -> tuple[str, str]:
+    return branch_point.created_at, branch_point.id
 
 
-def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
-    """Return ``(path, bytes, sha256)`` for each log an atom recorded."""
+def _recorded_logs(record: model.RunRecord) -> list[tuple[str, int, str]]:
+    """Return ``(path, bytes, sha256)`` for each log a run recorded."""
     logs: list[tuple[str, int, str]] = []
     for relative, size, digest in (
-        (atom.stdout_log, atom.stdout_bytes, atom.stdout_sha256),
-        (atom.stderr_log, atom.stderr_bytes, atom.stderr_sha256),
+        (record.stdout_log, record.stdout_bytes, record.stdout_sha256),
+        (record.stderr_log, record.stderr_bytes, record.stderr_sha256),
     ):
         if relative is not None and size is not None and digest is not None:
             logs.append((relative, size, digest))
@@ -1501,18 +1423,18 @@ def _recorded_logs(atom: model.Atom) -> list[tuple[str, int, str]]:
 
 
 @contextlib.contextmanager
-def _log_failures(atom_id: str, relative: str) -> Iterator[None]:
+def _log_failures(run_id: str, relative: str) -> Iterator[None]:
     """Report a log's storage failures as StoreError."""
     try:
         yield
     except logstorage.LogStorageError as exc:
         raise StoreError(
-            f"atom {atom_id} {exc}: {relative}", code=exc.code, ids={"run_id": atom_id}
+            f"run {run_id} {exc}: {relative}", code=exc.code, ids={"run_id": run_id}
         ) from (exc.__cause__ or exc)
     except (OSError, ValueError, TimeoutError) as exc:
         code = classify_os_error(exc) if isinstance(exc, OSError) else "io_error"
         raise StoreError(
-            f"atom {atom_id} log is unreadable: {relative}", code=code, ids={"run_id": atom_id}
+            f"run {run_id} log is unreadable: {relative}", code=code, ids={"run_id": run_id}
         ) from exc
 
 
@@ -1521,12 +1443,12 @@ def _stored_path(relative: str, physical: Path, path: Path) -> str:
     return relative if physical == path else f"{relative}.gz"
 
 
-def _recorded_log(atom: model.Atom, stream: str) -> tuple[str, int, str]:
+def _recorded_log(record: model.RunRecord, stream: str) -> tuple[str, int, str]:
     if stream not in ("stdout", "stderr"):
         raise StoreError("log stream must be 'stdout' or 'stderr'", code="invalid_input")
-    logs = _recorded_logs(atom)
+    logs = _recorded_logs(record)
     if len(logs) != 2:
-        raise StoreError(f"atom {atom.id} was recorded without output capture")
+        raise StoreError(f"run {record.id} was recorded without output capture")
     return logs[0] if stream == "stdout" else logs[1]
 
 
