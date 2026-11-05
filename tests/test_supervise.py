@@ -371,7 +371,7 @@ sys.path.insert(0, {str(Path(supervise.__file__).resolve().parents[1])!r})
 from ocura_oss import run, verify, Store
 root = {str(self.root)!r}
 result = run([sys.executable, '-c', 'pass'], root=root)
-assert result.run.outcome.value == 'passed', result.run.outcome
+assert result.record.outcome.value == 'passed', result.record.outcome
 assert verify(root).ok
 assert not Store(root).list_attempts()
 """,
