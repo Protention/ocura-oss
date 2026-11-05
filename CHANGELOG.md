@@ -2,6 +2,42 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.8.0 - 2026-11-04
+
+This release renames stored state and cannot read ledgers written by earlier versions.
+
+- Use the names ledger, run, and branch point in stored state and JSON output, as
+  0.7 did in Python. State is now `ledger.json`, `runs/`, and `branch-points/`; IDs
+  start with `ledger-`, `run-`, and `branch-point-`, and logs are named for the run
+  ID. JSON keys are `ledger_id`, `run_id`, `branch_point_id`, and
+  `source_branch_point_id`, and `verify --json` counts `runs` and `branch_points`.
+  Records carry schema version 3.
+- Refuse state written by 0.5 to 0.7 (schema 2) with exit status 2 and a message
+  to keep using `ocura-oss<0.8` for it or start a new ledger. The old directory is
+  not modified, and there is no conversion.
+- Remove the names 0.7 kept for compatibility: `Den`, `Atom`, `Chokepoint`, their
+  attributes, fields, and keyword arguments, `load_atom()` and the other old
+  `Store` methods, the `chokepoints` command, and the `--atom` option.
+  `docs/naming-migration.md` maps each one to its replacement.
+
+## 0.7.2 - 2026-11-02
+
+- On Python 3.11 and 3.12, record a stop request that arrives between polls of the
+  command as an interrupted run. It could instead end `run` with a traceback, leaving
+  the attempt for `recover` and, on macOS, the command still running.
+
+## 0.7.1 - 2026-11-02
+
+This documentation release changes no code or record formats.
+
+- Use full URLs for README links so they resolve on PyPI. The release check now
+  reports relative links in a built package description.
+- Show how to fetch the history inspector after installing from PyPI; the script
+  is not in the distributions.
+- Introduce opt-in log compression in the overview.
+- Replace pre-release wording in the example guide that shipped in the 0.7.0 source
+  distribution.
+
 ## 0.7.0 - 2026-11-01
 
 - Keep the demo and history inspection as the primary example in the core

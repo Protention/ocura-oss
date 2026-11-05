@@ -1,11 +1,11 @@
 # Replay a training search with Ocura OSS
 
-Version 0.7.0.
+Version 0.8.0.
 
-This experimental example is part of the maintained [0.7 catalog](../../docs/use-cases.md)
-on `examples/0.7` and uses the released 0.7.0 interfaces. Follow the
-[catalog setup](../../README.md#install-and-try) for the scripts and install
-`ocura-oss==0.7.0` from PyPI. Installing this checkout also works.
+This experimental example is part of the [0.8 catalog](../../docs/use-cases.md)
+on `examples/0.8` and uses the draft 0.8.0 interfaces. Follow the
+[catalog setup](../../README.md#install-and-try) for the scripts and matching wheel.
+Installing this checkout also works.
 
 Which training run should get the next block of CPU time? This example records
 small GPT training segments, replays allocation policies against their saved
@@ -31,7 +31,8 @@ CPU PyTorch.
 From the repository root, in an activated virtual environment:
 
 ```console
-python -m pip install ocura-oss==0.7.0
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
 python -m pip install -r examples/dream_replay/requirements.txt --index-url https://download.pytorch.org/whl/cpu
 python examples/dream_replay/experiment.py prepare --root .tmp-tests/dream-inputs --download
 ```
@@ -151,8 +152,9 @@ inputs. The continuation test targets one fixed CPU/runtime configuration;
 cross-version or cross-hardware bitwise reproducibility is not promised.
 
 The example uses `RunExecution.record`, `RunExecution.branch_point`,
-`Store.load_run()`, and `Store.list_run_records()`. Existing result and ledger
-fields such as `atom_id`, `parent_atom`, and `chokepoint_id` remain unchanged.
+`Store.load_run()`, and `Store.list_run_records()`. The example's own v1 report
+fields `atom_id`, `parent_atom`, and `root_atom` retain their names; they contain
+0.8 `run-...` identifiers. Package JSON uses `run_id` and `branch_point_id`.
 For example, a reported node's `atom_id` is the run ID accepted by the log reader:
 
 ```console
@@ -168,22 +170,14 @@ run creates another child and is not a resume operation.
 
 ## Reading an older experiment
 
-Existing schema-2 ledgers keep their IDs and JSON fields. The original 0.4 example
-created schema-1 ledgers, which 0.7 does not open directly. With all writers
-stopped, use the separate [0.4 migration tool](../../tools/migrations/README.md)
-to validate and copy a complete ledger into a new project directory:
+Ocura 0.8 reads schema 3 only. Keep the original experiment, package version and
+example checkout together when reporting on earlier work. The
+[0.7 catalog](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/dream_replay)
+documents schema-2 reporting and the separate 0.4-to-schema-2 migration tool.
+That tool does not convert ledgers to 0.8.
 
-```console
-python tools/migrations/migrate_0_4.py --source OLD_PROJECT --destination NEW_PROJECT --dry-run --json
-python tools/migrations/migrate_0_4.py --source OLD_PROJECT --destination NEW_PROJECT --json
-python examples/dream_replay/experiment.py report --root NEW_PROJECT
-```
-
-Keep the original and migration receipt. Migration copies ledger records and
-logs only; prepared inputs, checkpoints and other workload files remain separately
-owned by the example. Read-only reporting/replay can use the converted ledger.
-New evaluation intentionally rejects a changed adapter fingerprint, so use a fresh
-0.7 collection rather than extending a historical study with changed example code.
+Start a fresh 0.8 collection for new evaluation. Keep historical logs, checkpoints
+and source fingerprints unchanged; updating the adapter does not repeat the study.
 
 ## Replay and costs
 

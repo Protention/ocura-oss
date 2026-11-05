@@ -66,7 +66,7 @@ class ReportIntegrityTests(unittest.TestCase):
         def read(store, identity, *args, **kwargs):
             raw = original(store, identity, *args, **kwargs)
             if kwargs.get("stream", "stdout") == "stdout" and (
-                store.load_atom(identity).declared_parameters.get("kind") == kind
+                store.load_run(identity).declared_parameters.get("kind") == kind
             ):
                 value = json.loads(raw)
                 change(value)
@@ -237,7 +237,7 @@ class PartialWorldReportTests(unittest.TestCase):
             self.assertEqual(controller.discovery_calls, 3)
             retained_nodes = [
                 json.loads(controller.store.read_verified_log(atom.id))
-                for atom in controller.store.list_atoms()
+                for atom in controller.store.list_run_records()
                 if atom.declared_parameters.get("kind") == "node"
             ]
             self.assertEqual(len(retained_nodes), 2)

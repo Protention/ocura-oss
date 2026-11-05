@@ -29,17 +29,17 @@ class VerifiedLogReadTests(unittest.TestCase):
             ],
             root=self.root,
         )
-        self.atom = execution.atom
-        self.stdout_path = self.store.resolve_log_path(self.atom, "stdout")
-        self.stderr_path = self.store.resolve_log_path(self.atom, "stderr")
+        self.record = execution.record
+        self.stdout_path = self.store.resolve_log_path(self.record, "stdout")
+        self.stderr_path = self.store.resolve_log_path(self.record, "stderr")
 
     def test_returns_exact_binary_output_from_failed_command_without_writing(self):
         paths = [path for path in self.store.state_dir.rglob("*") if path.is_file()]
         before = {path: path.read_bytes() for path in paths}
 
-        self.assertEqual(self.atom.return_code, 7)
-        self.assertEqual(self.store.read_verified_log(self.atom.id), self.stdout)
-        self.assertEqual(self.store.read_verified_log(self.atom.id, stream="stderr"), self.stderr)
+        self.assertEqual(self.record.return_code, 7)
+        self.assertEqual(self.store.read_verified_log(self.record.id), self.stdout)
+        self.assertEqual(self.store.read_verified_log(self.record.id, stream="stderr"), self.stderr)
         after = {
             path: path.read_bytes() for path in self.store.state_dir.rglob("*") if path.is_file()
         }
@@ -47,22 +47,22 @@ class VerifiedLogReadTests(unittest.TestCase):
 
     def test_empty_log_is_valid(self):
         execution = run([sys.executable, "-c", "pass"], root=self.root)
-        self.assertEqual(self.store.read_verified_log(execution.atom.id), b"")
+        self.assertEqual(self.store.read_verified_log(execution.record.id), b"")
 
     def test_checks_only_selected_log(self):
         self.stderr_path.unlink()
         (self.store.logs_dir / "unrelated.log").write_bytes(b"orphan")
-        self.assertEqual(self.store.read_verified_log(self.atom.id), self.stdout)
+        self.assertEqual(self.store.read_verified_log(self.record.id), self.stdout)
         self.assertFalse(self.store.verify_state().ok)
 
     def test_rejects_unknown_stream(self):
         with self.assertRaisesRegex(StoreError, "log stream must be"):
-            self.store.read_verified_log(self.atom.id, stream="combined")
+            self.store.read_verified_log(self.record.id, stream="combined")
 
     def test_rejects_missing_log(self):
         self.stdout_path.unlink()
         with self.assertRaisesRegex(StoreError, "log is missing"):
-            self.store.read_verified_log(self.atom.id)
+            self.store.read_verified_log(self.record.id)
 
     def test_rejects_size_and_digest_mismatches_for_either_stream(self):
         for stream, path, original in (
@@ -77,11 +77,11 @@ class VerifiedLogReadTests(unittest.TestCase):
                 with self.subTest(stream=stream, error=error):
                     path.write_bytes(changed)
                     with self.assertRaisesRegex(StoreError, error):
-                        self.store.read_verified_log(self.atom.id, stream=stream)
+                        self.store.read_verified_log(self.record.id, stream=stream)
             path.write_bytes(original)
 
     def test_rejects_log_changed_at_read_after_earlier_verification(self):
-        self.store.verify_atom_evidence(self.atom)
+        self.store.verify_run_evidence(self.record)
         original_open = Path.open
 
         def change_at_read(path, *arguments, **options):
@@ -94,7 +94,7 @@ class VerifiedLogReadTests(unittest.TestCase):
             patch.object(Path, "open", autospec=True, side_effect=change_at_read),
             self.assertRaisesRegex(StoreError, "log checksum mismatch"),
         ):
-            self.store.read_verified_log(self.atom.id)
+            self.store.read_verified_log(self.record.id)
 
     def test_returns_verified_contents_when_file_changes_after_read(self):
         original_open = Path.open
@@ -110,9 +110,9 @@ class VerifiedLogReadTests(unittest.TestCase):
             return io.BytesIO(data)
 
         with patch.object(Path, "open", autospec=True, side_effect=change_after_read):
-            self.assertEqual(self.store.read_verified_log(self.atom.id), self.stdout)
+            self.assertEqual(self.store.read_verified_log(self.record.id), self.stdout)
         with self.assertRaisesRegex(StoreError, "log checksum mismatch"):
-            self.store.read_verified_log(self.atom.id)
+            self.store.read_verified_log(self.record.id)
 
     def test_wraps_log_read_errors_as_store_error(self):
         original_open = Path.open
@@ -126,32 +126,32 @@ class VerifiedLogReadTests(unittest.TestCase):
             patch.object(Path, "open", autospec=True, side_effect=deny_log_read),
             self.assertRaisesRegex(StoreError, "log is unreadable") as caught,
         ):
-            self.store.read_verified_log(self.atom.id)
+            self.store.read_verified_log(self.record.id)
         self.assertIsInstance(caught.exception.__cause__, PermissionError)
 
-    def test_rejects_corrupt_stored_atom(self):
-        record = self.store.atoms_dir / f"{self.atom.id}.json"
+    def test_rejects_corrupt_stored_run(self):
+        record = self.store.runs_dir / f"{self.record.id}.json"
         record.write_text("{}", encoding="utf-8")
-        with self.assertRaisesRegex(StoreError, "malformed atom record"):
-            self.store.read_verified_log(self.atom.id)
+        with self.assertRaisesRegex(StoreError, "malformed run record"):
+            self.store.read_verified_log(self.record.id)
 
     def test_rejects_missing_lineage(self):
-        (self.store.pathways_dir / f"{self.atom.pathway_id}.json").unlink()
+        (self.store.pathways_dir / f"{self.record.pathway_id}.json").unlink()
         with self.assertRaisesRegex(StoreError, "missing pathway record"):
-            self.store.read_verified_log(self.atom.id)
+            self.store.read_verified_log(self.record.id)
 
     def test_rejects_invalid_filesystem_path_as_store_error(self):
-        self.store._save_atom(replace(self.atom, stdout_log=".ocura-oss/logs/bad\x00.log"))
+        self.store._save_run(replace(self.record, stdout_log=".ocura-oss/logs/bad\x00.log"))
         with self.assertRaises(StoreError):
-            self.store.read_verified_log(self.atom.id)
+            self.store.read_verified_log(self.record.id)
 
     def test_rejects_log_outside_log_directory(self):
         (self.root / "outside.log").write_bytes(self.stdout)
         for relative in ("outside.log", ".ocura-oss/logs/../../outside.log"):
             with self.subTest(relative=relative):
-                self.store._save_atom(replace(self.atom, stdout_log=relative))
+                self.store._save_run(replace(self.record, stdout_log=relative))
                 with self.assertRaisesRegex(StoreError, "log path"):
-                    self.store.read_verified_log(self.atom.id)
+                    self.store.read_verified_log(self.record.id)
 
 
 if __name__ == "__main__":

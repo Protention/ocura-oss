@@ -1,8 +1,8 @@
 # Ocura OSS
 
-Version 0.7.0.
+Version 0.8.0.
 
-This documentation accompanies the maintained **`examples/0.7`** branch. See the
+This documentation accompanies the **`examples/0.8`** branch. See the
 [example catalog](use-cases.md) for the fuller demonstrations and the
 [checkout setup](../README.md#install-and-try) for the matching development package.
 
@@ -16,16 +16,18 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## New in 0.7.0
+## New in 0.8.0
 
-Version 0.7 adds descriptive Python names, `runs` and `show` for history
-discovery, bounded verified log reads, and opt-in `--json-errors` for structured
-failures. It also adds `run --from ID --reason TEXT` to create and execute a
-variation in one call. The
+Version 0.8 uses the names ledger, run, and branch point throughout, including
+stored IDs, directories, and JSON keys, and removes the older names. It does not
+read state written by 0.7 or earlier; the [naming guide](naming-migration.md) maps the old names.
+
+Version 0.7 added `runs` and `show` for history
+discovery, bounded verified log reads, opt-in [log compression](autocompression.md), and
+opt-in `--json-errors` for structured failures. It also adds
+`run --from ID --reason TEXT` to create and execute a variation in one call. The
 [history example](../examples/history/README.md) starts with only a project root, retains failed
 retries and empty variations, and returns verified excerpts with stable references.
-The [naming guide](naming-migration.md) maps descriptive names to compatible legacy names
-and unchanged JSON fields. Existing ledgers and callers remain compatible.
 
 ## Why use it
 
@@ -86,30 +88,32 @@ concurrent use, and the limits of each option.
 
 Python 3.11 or later is required. Ocura OSS uses only the standard library at runtime.
 
-From the `examples/0.7` checkout root, in an activated virtual environment:
+From the `examples/0.8` checkout root, in an activated virtual environment:
 
 ```console
-python -m pip install ocura-oss==0.7.0
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
 ocura-oss demo --root ./ocura-oss-demo
 ```
 
 The demo runs the complete workflow and retains a new directory for inspection.
 Its destination must not already exist. Keep this checkout for its example
-scripts; they run with the [published 0.7.0 package](https://pypi.org/project/ocura-oss/0.7.0/).
-See the [release documentation](https://protention.dev/) for the package interfaces.
+scripts. This branch uses the draft 0.8.0 package; the setup above installs its
+matching wheel. The [published documentation](https://protention.dev/) describes
+the latest released version, which may differ from this draft.
 
 ## Compare two runs
 
 ```console
 ocura-oss init --name example --json
 ocura-oss run --json --param count=1 -- python -c "print(1)"
-ocura-oss branch --json --from <chokepoint-id> --reason "try count 2" --param count=2
+ocura-oss branch --json --from <branch-point-id> --reason "try count 2" --param count=2
 ocura-oss run --json --pathway <child-pathway-id> -- python -c "print(2)"
 ocura-oss verify --json
 ocura-oss compare --json
 ```
 
-Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
+Use the baseline's `branch_point_id` to branch and the branch result's `id` for the
 child run. When typing an ID by hand, its first four or more hexadecimal characters
 are enough if they match one record.
 
@@ -117,7 +121,7 @@ Without `--json`, `compare` prints:
 
 ```text
 comparison: ready
-source branch point: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
+source branch point: branch-point-eb61ef56491042ae94e61d1387f3f0d5
 source pathway: pathway-1378d1d28cb54987b9e80d59d61aec74
 source run: passed 0.056063s
 child pathway: pathway-ce4c71137dd449398fe2b4e0198c83c3
@@ -146,6 +150,12 @@ the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
 `ocura-oss run`, stops the command and records an interrupted attempt; a second
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
+Logs stay raw unless you ask for lossless gzip storage: `run --compress` stores
+that run's logs of at least 1 MiB as gzip when this saves at least 10%, and
+`compress --dry-run` previews a pass over older logs; `decompress` restores raw
+files. `ocura-oss logs <run-id>` prints the verified original bytes either way,
+and `--info` shows sizes, the storage path, and a readable fingerprint. See [log compression](autocompression.md).
+
 ## When to use something else
 
 Ocura OSS records what ran, how runs relate, and whether those records are still
@@ -165,21 +175,23 @@ adopt than a tracking platform.
 
 ## Primary example: record and inspect
 
-From this checkout, after `python -m pip install .`, create a small demonstration
-and inspect its retained history:
+The inspection script lives in the repository and is not installed with the package.
+With Ocura OSS installed, clone the repository, create a small demonstration, and
+inspect its retained history:
 
 ```console
+git clone https://github.com/Protention/ocura-oss.git
 ocura-oss demo --root ./ocura-oss-demo
-python examples/history/inspect_history.py --root ./ocura-oss-demo --archive
+python ocura-oss/examples/history/inspect_history.py --root ./ocura-oss-demo --archive
 ```
 
 Use a new destination for the demo; if it already exists from an earlier run,
-run only the inspection command. The [history guide](../examples/history/README.md)
+skip that command. The [history guide](../examples/history/README.md)
 explains the JSON report and how to inspect your own ledger. No optional dependencies
 are needed.
 
 The fuller CI-report, autoregressive, and Dream demonstrations live on the
-semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7).
+semi-permanent [`examples/0.8` branch](https://github.com/Protention/ocura-oss/tree/examples/0.8).
 See [use cases](use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
@@ -210,19 +222,19 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [CLI reference](cli.md): every command, JSON fields, and exit codes
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
-- [Examples](use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
+- [Log compression](autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
+- [Examples](use-cases.md): the primary walkthrough and demonstrations on `examples/0.8`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
-Repository references describe this checkout and remain readable directly on GitHub.
-The documentation for the published release is also [available online](https://protention.dev/).
+The documentation for the published release is at [protention.dev](https://protention.dev/).
+The repository's `docs/` directory follows `main`.
 
 ## Local state and operating model
 
 State lives under `.ocura-oss/` in the project root. A **ledger** identifies that
 state; a **pathway** groups runs in a lineage; a **run record** retains one command
 attempt; a **branch point** identifies terminal evidence from which a branch can
-be created. Older names (`Den`, `Atom`, and `Chokepoint`) remain Python aliases;
-stored IDs, directories, and JSON keys retain their existing spellings.
+be created.
 
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.

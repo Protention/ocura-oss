@@ -2,6 +2,7 @@
 
 """Stop requests, a killed recorder, and what a finished command leaves running."""
 
+import _thread
 import contextlib
 import json
 import os
@@ -196,11 +197,12 @@ class RecorderTests(unittest.TestCase):
 
                 def interrupt_at_boundary(frame, event, _argument, boundary=boundary):
                     nonlocal injected
-                    if frame.f_code is runner._execute.__code__ and event == "line":
+                    waiting = (runner._execute.__code__, runner._wait_for.__code__)
+                    if frame.f_code in waiting and event == "line":
                         reached = (
                             isinstance(sys.exception(), subprocess.TimeoutExpired)
                             if boundary == "timeout handler"
-                            else frame.f_locals.get("finished") is True
+                            else frame.f_locals.get("return_code") is not None
                         )
                         if reached and not injected:
                             injected = True
@@ -225,6 +227,35 @@ class RecorderTests(unittest.TestCase):
                 self.assertEqual(self.store.list_attempts(), [])
                 self.assertTrue(self.store.verify_state().ok)
 
+    def test_interrupts_while_polling_are_caught_wherever_they_land(self):
+        class Polling:
+            stdout = stderr = None
+
+            def __init__(self):
+                self.timer = threading.Timer(0.0005, _thread.interrupt_main)
+                self.stopped = False
+
+            def wait(self, timeout=None):
+                if self.stopped:
+                    return 0
+                if not self.timer.is_alive() and self.timer.ident is None:
+                    self.timer.start()
+                raise subprocess.TimeoutExpired("command", timeout)
+
+            def terminate(self):
+                self.stopped = True
+
+        with mock.patch.object(supervise, "Tether") as factory:
+            factory.return_value.launch.side_effect = lambda *_args, **_options: Polling()
+            for _ in range(100):
+                try:
+                    _, _, interrupted = runner._execute(
+                        ("simulated-command",), mock.Mock(root=self.root), None, None, False
+                    )
+                except KeyboardInterrupt:
+                    self.fail("an interrupt escaped while polling")
+                self.assertTrue(interrupted)
+
     def test_second_interrupt_during_stop_leaves_an_attempt_for_recovery(self):
         with mock.patch.object(supervise, "Tether") as factory:
             tether = factory.return_value
@@ -235,11 +266,11 @@ class RecorderTests(unittest.TestCase):
                 api.run(["simulated-command"], root=self.root)
             process.terminate.assert_called_once_with()
             tether.release.assert_called_once_with(command_finished=False)
-            self.assertEqual(self.store.list_atoms(), [])
+            self.assertEqual(self.store.list_run_records(), [])
             self.assertEqual(len(self.store.list_attempts()), 1)
             self.assertEqual(len(api.recover(self.root)), 1)
             tether.launch.assert_called_once()
-        self.assertEqual(self.store.list_atoms()[0].outcome.value, "abandoned")
+        self.assertEqual(self.store.list_run_records()[0].outcome.value, "abandoned")
         self.assertTrue(self.store.verify_state().ok)
 
     @unittest.skipUnless(os.name == "posix", "SIGTERM and SIGHUP are POSIX stop requests")
@@ -316,7 +347,7 @@ supervise.Tether.attach = delayed
                     ],
                     root=self.root,
                 )
-                self.assertEqual(result.atom.outcome.value, "passed")
+                self.assertEqual(result.record.outcome.value, "passed")
                 self.assertEqual(self.beat.read_bytes(), b".")
                 self.assertFalse(self.store.list_attempts())
                 self.assertTrue(self.store.verify_state().ok)
@@ -340,7 +371,7 @@ sys.path.insert(0, {str(Path(supervise.__file__).resolve().parents[1])!r})
 from ocura_oss import run, verify, Store
 root = {str(self.root)!r}
 result = run([sys.executable, '-c', 'pass'], root=root)
-assert result.atom.outcome.value == 'passed', result.atom.outcome
+assert result.record.outcome.value == 'passed', result.record.outcome
 assert verify(root).ok
 assert not Store(root).list_attempts()
 """,

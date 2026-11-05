@@ -14,20 +14,17 @@ class PublicSurfaceTests(unittest.TestCase):
         self.assertEqual(
             set(ocura_oss.__all__),
             {
-                "Atom",
-                "Ledger",
                 "RunRecord",
+                "Ledger",
                 "BranchPoint",
                 "Attempt",
                 "AttemptState",
                 "ChildComparison",
-                "Chokepoint",
                 "ComparisonResult",
                 "ComparisonState",
                 "DemoError",
                 "DemoReport",
                 "DemoStep",
-                "Den",
                 "FileDigest",
                 "Initialization",
                 "Outcome",
@@ -56,7 +53,7 @@ class PublicSurfaceTests(unittest.TestCase):
             self.assertTrue(hasattr(ocura_oss, name), name)
 
     def test_low_level_serialization_is_not_exported(self):
-        for name in ("atom_from_payload", "canonical_json", "checksum_for", "save_atom"):
+        for name in ("run_from_payload", "canonical_json", "checksum_for", "save_run"):
             self.assertNotIn(name, ocura_oss.__all__)
 
     def test_public_function_names_do_not_shadow_existing_submodules(self):
@@ -74,26 +71,26 @@ class ProgrammaticWorkflowTests(unittest.TestCase):
     def test_complete_programmatic_workflow(self):
         initialized = ocura_oss.initialize(self.root, name="API example")
         self.assertEqual(initialized.root, self.root.resolve())
-        self.assertEqual(initialized.den.default_pathway_id, initialized.pathway.id)
+        self.assertEqual(initialized.ledger.default_pathway_id, initialized.pathway.id)
 
         baseline = ocura_oss.run(
             [sys.executable, "-c", "print('baseline')"],
             root=self.root,
             parameters={"batch": "1"},
         )
-        self.assertIs(baseline.atom.outcome, ocura_oss.Outcome.PASSED)
-        self.assertEqual(baseline.atom.pathway_id, initialized.pathway.id)
+        self.assertIs(baseline.record.outcome, ocura_oss.Outcome.PASSED)
+        self.assertEqual(baseline.record.pathway_id, initialized.pathway.id)
         store = ocura_oss.Store(self.root)
-        store.verify_atom_evidence(baseline.atom)
-        self.assertIn("baseline", store.resolve_log_path(baseline.atom, "stdout").read_text())
+        store.verify_run_evidence(baseline.record)
+        self.assertIn("baseline", store.resolve_log_path(baseline.record, "stdout").read_text())
 
         child = ocura_oss.branch(
-            baseline.chokepoint.id,
+            baseline.branch_point.id,
             root=self.root,
             reason="increase batch",
             parameters={"batch": "4"},
         )
-        partial = ocura_oss.compare(baseline.chokepoint.id, root=self.root)
+        partial = ocura_oss.compare(baseline.branch_point.id, root=self.root)
         self.assertIs(partial.state, ocura_oss.ComparisonState.PARTIAL)
         self.assertEqual(partial.children[0].pathway_id, child.id)
 
@@ -103,9 +100,9 @@ class ProgrammaticWorkflowTests(unittest.TestCase):
             pathway_id=child.id,
             parameters={"batch": "4"},
         )
-        self.assertIs(child_run.atom.outcome, ocura_oss.Outcome.PASSED)
+        self.assertIs(child_run.record.outcome, ocura_oss.Outcome.PASSED)
 
-        ready = ocura_oss.compare(baseline.chokepoint.id, root=self.root)
+        ready = ocura_oss.compare(baseline.branch_point.id, root=self.root)
         self.assertIs(ready.state, ocura_oss.ComparisonState.READY)
         self.assertEqual(
             ready.children[0].run_parameters.changed,
@@ -113,14 +110,14 @@ class ProgrammaticWorkflowTests(unittest.TestCase):
         )
         report = ocura_oss.verify(self.root)
         self.assertTrue(report.ok, report.problems)
-        self.assertEqual(report.atoms, 2)
+        self.assertEqual(report.run_records, 2)
         self.assertEqual(report.logs_checked, 4)
 
     def test_failed_command_is_returned_as_evidence(self):
         ocura_oss.initialize(self.root)
         result = ocura_oss.run([sys.executable, "-c", "import sys; sys.exit(7)"], root=self.root)
-        self.assertIs(result.atom.outcome, ocura_oss.Outcome.FAILED)
-        self.assertEqual(result.atom.return_code, 7)
+        self.assertIs(result.record.outcome, ocura_oss.Outcome.FAILED)
+        self.assertEqual(result.record.return_code, 7)
         self.assertTrue(ocura_oss.verify(self.root).ok)
 
     def test_string_command_is_rejected_as_ambiguous(self):
@@ -157,7 +154,7 @@ class ProgrammaticWorkflowTests(unittest.TestCase):
         result = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root)
         store = ocura_oss.Store(self.root)
         with self.assertRaisesRegex(ocura_oss.StoreError, "log stream"):
-            store.resolve_log_path(result.atom, "combined")
+            store.resolve_log_path(result.record, "combined")
 
     def test_existing_state_is_required_after_initialization(self):
         for operation in (
@@ -171,8 +168,8 @@ class ProgrammaticWorkflowTests(unittest.TestCase):
     def test_store_accepts_string_roots_and_resolves_them(self):
         store = ocura_oss.Store(str(self.root))
         self.assertEqual(store.root, self.root.resolve())
-        den, pathway = store.initialize_state(name="store example")
-        self.assertEqual(store.load_den(), den)
+        ledger, pathway = store.initialize_state(name="store example")
+        self.assertEqual(store.load_ledger(), ledger)
         self.assertEqual(store.load_pathway(pathway.id), pathway)
         self.assertTrue(store.verify_state().ok)
 

@@ -1,11 +1,11 @@
 # Fix a CI job report and retain the evidence
 
-This repository-only example uses **Ocura OSS 0.7.0**. It needs Python 3.11+
+This repository-only example uses **Ocura OSS 0.8.0**. It needs Python 3.11+
 with Ocura installed; the reporter and its checks use only the standard library.
 The example is copied separately and is not bundled in the wheel or source distribution.
 
-It is part of the maintained [0.7 example catalog](../../docs/use-cases.md) on
-`examples/0.7`. Use the [catalog setup](../../README.md#install-and-try) to obtain
+It is part of the [0.8 example catalog](../../docs/use-cases.md) on
+`examples/0.8`. Use the [catalog setup](../../README.md#install-and-try) to obtain
 the matching checkout.
 
 A small CI job reporter starts by counting input rows. That gives the wrong answer
@@ -18,7 +18,8 @@ recording the failure, the reason for the change, and the passing result.
 From the repository root, in a virtual environment:
 
 ```console
-python -m pip install ocura-oss==0.7.0
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
 python examples/ci_report/workflow.py run --root ./ci-report-run
 python examples/ci_report/workflow.py report --root ./ci-report-run --json
 ```
@@ -40,13 +41,13 @@ CI report workflow: complete
 ...
 starter: failed (0/31 checks passed; exit 1)
   intent: Count final job outcomes by highest attempt; validate rows before emitting a summary.
-  run_id: atom-<starter-run>
-  branch_point_id: chokepoint-<starter-branch-point>
+  run_id: run-<starter-run>
+  branch_point_id: branch-point-<starter-branch-point>
   verified stderr excerpt:
     FAIL out-of-order attempts: expected ... "jobs": 5 ...; got ... "jobs": 8 ...
 ...
 completed: passed (31/31 checks passed; exit 0)
-  source_branch_point_id: chokepoint-<starter-branch-point>
+  source_branch_point_id: branch-point-<starter-branch-point>
   reason: Group attempts by job, account for retries and recovery, and reject invalid rows.
 ...
 Verified 4 logs and preserved source hashes.
@@ -61,7 +62,7 @@ those arguments remain available in the ledger's run records.
 
 ## Follow the IDs to the evidence
 
-The Python driver uses the 0.7 combined operation:
+The Python driver uses the combined branch-and-run operation:
 
 ```python
 baseline = run(command, root=root, context_files=source_files)
@@ -79,17 +80,15 @@ variation = run(
 The example declares the intent and reporter version on both calls: labels set
 only on the source run are not inherited by a child pathway.
 
-The CLI keeps compatible JSON and storage names. `run --json` returns `atom_id`
-(the run ID), `chokepoint_id` (the branch point), and `pathway_id`; `show --json`
-uses `atom` and `chokepoint` objects. The example's report uses descriptive names
-without changing package JSON, existing IDs, or storage. Use the *branch point*
+The 0.8 CLI's `run --json` returns `run_id`, `branch_point_id`, and `pathway_id`;
+`show --json` uses `run` and `branch_point` objects. Use the *branch point*
 for `--from`, and the *run ID* for `show` and `logs`:
 
 ```powershell
 # Replace these placeholders with the actual report fields.
-$sourcePoint = 'chokepoint-<starter-branch-point>'
-$starterRun = 'atom-<starter-run>'
-$completedRun = 'atom-<completed-run>'
+$sourcePoint = 'branch-point-<starter-branch-point>'
+$starterRun = 'run-<starter-run>'
+$completedRun = 'run-<completed-run>'
 ocura-oss compare --root ./ci-report-run --from $sourcePoint --archive
 ocura-oss show $completedRun --root ./ci-report-run --command --json --archive
 ocura-oss logs $starterRun --root ./ci-report-run --stream stderr --archive
@@ -130,7 +129,7 @@ destination names:
 ```powershell
 python -m pip wheel . --no-deps --wheel-dir ./dist
 python -m venv .venv-example
-.\.venv-example\Scripts\python.exe -m pip install --no-index --no-deps ./dist/ocura_oss-0.7.0-py3-none-any.whl
+.\.venv-example\Scripts\python.exe -m pip install --no-index --no-deps ./dist/ocura_oss-0.8.0-py3-none-any.whl
 Copy-Item -Recurse ./examples/ci_report ./ci-report-example
 $env:PYTHONPATH = ''
 .\.venv-example\Scripts\python.exe ./ci-report-example/workflow.py run --root ./ci-report-wheel-run

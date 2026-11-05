@@ -89,15 +89,15 @@ class AutoregressiveContractTests(unittest.TestCase):
                 mock.patch.object(driver.importlib.util, "find_spec", return_value=object()),
             ):
                 result = driver.run_experiment(args)
-            self.assertEqual(result["verification"], {"ok": True, "atoms": 2, "logs": 4})
+            self.assertEqual(result["verification"], {"ok": True, "runs": 2, "logs": 4})
             self.assertEqual(result["validation_loss_delta"], -0.25)
             child = result["comparison"]["children"][0]
             self.assertEqual(child["reason"], "test 4 training steps against 2")
-            self.assertEqual(child["source_chokepoint_id"], result["source_chokepoint_id"])
+            self.assertEqual(child["source_branch_point_id"], result["source_branch_point_id"])
             store = Store(args.root)
             self.assertEqual(len(store.list_pathways()), 2)
             for role in ("baseline", "variant"):
-                record = store.load_run(result[role]["atom_id"])
+                record = store.load_run(result[role]["run_id"])
                 self.assertEqual(record.declared_parameters["steps"], str(result[role]["steps"]))
                 self.assertIn("--steps", record.command)
 
@@ -139,7 +139,7 @@ class AutoregressiveContractTests(unittest.TestCase):
             self.assertIn('"execution": "not_started"', message)
             self.assertEqual(Store(root).list_run_records(), [])
 
-    def test_explicit_report_reads_legacy_pair_after_newer_work_without_changes(self):
+    def test_explicit_report_reads_two_step_pair_after_newer_work_without_changes(self):
         driver = load_example("experiment")
         with tempfile.TemporaryDirectory() as temporary:
             root = initialize(Path(temporary) / "project").root
@@ -159,20 +159,20 @@ class AutoregressiveContractTests(unittest.TestCase):
                 }
                 command = [sys.executable, "-c", f"print({json.dumps(metrics)!r})"]
                 baseline = run(command, root=root, parameters=parameters)
-                # Earlier callers use these names and create the child separately.
-                child = branch(baseline.chokepoint.id, root=root, reason="legacy two-step")
+                # The explicit branch-then-run workflow remains supported.
+                child = branch(baseline.branch_point.id, root=root, reason="explicit two-step")
                 run(command, root=root, pathway_id=child.id, parameters=parameters)
                 return baseline
 
             earlier = recorded_pair(2)
             later = recorded_pair(4)
             before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
-            selected = driver.report(root, source_branch_point_id=earlier.chokepoint.id)
+            selected = driver.report(root, source_branch_point_id=earlier.branch_point.id)
             automatic = driver.report(root)
-            self.assertEqual(selected["source_chokepoint_id"], earlier.chokepoint.id)
-            self.assertEqual(selected["baseline"]["atom_id"], earlier.atom.id)
-            self.assertEqual(automatic["source_chokepoint_id"], later.chokepoint.id)
-            self.assertEqual(selected["verification"], {"ok": True, "atoms": 4, "logs": 8})
+            self.assertEqual(selected["source_branch_point_id"], earlier.branch_point.id)
+            self.assertEqual(selected["baseline"]["run_id"], earlier.record.id)
+            self.assertEqual(automatic["source_branch_point_id"], later.branch_point.id)
+            self.assertEqual(selected["verification"], {"ok": True, "runs": 4, "logs": 8})
             self.assertEqual(before, {p: p.read_bytes() for p in root.rglob("*") if p.is_file()})
 
 
@@ -203,7 +203,7 @@ class AutoregressiveIntegrationTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 0, completed.stderr)
                 result = json.loads(completed.stdout)
                 reports[backend] = result
-                self.assertEqual(result["verification"], {"ok": True, "atoms": 2, "logs": 4})
+                self.assertEqual(result["verification"], {"ok": True, "runs": 2, "logs": 4})
                 for key, steps in (("baseline", 40), ("variant", 120)):
                     metrics = result[key]
                     self.assertEqual(metrics["backend"], backend)

@@ -32,16 +32,16 @@ class BranchSourceTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={},
         )
-        chokepoint, atom, pathway = branching.load_verified_source(
-            self.store, execution.chokepoint.id
+        branch_point, record, pathway = branching.load_verified_source(
+            self.store, execution.branch_point.id
         )
-        self.assertEqual(chokepoint.id, execution.chokepoint.id)
-        self.assertEqual(atom.id, execution.atom.id)
+        self.assertEqual(branch_point.id, execution.branch_point.id)
+        self.assertEqual(record.id, execution.record.id)
         self.assertEqual(pathway.id, self.pathway.id)
 
     def test_missing_source_is_rejected(self):
         with self.assertRaises(StoreError):
-            branching.load_verified_source(self.store, "chokepoint-" + "0" * 32)
+            branching.load_verified_source(self.store, "branch-point-" + "0" * 32)
 
     def test_checksum_tampered_source_is_rejected(self):
         execution = runner.run_command(
@@ -50,20 +50,20 @@ class BranchSourceTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={},
         )
-        path = self.store.chokepoints_dir / f"{execution.chokepoint.id}.json"
+        path = self.store.branch_points_dir / f"{execution.branch_point.id}.json"
         envelope = json.loads(path.read_text("utf-8"))
         envelope["payload"]["outcome"] = "failed"
         path.write_text(json.dumps(envelope), "utf-8")
         with self.assertRaises(StoreError):
-            branching.load_verified_source(self.store, execution.chokepoint.id)
+            branching.load_verified_source(self.store, execution.branch_point.id)
 
     def test_nonterminal_source_is_rejected(self):
-        identifier = model.make_id("chokepoint")
-        self.store._save_chokepoint(
-            model.Chokepoint(
+        identifier = model.make_id("branch_point")
+        self.store._save_branch_point(
+            model.BranchPoint(
                 id=identifier,
                 pathway_id=self.pathway.id,
-                atom_id=model.make_id("atom"),
+                run_id=model.make_id("run"),
                 created_at=model.format_timestamp(model.utc_now()),
                 kind="checkpoint",
                 outcome=model.Outcome.PASSED,
@@ -74,12 +74,12 @@ class BranchSourceTests(unittest.TestCase):
             branching.load_verified_source(self.store, identifier)
 
     def test_nonbranchable_source_is_rejected(self):
-        identifier = model.make_id("chokepoint")
-        self.store._save_chokepoint(
-            model.Chokepoint(
+        identifier = model.make_id("branch_point")
+        self.store._save_branch_point(
+            model.BranchPoint(
                 id=identifier,
                 pathway_id=self.pathway.id,
-                atom_id=model.make_id("atom"),
+                run_id=model.make_id("run"),
                 created_at=model.format_timestamp(model.utc_now()),
                 kind="terminal",
                 outcome=model.Outcome.PASSED,
@@ -96,9 +96,9 @@ class BranchSourceTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={},
         )
-        (self.store.logs_dir / f"{execution.atom.id}.stdout.log").unlink()
+        (self.store.logs_dir / f"{execution.record.id}.stdout.log").unlink()
         with self.assertRaises(StoreError):
-            branching.load_verified_source(self.store, execution.chokepoint.id)
+            branching.load_verified_source(self.store, execution.branch_point.id)
 
     def test_source_with_tampered_log_is_rejected(self):
         execution = runner.run_command(
@@ -107,10 +107,10 @@ class BranchSourceTests(unittest.TestCase):
             argv=[sys.executable, "-c", "print('evidence')"],
             declared_parameters={},
         )
-        log = self.store.logs_dir / f"{execution.atom.id}.stdout.log"
+        log = self.store.logs_dir / f"{execution.record.id}.stdout.log"
         log.write_bytes(b"rewritten\n")
         with self.assertRaises(StoreError):
-            branching.load_verified_source(self.store, execution.chokepoint.id)
+            branching.load_verified_source(self.store, execution.branch_point.id)
 
 
 class BranchCreationTests(unittest.TestCase):
@@ -125,41 +125,41 @@ class BranchCreationTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={},
         )
-        self.source = branching.load_verified_source(self.store, self.execution.chokepoint.id)
+        self.source = branching.load_verified_source(self.store, self.execution.branch_point.id)
 
     def test_branch_is_metadata_only(self):
-        atoms_before = {item.id for item in self.store.list_atoms()}
+        runs_before = {item.id for item in self.store.list_run_records()}
         logs_before = sorted(p.name for p in self.store.logs_dir.iterdir())
         root_entries_before = sorted(p.name for p in self.root.iterdir())
 
         child = branching.create_child_pathway(
             self.store,
-            source_chokepoint=self.source[0],
+            source_branch_point=self.source[0],
             source_pathway=self.source[2],
             reason="try a change",
             overrides={"batch": "2"},
         )
 
-        self.assertEqual({item.id for item in self.store.list_atoms()}, atoms_before)
+        self.assertEqual({item.id for item in self.store.list_run_records()}, runs_before)
         self.assertEqual(sorted(p.name for p in self.store.logs_dir.iterdir()), logs_before)
         self.assertEqual(sorted(p.name for p in self.root.iterdir()), root_entries_before)
         self.assertEqual(child.parent_pathway_id, self.pathway.id)
-        self.assertEqual(child.source_chokepoint_id, self.execution.chokepoint.id)
+        self.assertEqual(child.source_branch_point_id, self.execution.branch_point.id)
         self.assertEqual(child.reason, "try a change")
         self.assertEqual(child.parameters, {"batch": "2"})
 
     def test_effective_parameters_merge_parent_and_overrides(self):
         parent = branching.create_child_pathway(
             self.store,
-            source_chokepoint=self.source[0],
+            source_branch_point=self.source[0],
             source_pathway=self.source[2],
             reason="first",
             overrides={"batch": "2"},
         )
-        second_source = branching.load_verified_source(self.store, self.execution.chokepoint.id)
+        second_source = branching.load_verified_source(self.store, self.execution.branch_point.id)
         grandchild = branching.create_child_pathway(
             self.store,
-            source_chokepoint=second_source[0],
+            source_branch_point=second_source[0],
             source_pathway=parent,
             reason="second",
             overrides={"batch": "3", "extra": "x"},
@@ -172,7 +172,7 @@ class BranchCreationTests(unittest.TestCase):
             with self.assertRaises(StoreError):
                 branching.create_child_pathway(
                     self.store,
-                    source_chokepoint=self.source[0],
+                    source_branch_point=self.source[0],
                     source_pathway=self.source[2],
                     reason=reason,
                     overrides={},
@@ -194,33 +194,33 @@ class CompareTests(unittest.TestCase):
             declared_parameters={},
             now=now,
         )
-        return branching.load_verified_source(self.store, execution.chokepoint.id), execution
+        return branching.load_verified_source(self.store, execution.branch_point.id), execution
 
     def test_no_branch_state(self):
-        (_chokepoint, _atom, _pathway), execution = self._source()
-        result = branching.compare(self.store, execution.chokepoint.id)
+        (_branch_point, _run, _pathway), execution = self._source()
+        result = branching.compare(self.store, execution.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.NO_BRANCH)
         self.assertEqual(result.children, ())
 
     def test_partial_state_when_child_has_no_run(self):
-        (_chokepoint, _atom, pathway), execution = self._source()
+        (_branch_point, _run, pathway), execution = self._source()
         branching.create_child_pathway(
             self.store,
-            source_chokepoint=execution.chokepoint,
+            source_branch_point=execution.branch_point,
             source_pathway=pathway,
             reason="not run yet",
             overrides={"a": "1"},
         )
-        result = branching.compare(self.store, execution.chokepoint.id)
+        result = branching.compare(self.store, execution.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.PARTIAL)
         self.assertTrue(result.children[0].missing_evidence)
         self.assertIsNone(result.children[0].child_run)
 
     def test_ready_state_with_parameter_deltas(self):
-        (_chokepoint, _atom, pathway), execution = self._source()
+        (_branch_point, _run, pathway), execution = self._source()
         first = branching.create_child_pathway(
             self.store,
-            source_chokepoint=execution.chokepoint,
+            source_branch_point=execution.branch_point,
             source_pathway=pathway,
             reason="add batch",
             overrides={"batch": "2", "shared": "same"},
@@ -231,7 +231,7 @@ class CompareTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={"batch": "2"},
         )
-        result = branching.compare(self.store, execution.chokepoint.id)
+        result = branching.compare(self.store, execution.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.READY)
         child = result.children[0]
         self.assertFalse(child.missing_evidence)
@@ -241,7 +241,7 @@ class CompareTests(unittest.TestCase):
 
         second = branching.create_child_pathway(
             self.store,
-            source_chokepoint=first_run.chokepoint,
+            source_branch_point=first_run.branch_point,
             source_pathway=first,
             reason="change batch",
             overrides={"batch": "9"},
@@ -252,7 +252,7 @@ class CompareTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={"batch": "9"},
         )
-        deep = branching.compare(self.store, first_run.chokepoint.id)
+        deep = branching.compare(self.store, first_run.branch_point.id)
         self.assertIs(deep.state, model.ComparisonState.READY)
         changed = deep.children[0]
         self.assertEqual(changed.pathway_id, second.id)
@@ -260,19 +260,19 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(changed.parameters.changed, {"batch": {"source": "2", "child": "9"}})
         self.assertEqual(changed.parameters.added, {})
 
-    def test_compare_without_branches_selects_newest_chokepoint(self):
+    def test_compare_without_branches_selects_newest_branch_point(self):
         (_c1, _a1, _p1), first_execution = self._source()
         (_c2, _a2, _p2), second_execution = self._source()
         result = branching.compare(self.store, None)
-        self.assertEqual(result.source_chokepoint_id, second_execution.chokepoint.id)
+        self.assertEqual(result.source_branch_point_id, second_execution.branch_point.id)
 
-    def test_compare_selects_branched_source_over_newer_unbranched_chokepoint(self):
+    def test_compare_selects_branched_source_over_newer_unbranched_branch_point(self):
         source, first_execution = self._source(
             now=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
         )
         branching.create_child_pathway(
             self.store,
-            source_chokepoint=source[0],
+            source_branch_point=source[0],
             source_pathway=source[2],
             reason="test a branch",
             overrides={},
@@ -282,7 +282,7 @@ class CompareTests(unittest.TestCase):
 
         result = branching.compare(self.store, None)
 
-        self.assertEqual(result.source_chokepoint_id, first_execution.chokepoint.id)
+        self.assertEqual(result.source_branch_point_id, first_execution.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.PARTIAL)
 
     def test_compare_selects_newest_source_when_multiple_have_children(self):
@@ -291,7 +291,7 @@ class CompareTests(unittest.TestCase):
         )
         branching.create_child_pathway(
             self.store,
-            source_chokepoint=first_source[0],
+            source_branch_point=first_source[0],
             source_pathway=first_source[2],
             reason="first branch",
             overrides={},
@@ -302,7 +302,7 @@ class CompareTests(unittest.TestCase):
         )
         branching.create_child_pathway(
             self.store,
-            source_chokepoint=second_source[0],
+            source_branch_point=second_source[0],
             source_pathway=second_source[2],
             reason="second branch",
             overrides={},
@@ -311,31 +311,31 @@ class CompareTests(unittest.TestCase):
 
         result = branching.compare(self.store, None)
 
-        self.assertEqual(result.source_chokepoint_id, second_execution.chokepoint.id)
+        self.assertEqual(result.source_branch_point_id, second_execution.branch_point.id)
 
-    def test_compare_fails_closed_on_invalid_chokepoint(self):
-        (_chokepoint, _atom, _pathway), _first = self._source()
+    def test_compare_fails_closed_on_invalid_branch_point(self):
+        (_branch_point, _run, _pathway), _first = self._source()
         (_c2, _a2, _p2), second_execution = self._source()
-        path = self.store.chokepoints_dir / f"{second_execution.chokepoint.id}.json"
+        path = self.store.branch_points_dir / f"{second_execution.branch_point.id}.json"
         path.write_text("{broken", "utf-8")
         with self.assertRaises(StoreError):
             branching.compare(self.store, None)
 
-    def test_automatic_selection_refuses_unrelated_malformed_atom(self):
-        (_chokepoint, _atom, _pathway), _execution = self._source()
-        bad = self.store.atoms_dir / ("atom-" + "a" * 32 + ".json")
+    def test_automatic_selection_refuses_unrelated_malformed_run(self):
+        (_branch_point, _run, _pathway), _execution = self._source()
+        bad = self.store.runs_dir / ("run-" + "a" * 32 + ".json")
         bad.write_text("{broken", "utf-8")
         with self.assertRaises(StoreError):
             branching.compare(self.store, None)
 
     def test_automatic_selection_refuses_broken_references_anywhere(self):
-        (_chokepoint, _atom, _pathway), _execution = self._source()
-        ghost_atom = model.make_id("atom")
-        self.store._save_chokepoint(
-            model.Chokepoint(
-                id=model.make_id("chokepoint"),
+        (_branch_point, _run, _pathway), _execution = self._source()
+        ghost_run = model.make_id("run")
+        self.store._save_branch_point(
+            model.BranchPoint(
+                id=model.make_id("branch_point"),
                 pathway_id=self.pathway.id,
-                atom_id=ghost_atom,
+                run_id=ghost_run,
                 created_at=model.format_timestamp(model.utc_now()),
                 kind="terminal",
                 outcome=model.Outcome.PASSED,
@@ -345,16 +345,16 @@ class CompareTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             branching.compare(self.store, None)
 
-    def test_automatic_selection_refuses_ghost_pathway_atom(self):
-        (_chokepoint, _atom, _pathway), _execution = self._source()
+    def test_automatic_selection_refuses_ghost_pathway_run(self):
+        (_branch_point, _run, _pathway), _execution = self._source()
         ghost_pathway = "pathway-" + "f" * 32
-        atom_id = model.make_id("atom")
+        run_id = model.make_id("run")
         empty_digest = hashlib.sha256(b"").hexdigest()
         for suffix in ("stdout", "stderr"):
-            (self.store.logs_dir / f"{atom_id}.{suffix}.log").write_bytes(b"")
-        self.store._save_atom(
-            model.Atom(
-                id=atom_id,
+            (self.store.logs_dir / f"{run_id}.{suffix}.log").write_bytes(b"")
+        self.store._save_run(
+            model.RunRecord(
+                id=run_id,
                 pathway_id=ghost_pathway,
                 started_at="2026-01-01T00:00:00.000000+00:00",
                 finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -364,8 +364,8 @@ class CompareTests(unittest.TestCase):
                 launch_error_category=None,
                 declared_parameters={},
                 command=("x",),
-                stdout_log=f".ocura-oss/logs/{atom_id}.stdout.log",
-                stderr_log=f".ocura-oss/logs/{atom_id}.stderr.log",
+                stdout_log=f".ocura-oss/logs/{run_id}.stdout.log",
+                stderr_log=f".ocura-oss/logs/{run_id}.stderr.log",
                 stdout_bytes=0,
                 stderr_bytes=0,
                 stdout_sha256=empty_digest,
@@ -375,11 +375,11 @@ class CompareTests(unittest.TestCase):
         with self.assertRaises(StoreError):
             branching.compare(self.store, None)
 
-    def test_automatic_selection_refuses_duplicated_atom_record(self):
-        (_chokepoint, _atom, _pathway), execution = self._source()
-        original = self.store.atoms_dir / f"{execution.atom.id}.json"
-        other_id = model.make_id("atom")
-        (self.store.atoms_dir / f"{other_id}.json").write_bytes(original.read_bytes())
+    def test_automatic_selection_refuses_duplicated_run_record(self):
+        (_branch_point, _run, _pathway), execution = self._source()
+        original = self.store.runs_dir / f"{execution.record.id}.json"
+        other_id = model.make_id("run")
+        (self.store.runs_dir / f"{other_id}.json").write_bytes(original.read_bytes())
         with self.assertRaises(StoreError):
             branching.compare(self.store, None)
 
@@ -390,12 +390,12 @@ class CompareTests(unittest.TestCase):
             argv=[sys.executable, "-c", "print('baseline')"],
             declared_parameters={"batch": "1"},
         )
-        _cp, _atom, root_pathway = branching.load_verified_source(
-            self.store, source_execution.chokepoint.id
+        _cp, _run, root_pathway = branching.load_verified_source(
+            self.store, source_execution.branch_point.id
         )
         child = branching.create_child_pathway(
             self.store,
-            source_chokepoint=source_execution.chokepoint,
+            source_branch_point=source_execution.branch_point,
             source_pathway=root_pathway,
             reason="try batch four",
             overrides={"batch": "4"},
@@ -406,7 +406,7 @@ class CompareTests(unittest.TestCase):
             argv=[sys.executable, "-c", "print('child')"],
             declared_parameters={"batch": "4"},
         )
-        result = branching.compare(self.store, source_execution.chokepoint.id)
+        result = branching.compare(self.store, source_execution.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.READY)
         comparison = result.children[0]
         self.assertIsNotNone(comparison.run_parameters)
@@ -417,9 +417,9 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(comparison.run_parameters.inherited, {})
         self.assertEqual(comparison.parameters.added, {"batch": "4"})
 
-    def test_select_source_raises_without_chokepoints(self):
+    def test_select_source_raises_without_branch_points(self):
         with self.assertRaises(StoreError):
-            branching.select_source_chokepoint(self.store)
+            branching.select_source_branch_point(self.store)
 
     def test_failed_and_launch_failed_sources_are_branchable(self):
         failed = runner.run_command(
@@ -428,15 +428,15 @@ class CompareTests(unittest.TestCase):
             argv=[sys.executable, "-c", "import sys; sys.exit(1)"],
             declared_parameters={},
         )
-        self.assertEqual(failed.atom.outcome, model.Outcome.FAILED)
+        self.assertEqual(failed.record.outcome, model.Outcome.FAILED)
         child = branching.create_child_pathway(
             self.store,
-            source_chokepoint=failed.chokepoint,
+            source_branch_point=failed.branch_point,
             source_pathway=self.pathway,
             reason="from failure",
             overrides={},
         )
-        result = branching.compare(self.store, failed.chokepoint.id)
+        result = branching.compare(self.store, failed.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.PARTIAL)
         self.assertEqual(result.children[0].pathway_id, child.id)
 
@@ -446,20 +446,20 @@ class CompareTests(unittest.TestCase):
             argv=["definitely-not-a-real-executable-ocura-oss"],
             declared_parameters={},
         )
-        self.assertEqual(launched.atom.outcome, model.Outcome.LAUNCH_FAILED)
+        self.assertEqual(launched.record.outcome, model.Outcome.LAUNCH_FAILED)
         second_child = branching.create_child_pathway(
             self.store,
-            source_chokepoint=launched.chokepoint,
+            source_branch_point=launched.branch_point,
             source_pathway=self.pathway,
             reason="from launch failure",
             overrides={},
         )
-        result = branching.compare(self.store, launched.chokepoint.id)
+        result = branching.compare(self.store, launched.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.PARTIAL)
         self.assertEqual(result.children[0].pathway_id, second_child.id)
 
     def test_children_are_listed_in_creation_order(self):
-        (_chokepoint, _atom, pathway), execution = self._source()
+        (_branch_point, _run, pathway), execution = self._source()
         import datetime
 
         base = datetime.datetime(2026, 5, 1, tzinfo=datetime.UTC)
@@ -469,14 +469,14 @@ class CompareTests(unittest.TestCase):
         for index in range(3):
             child = branching.create_child_pathway(
                 self.store,
-                source_chokepoint=execution.chokepoint,
+                source_branch_point=execution.branch_point,
                 source_pathway=pathway,
                 reason=f"child {index}",
                 overrides={},
                 now=clock,
             )
             created.append(child.id)
-        result = branching.compare(self.store, execution.chokepoint.id)
+        result = branching.compare(self.store, execution.branch_point.id)
         self.assertIs(result.state, model.ComparisonState.PARTIAL)
         self.assertEqual([item.pathway_id for item in result.children], created)
 
@@ -484,7 +484,7 @@ class CompareTests(unittest.TestCase):
         (_c1, _a1, root_pathway), root_execution = self._source()
         first = branching.create_child_pathway(
             self.store,
-            source_chokepoint=root_execution.chokepoint,
+            source_branch_point=root_execution.branch_point,
             source_pathway=root_pathway,
             reason="level one",
             overrides={"level": "1"},
@@ -497,7 +497,7 @@ class CompareTests(unittest.TestCase):
         )
         second = branching.create_child_pathway(
             self.store,
-            source_chokepoint=first_run.chokepoint,
+            source_branch_point=first_run.branch_point,
             source_pathway=first,
             reason="level two",
             overrides={"level": "2"},
@@ -508,7 +508,7 @@ class CompareTests(unittest.TestCase):
             argv=["true"],
             declared_parameters={},
         )
-        deep = branching.compare(self.store, first_run.chokepoint.id)
+        deep = branching.compare(self.store, first_run.branch_point.id)
         self.assertEqual(deep.source_pathway_id, first.id)
         self.assertEqual([item.pathway_id for item in deep.children], [second.id])
         self.assertEqual(deep.children[0].parameters.inherited, {})
@@ -518,10 +518,10 @@ class CompareTests(unittest.TestCase):
         )
 
     def test_compare_rejects_child_with_unverified_evidence(self):
-        (_chokepoint, _atom, pathway), execution = self._source()
+        (_branch_point, _run, pathway), execution = self._source()
         child = branching.create_child_pathway(
             self.store,
-            source_chokepoint=execution.chokepoint,
+            source_branch_point=execution.branch_point,
             source_pathway=pathway,
             reason="later broken",
             overrides={},
@@ -532,9 +532,9 @@ class CompareTests(unittest.TestCase):
             argv=[sys.executable, "-c", "print('child')"],
             declared_parameters={},
         )
-        (self.store.logs_dir / f"{child_run.atom.id}.stdout.log").unlink()
+        (self.store.logs_dir / f"{child_run.record.id}.stdout.log").unlink()
         with self.assertRaises(StoreError):
-            branching.compare(self.store, execution.chokepoint.id)
+            branching.compare(self.store, execution.branch_point.id)
 
 
 if __name__ == "__main__":

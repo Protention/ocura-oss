@@ -1,9 +1,9 @@
 # Small autoregressive experiment
 
-For the released Ocura OSS 0.7.0 interfaces.
+For the draft Ocura OSS 0.8.0 interfaces.
 
-This guide belongs to the maintained [0.7 example catalog](../../docs/use-cases.md)
-on `examples/0.7`. Use the [catalog setup](../../README.md#install-and-try) to obtain
+This guide belongs to the [0.8 example catalog](../../docs/use-cases.md)
+on `examples/0.8`. Use the [catalog setup](../../README.md#install-and-try) to obtain
 the matching checkout.
 
 Train a character-level next-token model with **PyTorch** or **JAX**, either directly
@@ -37,13 +37,15 @@ From a repository checkout, use a virtual
 environment with Python 3.11 or later, subject to your framework's platform support:
 
 ```console
-python -m pip install ocura-oss==0.7.0
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
 ```
 
-The driver uses the combined branch-and-run interface released in 0.7.0.
-Installing this checkout with `python -m pip install .` also works. The updated
-driver still reads existing schema-2 autoregressive example ledgers without
-rewriting them.
+The driver uses the combined branch-and-run interface with 0.8's JSON fields.
+Installing this checkout with `python -m pip install .` also works. Use a new
+ledger: 0.8 cannot read schema-2 histories. Keep the
+[0.7 checkout](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/autoregressive)
+and its matching package to report on older experiments.
 
 Scripts and requirements live only in this repository; neither the wheel nor the
 source distribution includes them. The core package has no PyTorch, JAX, or Ray
@@ -98,7 +100,7 @@ ocura-oss compare --root ./ar-pytorch --json
 ocura-oss verify --root ./ar-pytorch --json
 ```
 
-Reporting with this driver needs Ocura OSS 0.7.0 or later and the standard
+Reporting with this driver needs Ocura OSS 0.8.0 and the standard
 library; PyTorch, JAX, and Ray are not imported for a report. It verifies
 the saved state, reads each run's stdout through `Store.read_verified_log()` so the
 consumed bytes match their recorded size and digest, and checks that reported
@@ -107,16 +109,16 @@ calculates `variant.validation_loss - baseline.validation_loss`. A negative
 delta means lower validation loss. The generic `ocura-oss compare` command returns
 execution summaries and parameter deltas; the example supplies metric interpretation.
 
-The report keeps its existing JSON field names for callers:
+The report uses the 0.8 names for run and branch-point identifiers:
 
 | JSON field | Meaning and next use |
 | --- | --- |
-| `source_chokepoint_id` | Source branch-point ID; pass it to `report --from` or `ocura-oss compare --from`. |
-| `baseline.atom_id`, `variant.atom_id` | Run-record IDs; pass one to `ocura-oss show` or `ocura-oss logs`. |
+| `source_branch_point_id` | Source branch-point ID; pass it to `report --from` or `ocura-oss compare --from`. |
+| `baseline.run_id`, `variant.run_id` | Run-record IDs; pass one to `ocura-oss show` or `ocura-oss logs`. |
 | `comparison.children[0].pathway_id` | The variation's pathway; subsequent runs can select it with `run --pathway`. |
 | `baseline.stdout_log`, `variant.stdout_log` | Recorded log references; use the verified reader instead of opening storage files directly. |
 
-For example, replace `RUN_ID` with `variant.atom_id` from the report:
+For example, replace `RUN_ID` with `variant.run_id` from the report:
 
 ```console
 ocura-oss show RUN_ID --root ./ar-pytorch --command --json
@@ -127,7 +129,7 @@ ocura-oss logs RUN_ID --root ./ar-pytorch --stream stderr
 The report expects one baseline and one completed child for the selected source.
 Without `--from`, it selects the newest source with a branch, as before. If you
 add another experiment to the same root, select the earlier pair explicitly,
-replacing `SOURCE_ID` with the report's full `source_chokepoint_id`:
+replacing `SOURCE_ID` with the report's full `source_branch_point_id`:
 
 ```console
 python examples/autoregressive/experiment.py report --root ./ar-pytorch --from SOURCE_ID
@@ -159,8 +161,8 @@ python examples/autoregressive/ray_train.py --backend jax --steps 40
 
 The experiment driver uses `python -m ocura_oss` with `--json-errors` and parses
 JSON results. It records the baseline, then uses `run --from ID --reason TEXT`
-to create and execute the variation in one call. The returned `chokepoint_id`
-identifies each run's branch point; `atom_id` identifies its run record. The
+to create and execute the variation in one call. The returned `branch_point_id`
+identifies each run's branch point; `run_id` identifies its run record. The
 report uses the descriptive `Store.load_run()` and `run_id=` reader interfaces
 while retaining compatible report fields. It is a normal script; an AI agent
 with a shell can drive the same commands. See the

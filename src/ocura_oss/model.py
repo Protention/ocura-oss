@@ -14,19 +14,24 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CHECKSUM_ALGORITHM = "sha256"
 TERMINAL_KIND = "terminal"
 MASKED_ARGUMENT = "<masked>"
 
-_ID_PATTERN = re.compile(r"^(den|pathway|atom|chokepoint)-([0-9a-f]{32})$")
 ID_PREFIX_MIN = 4
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PARAMETER_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_.-]*)\}|[{}]")
 _GIT_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
-_ID_KINDS = ("den", "pathway", "atom", "chokepoint")
+# Each record kind and the prefix its identifiers carry.
+ID_PREFIXES = {
+    "ledger": "ledger",
+    "pathway": "pathway",
+    "run": "run",
+    "branch_point": "branch-point",
+}
 
 
 class ModelError(Exception):
@@ -100,25 +105,26 @@ def parse_timestamp(value: object, label: str) -> datetime.datetime:
 
 
 def make_id(kind: str) -> str:
-    if kind not in _ID_KINDS:
+    if kind not in ID_PREFIXES:
         raise ValidationError(f"unknown id kind: {kind}")
-    return f"{kind}-{uuid.uuid4().hex}"
+    return f"{ID_PREFIXES[kind]}-{uuid.uuid4().hex}"
 
 
-def is_valid_id(value: object, prefix: str) -> bool:
-    if not isinstance(value, str):
+def is_valid_id(value: object, kind: str) -> bool:
+    if not isinstance(value, str) or kind not in ID_PREFIXES:
         return False
-    return re.fullmatch(rf"{re.escape(prefix)}-[0-9a-f]{{32}}", value) is not None
+    return re.fullmatch(rf"{re.escape(ID_PREFIXES[kind])}-[0-9a-f]{{32}}", value) is not None
 
 
-def id_stem(value: object, prefix: str) -> str | None:
+def id_stem(value: object, kind: str) -> str | None:
     """Return ``prefix-HEX`` when *value* abbreviates an id of that kind.
 
     An abbreviation is at least ``ID_PREFIX_MIN`` of the id's leading
-    hexadecimal characters, with or without the kind word in front.
+    hexadecimal characters, with or without the prefix in front.
     """
     if not isinstance(value, str):
         return None
+    prefix = ID_PREFIXES[kind]
     pattern = rf"(?:{re.escape(prefix)}-)?([0-9a-f]{{{ID_PREFIX_MIN},32}})"
     match = re.fullmatch(pattern, value)
     return None if match is None else f"{prefix}-{match.group(1)}"
@@ -361,7 +367,6 @@ class Ledger:
 
 
 # Legacy names remain the same classes, including their constructor fields.
-Den = Ledger
 
 
 @dataclass(frozen=True)
@@ -369,20 +374,12 @@ class Pathway:
     """One lineage of declared parameters and recorded evidence."""
 
     id: str
-    den_id: str
+    ledger_id: str
     created_at: str
     parent_pathway_id: str | None
-    source_chokepoint_id: str | None
+    source_branch_point_id: str | None
     reason: str
     parameters: Mapping[str, str]
-
-    @property
-    def ledger_id(self) -> str:
-        return self.den_id
-
-    @property
-    def source_branch_point_id(self) -> str | None:
-        return self.source_chokepoint_id
 
 
 @dataclass(frozen=True)
@@ -432,9 +429,6 @@ class RunRecord:
     context: RunContext | None = None
 
 
-Atom = RunRecord
-
-
 @dataclass(frozen=True)
 class Attempt:
     """A command attempt recorded before launch and not yet finalized.
@@ -444,7 +438,7 @@ class Attempt:
 
     id: str
     pathway_id: str
-    chokepoint_id: str
+    branch_point_id: str
     started_at: str
     declared_parameters: Mapping[str, str]
     command: tuple[str, ...]
@@ -458,10 +452,6 @@ class Attempt:
     def run_id(self) -> str:
         return self.id
 
-    @property
-    def branch_point_id(self) -> str:
-        return self.chokepoint_id
-
 
 @dataclass(frozen=True)
 class BranchPoint:
@@ -469,18 +459,11 @@ class BranchPoint:
 
     id: str
     pathway_id: str
-    atom_id: str
+    run_id: str
     created_at: str
     kind: str
     outcome: Outcome
     branchable: bool
-
-    @property
-    def run_id(self) -> str:
-        return self.atom_id
-
-
-Chokepoint = BranchPoint
 
 
 _LOG_FIELDS = (
@@ -491,19 +474,19 @@ _LOG_FIELDS = (
     "stdout_sha256",
     "stderr_sha256",
 )
-_DEN_FIELDS = frozenset({"id", "name", "created_at", "default_pathway_id"})
+_LEDGER_FIELDS = frozenset({"id", "name", "created_at", "default_pathway_id"})
 _PATHWAY_FIELDS = frozenset(
     {
         "id",
-        "den_id",
+        "ledger_id",
         "created_at",
         "parent_pathway_id",
-        "source_chokepoint_id",
+        "source_branch_point_id",
         "reason",
         "parameters",
     }
 )
-_ATOM_FIELDS = frozenset(
+_RUN_FIELDS = frozenset(
     {
         "id",
         "pathway_id",
@@ -524,7 +507,7 @@ _ATTEMPT_FIELDS = frozenset(
     {
         "id",
         "pathway_id",
-        "chokepoint_id",
+        "branch_point_id",
         "started_at",
         "declared_parameters",
         "command",
@@ -534,8 +517,8 @@ _ATTEMPT_FIELDS = frozenset(
         "stderr_log",
     }
 )
-_CHOKEPOINT_FIELDS = frozenset(
-    {"id", "pathway_id", "atom_id", "created_at", "kind", "outcome", "branchable"}
+_BRANCH_POINT_FIELDS = frozenset(
+    {"id", "pathway_id", "run_id", "created_at", "kind", "outcome", "branchable"}
 )
 
 
@@ -599,19 +582,19 @@ def _context(value: object) -> RunContext | None:
     return RunContext(platform=platform, git_revision=revision, git_dirty=dirty, files=files)
 
 
-def den_to_payload(den: Den) -> dict:
+def ledger_to_payload(ledger: Ledger) -> dict:
     return {
-        "id": den.id,
-        "name": den.name,
-        "created_at": den.created_at,
-        "default_pathway_id": den.default_pathway_id,
+        "id": ledger.id,
+        "name": ledger.name,
+        "created_at": ledger.created_at,
+        "default_pathway_id": ledger.default_pathway_id,
     }
 
 
-def den_from_payload(payload: object) -> Den:
-    payload = _fields(payload, "den", _DEN_FIELDS)
-    return Den(
-        id=_id(payload["id"], "den", "id"),
+def ledger_from_payload(payload: object) -> Ledger:
+    payload = _fields(payload, "ledger", _LEDGER_FIELDS)
+    return Ledger(
+        id=_id(payload["id"], "ledger", "id"),
         name=_string(payload["name"], "name"),
         created_at=format_timestamp(parse_timestamp(payload["created_at"], "created_at")),
         default_pathway_id=_id(payload["default_pathway_id"], "pathway", "default_pathway_id"),
@@ -621,10 +604,10 @@ def den_from_payload(payload: object) -> Den:
 def pathway_to_payload(pathway: Pathway) -> dict:
     return {
         "id": pathway.id,
-        "den_id": pathway.den_id,
+        "ledger_id": pathway.ledger_id,
         "created_at": pathway.created_at,
         "parent_pathway_id": pathway.parent_pathway_id,
-        "source_chokepoint_id": pathway.source_chokepoint_id,
+        "source_branch_point_id": pathway.source_branch_point_id,
         "reason": pathway.reason,
         "parameters": dict(pathway.parameters),
     }
@@ -633,48 +616,48 @@ def pathway_to_payload(pathway: Pathway) -> dict:
 def pathway_from_payload(payload: object) -> Pathway:
     payload = _fields(payload, "pathway", _PATHWAY_FIELDS)
     parent = payload["parent_pathway_id"]
-    source = payload["source_chokepoint_id"]
+    source = payload["source_branch_point_id"]
     if parent is not None:
         _id(parent, "pathway", "parent_pathway_id")
     if source is not None:
-        _id(source, "chokepoint", "source_chokepoint_id")
+        _id(source, "branch_point", "source_branch_point_id")
     return Pathway(
         id=_id(payload["id"], "pathway", "id"),
-        den_id=_id(payload["den_id"], "den", "den_id"),
+        ledger_id=_id(payload["ledger_id"], "ledger", "ledger_id"),
         created_at=format_timestamp(parse_timestamp(payload["created_at"], "created_at")),
         parent_pathway_id=parent,
-        source_chokepoint_id=source,
+        source_branch_point_id=source,
         reason=_string(payload["reason"], "reason"),
         parameters=_string_mapping(payload["parameters"], "parameters"),
     )
 
 
-def atom_to_payload(atom: Atom) -> dict:
+def run_to_payload(record: RunRecord) -> dict:
     return {
-        "id": atom.id,
-        "pathway_id": atom.pathway_id,
-        "started_at": atom.started_at,
-        "finished_at": atom.finished_at,
-        "duration_seconds": atom.duration_seconds,
-        "outcome": atom.outcome.value,
-        "return_code": atom.return_code,
-        "launch_error_category": atom.launch_error_category,
-        "declared_parameters": dict(atom.declared_parameters),
-        "command": list(atom.command),
-        "masked_arguments": list(atom.masked_arguments),
-        "output_capture": atom.output_capture.value,
-        "stdout_log": atom.stdout_log,
-        "stderr_log": atom.stderr_log,
-        "stdout_bytes": atom.stdout_bytes,
-        "stderr_bytes": atom.stderr_bytes,
-        "stdout_sha256": atom.stdout_sha256,
-        "stderr_sha256": atom.stderr_sha256,
-        **_context_entry(atom.context),
+        "id": record.id,
+        "pathway_id": record.pathway_id,
+        "started_at": record.started_at,
+        "finished_at": record.finished_at,
+        "duration_seconds": record.duration_seconds,
+        "outcome": record.outcome.value,
+        "return_code": record.return_code,
+        "launch_error_category": record.launch_error_category,
+        "declared_parameters": dict(record.declared_parameters),
+        "command": list(record.command),
+        "masked_arguments": list(record.masked_arguments),
+        "output_capture": record.output_capture.value,
+        "stdout_log": record.stdout_log,
+        "stderr_log": record.stderr_log,
+        "stdout_bytes": record.stdout_bytes,
+        "stderr_bytes": record.stderr_bytes,
+        "stdout_sha256": record.stdout_sha256,
+        "stderr_sha256": record.stderr_sha256,
+        **_context_entry(record.context),
     }
 
 
-def atom_from_payload(payload: object) -> Atom:
-    payload = _fields(payload, "atom", _ATOM_FIELDS)
+def run_from_payload(payload: object) -> RunRecord:
+    payload = _fields(payload, "run", _RUN_FIELDS)
     outcome = _outcome(payload["outcome"], "outcome")
     return_code = _optional_integer(payload["return_code"], "return_code")
     category = _optional_string(payload["launch_error_category"], "launch_error_category")
@@ -683,7 +666,7 @@ def atom_from_payload(payload: object) -> Atom:
     captured = capture is OutputCapture.FULL
     _require(
         captured or all(payload[name] is None for name in _LOG_FIELDS),
-        "atoms without captured output must not carry log fields",
+        "runs without captured output must not carry log fields",
     )
     finished_at: str | None = None
     duration: float | None = None
@@ -693,37 +676,37 @@ def atom_from_payload(payload: object) -> Atom:
     if outcome is Outcome.ABANDONED:
         _require(
             payload["finished_at"] is None and payload["duration_seconds"] is None,
-            "abandoned atoms must not carry a finish time or duration",
+            "abandoned runs must not carry a finish time or duration",
         )
         _require(
             return_code is None and category is None,
-            "abandoned atoms must not carry a return code or launch error category",
+            "abandoned runs must not carry a return code or launch error category",
         )
     elif outcome is Outcome.LAUNCH_FAILED:
         _require(
             return_code is None and category is not None,
-            "launch_failed atoms need a launch error category and no return code",
+            "launch_failed runs need a launch error category and no return code",
         )
     elif outcome is Outcome.INTERRUPTED:
         _require(
             category == "interrupted",
-            "interrupted atoms need the 'interrupted' category",
+            "interrupted runs need the 'interrupted' category",
         )
         _require(
             return_code is None,
-            "interrupted atoms must not carry a return code",
+            "interrupted runs must not carry a return code",
         )
     else:
         _require(
             return_code is not None and category is None,
-            "launched atoms need a return code and no launch error category",
+            "launched runs need a return code and no launch error category",
         )
         if outcome is Outcome.PASSED:
-            _require(return_code == 0, "passed atoms require return code 0")
+            _require(return_code == 0, "passed runs require return code 0")
         else:
-            _require(return_code != 0, "failed atoms require a nonzero return code")
-    return Atom(
-        id=_id(payload["id"], "atom", "id"),
+            _require(return_code != 0, "failed runs require a nonzero return code")
+    return RunRecord(
+        id=_id(payload["id"], "run", "id"),
         pathway_id=_id(payload["pathway_id"], "pathway", "pathway_id"),
         started_at=format_timestamp(parse_timestamp(payload["started_at"], "started_at")),
         finished_at=finished_at,
@@ -753,7 +736,7 @@ def attempt_to_payload(attempt: Attempt) -> dict:
     return {
         "id": attempt.id,
         "pathway_id": attempt.pathway_id,
-        "chokepoint_id": attempt.chokepoint_id,
+        "branch_point_id": attempt.branch_point_id,
         "started_at": attempt.started_at,
         "declared_parameters": dict(attempt.declared_parameters),
         "command": list(attempt.command),
@@ -775,9 +758,9 @@ def attempt_from_payload(payload: object) -> Attempt:
         "attempts without captured output must not carry log paths",
     )
     return Attempt(
-        id=_id(payload["id"], "atom", "id"),
+        id=_id(payload["id"], "run", "id"),
         pathway_id=_id(payload["pathway_id"], "pathway", "pathway_id"),
-        chokepoint_id=_id(payload["chokepoint_id"], "chokepoint", "chokepoint_id"),
+        branch_point_id=_id(payload["branch_point_id"], "branch_point", "branch_point_id"),
         started_at=format_timestamp(parse_timestamp(payload["started_at"], "started_at")),
         declared_parameters=_string_mapping(payload["declared_parameters"], "declared_parameters"),
         command=command,
@@ -789,26 +772,26 @@ def attempt_from_payload(payload: object) -> Attempt:
     )
 
 
-def chokepoint_to_payload(chokepoint: Chokepoint) -> dict:
+def branch_point_to_payload(branch_point: BranchPoint) -> dict:
     return {
-        "id": chokepoint.id,
-        "pathway_id": chokepoint.pathway_id,
-        "atom_id": chokepoint.atom_id,
-        "created_at": chokepoint.created_at,
-        "kind": chokepoint.kind,
-        "outcome": chokepoint.outcome.value,
-        "branchable": chokepoint.branchable,
+        "id": branch_point.id,
+        "pathway_id": branch_point.pathway_id,
+        "run_id": branch_point.run_id,
+        "created_at": branch_point.created_at,
+        "kind": branch_point.kind,
+        "outcome": branch_point.outcome.value,
+        "branchable": branch_point.branchable,
     }
 
 
-def chokepoint_from_payload(payload: object) -> Chokepoint:
-    payload = _fields(payload, "chokepoint", _CHOKEPOINT_FIELDS)
+def branch_point_from_payload(payload: object) -> BranchPoint:
+    payload = _fields(payload, "branch_point", _BRANCH_POINT_FIELDS)
     kind = _string(payload["kind"], "kind")
     _require(kind == TERMINAL_KIND, f"kind must be {TERMINAL_KIND!r}")
-    return Chokepoint(
-        id=_id(payload["id"], "chokepoint", "id"),
+    return BranchPoint(
+        id=_id(payload["id"], "branch_point", "id"),
         pathway_id=_id(payload["pathway_id"], "pathway", "pathway_id"),
-        atom_id=_id(payload["atom_id"], "atom", "atom_id"),
+        run_id=_id(payload["run_id"], "run", "run_id"),
         created_at=format_timestamp(parse_timestamp(payload["created_at"], "created_at")),
         kind=kind,
         outcome=_outcome(payload["outcome"], "outcome"),
@@ -842,14 +825,14 @@ class RunSummary:
         }
 
 
-def run_summary_from_atom(atom: Atom) -> RunSummary:
+def run_summary_from_run(record: RunRecord) -> RunSummary:
     return RunSummary(
-        id=atom.id,
-        pathway_id=atom.pathway_id,
-        outcome=atom.outcome,
-        started_at=atom.started_at,
-        duration_seconds=atom.duration_seconds,
-        return_code=atom.return_code,
+        id=record.id,
+        pathway_id=record.pathway_id,
+        outcome=record.outcome,
+        started_at=record.started_at,
+        duration_seconds=record.duration_seconds,
+        return_code=record.return_code,
     )
 
 
@@ -857,21 +840,17 @@ def run_summary_from_atom(atom: Atom) -> RunSummary:
 class PathwaySummary:
     id: str
     parent_pathway_id: str | None
-    source_chokepoint_id: str | None
+    source_branch_point_id: str | None
     created_at: str
     reason: str
     parameters: Mapping[str, str]
     has_terminal_evidence: bool
 
-    @property
-    def source_branch_point_id(self) -> str | None:
-        return self.source_chokepoint_id
-
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "parent_pathway_id": self.parent_pathway_id,
-            "source_chokepoint_id": self.source_chokepoint_id,
+            "source_branch_point_id": self.source_branch_point_id,
             "created_at": self.created_at,
             "reason": self.reason,
             "parameters": dict(sorted(self.parameters.items())),
@@ -880,23 +859,19 @@ class PathwaySummary:
 
 
 @dataclass(frozen=True)
-class ChokepointSummary:
+class BranchPointSummary:
     id: str
     pathway_id: str
-    atom_id: str
+    run_id: str
     outcome: Outcome
     created_at: str
     branchable: bool
-
-    @property
-    def run_id(self) -> str:
-        return self.atom_id
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "pathway_id": self.pathway_id,
-            "atom_id": self.atom_id,
+            "run_id": self.run_id,
             "outcome": self.outcome.value,
             "created_at": self.created_at,
             "branchable": self.branchable,
@@ -937,22 +912,18 @@ class ChildComparison:
 
     pathway_id: str
     reason: str
-    source_chokepoint_id: str
+    source_branch_point_id: str
     parameters: ParameterDelta
     source_run: RunSummary
     child_run: RunSummary | None
     run_parameters: ParameterDelta | None
     missing_evidence: bool
 
-    @property
-    def source_branch_point_id(self) -> str:
-        return self.source_chokepoint_id
-
     def to_dict(self) -> dict:
         return {
             "pathway_id": self.pathway_id,
             "reason": self.reason,
-            "source_chokepoint_id": self.source_chokepoint_id,
+            "source_branch_point_id": self.source_branch_point_id,
             "parameters": self.parameters.to_dict(),
             "source_run": self.source_run.to_dict(),
             "child_run": self.child_run.to_dict() if self.child_run else None,
@@ -966,19 +937,15 @@ class ComparisonResult:
     """Comparison state and every child associated with a source branch point."""
 
     state: ComparisonState
-    source_chokepoint_id: str
+    source_branch_point_id: str
     source_pathway_id: str
     source_run: RunSummary
     children: tuple[ChildComparison, ...]
 
-    @property
-    def source_branch_point_id(self) -> str:
-        return self.source_chokepoint_id
-
     def to_dict(self) -> dict:
         return {
             "state": self.state.value,
-            "source_chokepoint_id": self.source_chokepoint_id,
+            "source_branch_point_id": self.source_branch_point_id,
             "source_pathway_id": self.source_pathway_id,
             "source_run": self.source_run.to_dict(),
             "children": [child.to_dict() for child in self.children],

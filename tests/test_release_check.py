@@ -203,6 +203,15 @@ class DistributionTests(unittest.TestCase):
         problems = check_release.check_distributions(self.dist, "1.2.3")
         self.assertEqual(problems, ["source distribution metadata declares runtime dependencies"])
 
+    def test_relative_description_link_is_reported(self):
+        description = core_metadata("1.2.3") + "[guide](docs/guide.md) [top](#top)\n"
+        write_distributions(self.dist, sdist_metadata=description)
+        problems = check_release.check_distributions(self.dist, "1.2.3")
+        self.assertEqual(
+            problems,
+            ["source distribution description links to docs/guide.md, which breaks on PyPI"],
+        )
+
     def test_source_distribution_without_metadata_is_reported(self):
         write_distributions(self.dist, sdist_metadata=None, sdist_extra=("ocura_oss-1.2.3/x",))
         problems = check_release.check_distributions(self.dist, "1.2.3")

@@ -44,9 +44,9 @@ def cli(*arguments: str, root: Path | None = None) -> dict:
         if root is not None and arguments[0] == "run":
             try:
                 result = json.loads(completed.stdout)
-                if result.get("atom_id"):
+                if result.get("run_id"):
                     store = Store(root)
-                    record = store.load_run(result["atom_id"])
+                    record = store.load_run(result["run_id"])
                     offset = max(0, (record.stderr_bytes or 0) - 4096)
                     with store.open_verified_log(
                         run_id=record.id, stream="stderr", offset=offset, length=4096
@@ -84,13 +84,13 @@ def report(root: Path, *, source_branch_point_id: str | None = None) -> dict:
                 raise ValueError(f"recorded parameter {key} disagrees with workload output")
         if not math.isfinite(data["validation_loss"]):
             raise ValueError("validation loss must be finite")
-        metrics.append({**data, "atom_id": record.id, "stdout_log": record.stdout_log})
+        metrics.append({**data, "run_id": record.id, "stdout_log": record.stdout_log})
     baseline, variant = metrics
     return {
         "root": str(store.root),
-        "source_chokepoint_id": comparison.source_branch_point_id,
+        "source_branch_point_id": comparison.source_branch_point_id,
         "comparison": comparison.to_dict(),
-        "verification": {"ok": True, "atoms": checked.atoms, "logs": checked.logs_checked},
+        "verification": {"ok": True, "runs": checked.run_records, "logs": checked.logs_checked},
         "baseline": baseline,
         "variant": variant,
         "validation_loss_delta": variant["validation_loss"] - baseline["validation_loss"],
@@ -151,11 +151,11 @@ def run_experiment(args: argparse.Namespace) -> dict:
     run_variant(
         args.variant_steps,
         "--from",
-        baseline["chokepoint_id"],
+        baseline["branch_point_id"],
         "--reason",
         f"test {args.variant_steps} training steps against {args.baseline_steps}",
     )
-    return report(root, source_branch_point_id=baseline["chokepoint_id"])
+    return report(root, source_branch_point_id=baseline["branch_point_id"])
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -105,9 +105,9 @@ class HistoryExampleTests(unittest.TestCase):
     def test_unfinished_work_stays_visible_without_recovery_or_execution(self):
         completed = self.record()
         attempt = Attempt(
-            id="atom-" + uuid.uuid4().hex,
+            id="run-" + uuid.uuid4().hex,
             pathway_id=self.initial.pathway.id,
-            chokepoint_id="chokepoint-" + uuid.uuid4().hex,
+            branch_point_id="branch-point-" + uuid.uuid4().hex,
             started_at=model.format_timestamp(model.utc_now()),
             declared_parameters={},
             command=("synthetic-unfinished-test",),

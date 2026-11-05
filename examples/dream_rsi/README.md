@@ -1,9 +1,9 @@
 # Dream-RSI training adaptation with Ocura OSS
 
-Version 0.7.0.
+Version 0.8.0.
 
-This experimental example belongs to the maintained [0.7 catalog](../../docs/use-cases.md)
-on `examples/0.7` and uses the released 0.7.0 package. Use the
+This experimental example belongs to the [0.8 catalog](../../docs/use-cases.md)
+on `examples/0.8` and uses the draft 0.8.0 package. Use the
 [catalog setup](../../README.md#install-and-try) to obtain the matching checkout.
 The pilot and its published evidence summary remain historical 0.4.0 results;
 updating the adapter does not revalidate those results or establish a policy benefit.
@@ -38,7 +38,7 @@ Both agent requests and training jobs pass through `record_command()` in
 
 The example owns agent access, checkpoints, artifact digests, resource limits,
 replay, scoring, and policy selection. Ocura lineage identifies execution
-relationships; it does not restore model state. The example uses Ocura OSS 0.7.0
+relationships; it does not restore model state. The example uses Ocura OSS 0.8.0
 and stays outside the package distributions and runtime dependencies.
 
 ## Setup
@@ -47,10 +47,11 @@ Use a repository checkout and an activated Python 3.12 virtual environment.
 The live runner supports Windows and Linux host-capacity checks. Other operating
 systems defer when that check is unavailable. Docker and a GPU are not required.
 
-Install the released package from the repository root:
+Build and install the matching package from the repository root:
 
 ```console
-python -m pip install ocura-oss==0.7.0
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
 python -m unittest discover -s tests -p "test_dream_rsi_*.py" -v
 ```
 
@@ -115,11 +116,11 @@ checkpoints. Training also needs the prepared inputs.
 
 ## Inspect intention and failures
 
-The controller uses the 0.7 `record` and `branch_point` properties and public
+The controller uses the 0.8 `record` and `branch_point` fields and public
 `Store.load_run()`, `Store.list_run_records()`, and `Store.load_branch_point()`
-readers. Existing report keys such as `root_atom`, `agent_atom`, `terminal_atom`,
-and `atom_id` keep their names and values for callers and saved reports. Those
-values are run IDs; a branch source uses a branch-point ID (`chokepoint-...`).
+readers. The example's own v1 report keys, including `root_atom`, `agent_atom`,
+`terminal_atom`, and `atom_id`, retain their names. They contain `run-...` IDs;
+a branch source uses a `branch-point-...` ID. Package JSON uses the new names.
 
 ```console
 ocura-oss runs --root .tmp-tests/dream-rsi-smoke --all --json
@@ -141,14 +142,13 @@ does not create a snapshot or repair unfinished work. When a storage error can
 be retained in the completion record, the report preserves its `error_details`
 (code, execution state, known IDs, and recovery hint) alongside the existing text.
 
-Schema-2 ledgers remain readable. Original 0.4 experiments used schema 1 and need
-the separate [ledger migration tool](../../tools/migrations/README.md); they are
-not directly compatible with 0.7. Stop writers and retain the original complete
-experiment. Migration creates a new project containing ledger evidence only:
-copy the original `requests/`, `checkpoints/`, and other example-owned artifacts
-alongside that converted ledger before reconstructing an RSI report. Do not
-replace historical source/checkpoint digests with today's values. The curated
-`evidence-summary.json` is not a ledger and cannot be migrated into one.
+Ocura 0.8 cannot read schema-1 or schema-2 ledgers. Retain the complete original
+experiment and use its matching package and example checkout to reconstruct it.
+The [0.7 guide](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/dream_rsi)
+documents older-ledger reporting; its migration tool does not convert to 0.8.
+Start new experiments in new directories. Do not replace historical source or
+checkpoint digests with today's values. The curated `evidence-summary.json` is
+not a ledger and cannot be migrated into one.
 
 Checkpoint results contain absolute paths. If the complete experiment
 has moved, supply its exact former project root explicitly when reporting:

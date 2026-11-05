@@ -47,44 +47,44 @@ class NoCaptureTests(CaptureControlTestCase):
         # The printed text is assembled at run time, so it appears only in output.
         script = "import sys; print('STD' + 'OUT-TEXT'); sys.stderr.write('STD' + 'ERR-TEXT')"
         execution = ocura_oss.run([sys.executable, "-c", script], root=self.root, capture=False)
-        atom = execution.atom
-        self.assertIs(atom.outcome, model.Outcome.PASSED)
-        self.assertIs(atom.output_capture, model.OutputCapture.NONE)
+        record = execution.record
+        self.assertIs(record.outcome, model.Outcome.PASSED)
+        self.assertIs(record.output_capture, model.OutputCapture.NONE)
         for value in (
-            atom.stdout_log,
-            atom.stderr_log,
-            atom.stdout_bytes,
-            atom.stderr_bytes,
-            atom.stdout_sha256,
-            atom.stderr_sha256,
+            record.stdout_log,
+            record.stderr_log,
+            record.stdout_bytes,
+            record.stderr_bytes,
+            record.stdout_sha256,
+            record.stderr_sha256,
         ):
             self.assertIsNone(value)
         self.assertEqual(list(self.store.logs_dir.iterdir()), [])
         self.assertNotIn("STDOUT-TEXT", self.record_text())
         self.assertNotIn("STDERR-TEXT", self.record_text())
-        self.assertEqual(self.store.load_atom(atom.id), atom)
+        self.assertEqual(self.store.load_run(record.id), record)
 
         report = self.store.verify_state()
         self.assertTrue(report.ok, report.problems)
-        self.assertEqual((report.atoms, report.logs_checked), (1, 0))
+        self.assertEqual((report.run_records, report.logs_checked), (1, 0))
 
     def test_uncaptured_run_has_no_log_to_read_or_resolve(self):
-        atom = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, capture=False).atom
+        record = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, capture=False).record
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):
                 with self.assertRaises(StoreError) as ctx:
-                    self.store.read_verified_log(atom.id, stream=stream)
+                    self.store.read_verified_log(record.id, stream=stream)
                 self.assertIn("recorded without output capture", str(ctx.exception))
                 with self.assertRaises(StoreError):
-                    self.store.resolve_log_path(atom, stream)
-        self.store.verify_atom_evidence(atom)
+                    self.store.resolve_log_path(record, stream)
+        self.store.verify_run_evidence(record)
 
     def test_uncaptured_failure_still_records_its_return_code(self):
-        atom = ocura_oss.run(
+        record = ocura_oss.run(
             [sys.executable, "-c", "import sys; sys.exit(9)"], root=self.root, capture=False
-        ).atom
-        self.assertIs(atom.outcome, model.Outcome.FAILED)
-        self.assertEqual(atom.return_code, 9)
+        ).record
+        self.assertIs(record.outcome, model.Outcome.FAILED)
+        self.assertEqual(record.return_code, 9)
 
     def test_mirrored_uncaptured_run_streams_without_retaining(self):
         console, errors = BufferedConsole(), BufferedConsole()
@@ -99,12 +99,12 @@ class NoCaptureTests(CaptureControlTestCase):
             )
         self.assertIn(b"shown", console.buffer.getvalue())
         self.assertIn(b"warned", errors.buffer.getvalue())
-        self.assertIs(execution.atom.output_capture, model.OutputCapture.NONE)
+        self.assertIs(execution.record.output_capture, model.OutputCapture.NONE)
         self.assertEqual(list(self.store.logs_dir.iterdir()), [])
 
     def test_uncaptured_run_can_be_a_branch_source_and_compared(self):
         baseline = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, capture=False)
-        child = ocura_oss.branch(baseline.chokepoint.id, root=self.root, reason="vary")
+        child = ocura_oss.branch(baseline.branch_point.id, root=self.root, reason="vary")
         ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, pathway_id=child.id)
         comparison = ocura_oss.compare(root=self.root)
         self.assertIs(comparison.state, model.ComparisonState.READY)
@@ -118,37 +118,37 @@ class MaskedArgumentTests(CaptureControlTestCase):
             capture=False,
             masked_arguments=[4],
         )
-        atom = execution.atom
-        self.assertIs(atom.outcome, model.Outcome.PASSED)
+        record = execution.record
+        self.assertIs(record.outcome, model.Outcome.PASSED)
         self.assertEqual(
-            atom.command,
+            record.command,
             (sys.executable, "-c", ECHO_ARGUMENTS, "--token", model.MASKED_ARGUMENT, "plain"),
         )
-        self.assertEqual(atom.masked_arguments, (4,))
+        self.assertEqual(record.masked_arguments, (4,))
         self.assertNotIn(SECRET, self.record_text())
-        self.assertEqual(self.store.load_atom(atom.id), atom)
+        self.assertEqual(self.store.load_run(record.id), record)
         self.assertTrue(self.store.verify_state().ok)
 
     def test_masking_does_not_alter_captured_output(self):
-        atom = ocura_oss.run(
+        record = ocura_oss.run(
             [sys.executable, "-c", ECHO_ARGUMENTS, SECRET], root=self.root, masked_arguments=[3]
-        ).atom
-        self.assertNotIn(SECRET, atom.command)
-        self.assertEqual(self.store.read_verified_log(atom.id).strip(), SECRET.encode())
+        ).record
+        self.assertNotIn(SECRET, record.command)
+        self.assertEqual(self.store.read_verified_log(record.id).strip(), SECRET.encode())
 
     def test_repeated_and_unordered_positions_are_recorded_once_in_order(self):
-        atom = ocura_oss.run(
+        record = ocura_oss.run(
             [sys.executable, "-c", "pass", "a", "b"], root=self.root, masked_arguments=[4, 3, 4]
-        ).atom
-        self.assertEqual(atom.masked_arguments, (3, 4))
-        self.assertEqual(atom.command[3:], (model.MASKED_ARGUMENT, model.MASKED_ARGUMENT))
+        ).record
+        self.assertEqual(record.masked_arguments, (3, 4))
+        self.assertEqual(record.command[3:], (model.MASKED_ARGUMENT, model.MASKED_ARGUMENT))
 
     def test_literal_placeholder_argument_is_not_reported_as_masked(self):
-        atom = ocura_oss.run(
+        record = ocura_oss.run(
             [sys.executable, "-c", "pass", model.MASKED_ARGUMENT], root=self.root
-        ).atom
-        self.assertEqual(atom.masked_arguments, ())
-        self.assertEqual(atom.command[-1], model.MASKED_ARGUMENT)
+        ).record
+        self.assertEqual(record.masked_arguments, ())
+        self.assertEqual(record.command[-1], model.MASKED_ARGUMENT)
 
     def test_invalid_positions_are_rejected_before_anything_runs(self):
         marker = self.root / "ran"
@@ -159,7 +159,7 @@ class MaskedArgumentTests(CaptureControlTestCase):
                     ocura_oss.run(command, root=self.root, masked_arguments=positions)
                 self.assertIn("is not a command token position", str(ctx.exception))
         self.assertFalse(marker.exists())
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
         self.assertEqual(list(self.store.attempts_dir.iterdir()), [])
 
 
@@ -195,8 +195,8 @@ class CommandLineTests(CaptureControlTestCase):
         self.assertIsNone(payload["stdout_log"])
         self.assertIsNone(payload["stderr_log"])
         self.assertNotIn(SECRET, result.stdout + result.stderr)
-        atom = self.store.load_atom(payload["atom_id"])
-        self.assertEqual(atom.masked_arguments, (3,))
+        record = self.store.load_run(payload["run_id"])
+        self.assertEqual(record.masked_arguments, (3,))
         self.assertNotIn(SECRET, self.record_text())
 
     def test_captured_run_reports_full_capture(self):
@@ -234,7 +234,7 @@ class CommandLineTests(CaptureControlTestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
         self.assertIn("error: masked argument 9 is not a command token position", result.stderr)
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
 
 
 if __name__ == "__main__":

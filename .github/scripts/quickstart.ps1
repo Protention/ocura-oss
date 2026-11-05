@@ -18,8 +18,8 @@ ocura-oss init --name example --json > init.json
 Assert-Step "init"
 ocura-oss run --json --param count=1 -- python -c "print(1)" > baseline.json
 Assert-Step "baseline run"
-$chokepoint = (Read-Json baseline.json).chokepoint_id
-ocura-oss branch --json --from $chokepoint --reason "try count 2" --param count=2 > branch.json
+$branch_point = (Read-Json baseline.json).branch_point_id
+ocura-oss branch --json --from $branch_point --reason "try count 2" --param count=2 > branch.json
 Assert-Step "branch"
 $pathway = (Read-Json branch.json).id
 ocura-oss run --json --pathway $pathway -- python -c "print(2)" > child.json
@@ -42,11 +42,11 @@ ocura-oss manifest > retained.manifest
 Assert-Step "manifest"
 ocura-oss verify --against retained.manifest
 Assert-Step "verify --against"
-ocura-oss run --from $chokepoint --reason "try count 3" --param count=3 --substitute --json -- python -c "import sys; print(sys.argv[1])" "{count}" > variation.json
+ocura-oss run --from $branch_point --reason "try count 3" --param count=3 --substitute --json -- python -c "import sys; print(sys.argv[1])" "{count}" > variation.json
 Assert-Step "combined variation run"
 $printed = (Get-Content -Raw -Path (Read-Json variation.json).stdout_log).Trim()
 if ($printed -ne "3") { throw "combined variation passed '$printed', expected '3'" }
-ocura-oss compare --from $chokepoint --json > variation-compare.json
+ocura-oss compare --from $branch_point --json > variation-compare.json
 Assert-Step "combined variation compare"
 $comparison = Read-Json variation-compare.json
 if ($comparison.state -ne "ready" -or $comparison.children.Count -ne 2) { throw "combined variation comparison did not retain both children" }

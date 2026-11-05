@@ -50,16 +50,18 @@ class ArchiveReadTests(unittest.TestCase):
 
     def test_raw_and_gzip_snapshots_are_seekable_and_closed(self):
         data = b"binary\x00\xff\r\n" * 10000
-        atom = self.record().atom
-        raw = self.store.resolve_log_path(atom, "stdout")
+        record = self.record().record
+        raw = self.store.resolve_log_path(record, "stdout")
         raw.write_bytes(data)
-        atom = replace(atom, stdout_bytes=len(data), stdout_sha256=hashlib.sha256(data).hexdigest())
-        self.store._save_atom(atom)
+        record = replace(
+            record, stdout_bytes=len(data), stdout_sha256=hashlib.sha256(data).hexdigest()
+        )
+        self.store._save_run(record)
         for compressed in (False, True):
             with self.subTest(compressed=compressed):
                 if compressed:
-                    self.store.compress_logs(atom_id=atom.id, min_bytes=1)
-                with self.store.open_verified_log(atom.id) as source:
+                    self.store.compress_logs(run_id=record.id, min_bytes=1)
+                with self.store.open_verified_log(record.id) as source:
                     source.seek(17)
                     self.assertEqual(source.read(23), data[17:40])
                     source.seek(-9, 2)
@@ -68,27 +70,27 @@ class ArchiveReadTests(unittest.TestCase):
 
     def test_snapshot_remains_exact_after_original_changes(self):
         data = b"original evidence"
-        atom = self.record(data).atom
-        raw = self.store.resolve_log_path(atom, "stdout")
-        with self.store.open_verified_log(atom.id) as source:
+        record = self.record(data).record
+        raw = self.store.resolve_log_path(record, "stdout")
+        with self.store.open_verified_log(record.id) as source:
             raw.write_bytes(b"different evidence")
             self.assertEqual(source.read(), data)
-        with self.assertRaises(StoreError), self.store.open_verified_log(atom.id):
+        with self.assertRaises(StoreError), self.store.open_verified_log(record.id):
             self.fail("corrupt content was exposed")
 
     def test_snapshot_checks_other_present_representation(self):
-        atom = self.record(b"repetitive evidence" * 100).atom
-        raw = self.store.resolve_log_path(atom, "stdout")
-        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+        record = self.record(b"repetitive evidence" * 100).record
+        raw = self.store.resolve_log_path(record, "stdout")
+        self.store.compress_logs(run_id=record.id, min_bytes=1)
         raw.write_bytes(b"repetitive evidence" * 100)
         packed = raw.with_suffix(".log.gz")
         packed.write_bytes(packed.read_bytes()[:-5])
-        with self.assertRaises(StoreError), self.store.open_verified_log(atom.id):
+        with self.assertRaises(StoreError), self.store.open_verified_log(record.id):
             self.fail("corrupt duplicate storage was exposed")
 
     def test_large_snapshot_bounds_memory_and_closes_on_caller_error(self):
-        atom = self.record().atom
-        raw = self.store.resolve_log_path(atom, "stdout")
+        record = self.record().record
+        raw = self.store.resolve_log_path(record, "stdout")
         chunk = b"large evidence\n" * 65536
         digest = hashlib.sha256()
         size = len(chunk) * 32
@@ -96,16 +98,16 @@ class ArchiveReadTests(unittest.TestCase):
             for _ in range(32):
                 destination.write(chunk)
                 digest.update(chunk)
-        self.store._save_atom(replace(atom, stdout_bytes=size, stdout_sha256=digest.hexdigest()))
+        self.store._save_run(replace(record, stdout_bytes=size, stdout_sha256=digest.hexdigest()))
         for compressed in (False, True):
             with self.subTest(compressed=compressed):
                 if compressed:
-                    self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+                    self.store.compress_logs(run_id=record.id, min_bytes=1)
                 tracemalloc.start()
                 try:
                     with (
                         self.assertRaisesRegex(RuntimeError, "caller stopped"),
-                        self.store.open_verified_log(atom.id) as source,
+                        self.store.open_verified_log(record.id) as source,
                     ):
                         self.assertEqual(source.seek(0, 2), size)
                         source.seek(0)
@@ -118,21 +120,21 @@ class ArchiveReadTests(unittest.TestCase):
                 self.assertLess(peak, 6 * 1024 * 1024)
 
     def test_failed_large_snapshot_closes_its_temporary_file(self):
-        atom = self.record().atom
-        self.store._save_atom(replace(atom, stdout_bytes=2 * 1024 * 1024))
+        record = self.record().record
+        self.store._save_run(replace(record, stdout_bytes=2 * 1024 * 1024))
         with tempfile.TemporaryFile() as scratch:
             with (
                 patch.object(logstorage.tempfile, "TemporaryFile", return_value=scratch),
                 self.assertRaises(StoreError),
-                self.store.open_verified_log(atom.id),
+                self.store.open_verified_log(record.id),
             ):
                 self.fail("size mismatch was exposed")
             self.assertTrue(scratch.closed)
 
     def test_cli_ranges_are_original_bytes_with_explicit_bounds(self):
         data = bytes(range(256)) * 10
-        atom = self.record(data).atom
-        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+        record = self.record(data).record
+        self.store.compress_logs(run_id=record.id, min_bytes=1)
         for arguments, expected in (
             (("--offset", "255", "--length", "6"), data[255:261]),
             (("--offset", str(len(data))), b""),
@@ -140,7 +142,7 @@ class ArchiveReadTests(unittest.TestCase):
             (("--offset", "2550", "--length", "100"), data[2550:]),
         ):
             with self.subTest(arguments=arguments):
-                result = self.invoke("logs", atom.id, *arguments)
+                result = self.invoke("logs", record.id, *arguments)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, expected)
         for arguments in (
@@ -150,39 +152,39 @@ class ArchiveReadTests(unittest.TestCase):
             ("--json", "--length", "1"),
         ):
             with self.subTest(arguments=arguments):
-                result = self.invoke("logs", atom.id, *arguments)
+                result = self.invoke("logs", record.id, *arguments)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, b"")
 
     def test_small_window_of_large_log_does_not_allocate_temporary_storage(self):
-        atom = self.record().atom
-        raw = self.store.resolve_log_path(atom, "stdout")
+        record = self.record().record
+        raw = self.store.resolve_log_path(record, "stdout")
         data = b"large evidence\n" * 100000
         raw.write_bytes(data)
-        self.store._save_atom(
-            replace(atom, stdout_bytes=len(data), stdout_sha256=hashlib.sha256(data).hexdigest())
+        self.store._save_run(
+            replace(record, stdout_bytes=len(data), stdout_sha256=hashlib.sha256(data).hexdigest())
         )
-        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+        self.store.compress_logs(run_id=record.id, min_bytes=1)
         with (
             patch.object(
                 logstorage.tempfile, "TemporaryFile", side_effect=AssertionError("disk copy")
             ),
-            self.store.open_verified_log(atom.id, offset=1024, length=128) as source,
+            self.store.open_verified_log(record.id, offset=1024, length=128) as source,
         ):
             self.assertEqual(source.read(), data[1024:1152])
 
     def test_small_range_still_rejects_corruption_at_end_of_log(self):
-        atom = self.record(b"prefix followed by corrupt evidence").atom
-        raw = self.store.resolve_log_path(atom, "stdout")
+        record = self.record(b"prefix followed by corrupt evidence").record
+        raw = self.store.resolve_log_path(record, "stdout")
         raw.write_bytes(raw.read_bytes()[:-1] + b"!")
-        result = self.invoke("logs", atom.id, "--length", "6")
+        result = self.invoke("logs", record.id, "--length", "6")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b"")
 
     def test_archive_reads_do_not_write_or_take_ledger_locks(self):
         data = b"archived binary evidence\x00\xff" * 100
-        atom = self.record(data).atom
-        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+        record = self.record(data).record
+        self.store.compress_logs(run_id=record.id, min_bytes=1)
         before = self.inventory()
         archive = Store(self.root, archive=True)
         with (
@@ -190,19 +192,24 @@ class ArchiveReadTests(unittest.TestCase):
             patch.object(Path, "mkdir", side_effect=AssertionError("tried to create a directory")),
         ):
             archive.require()
-            self.assertEqual(archive.read_verified_log(atom.id), data)
-            with archive.open_verified_log(atom.id) as source:
+            self.assertEqual(archive.read_verified_log(record.id), data)
+            with archive.open_verified_log(record.id) as source:
                 self.assertEqual(source.read(), data)
-            self.assertEqual(archive.log_info(atom.id).encoding, "gzip")
+            self.assertEqual(archive.log_info(record.id).encoding, "gzip")
             self.assertTrue(archive.verify_state().ok)
         self.assertEqual(self.inventory(), before)
-        for arguments in (("verify", "--json"), ("logs", atom.id), ("runs",), ("show", atom.id)):
+        for arguments in (
+            ("verify", "--json"),
+            ("logs", record.id),
+            ("runs",),
+            ("show", record.id),
+        ):
             result = self.invoke(*arguments, "--archive")
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.inventory(), before)
 
     def test_archive_rejects_mutations_and_unfinished_attempts(self):
-        atom = self.record().atom
+        record = self.record().record
         archive = Store(self.root, archive=True)
         before = self.inventory()
         for operation in (
@@ -210,7 +217,7 @@ class ArchiveReadTests(unittest.TestCase):
             archive.compress_logs,
             archive.decompress_logs,
             lambda: archive.initialize_state(name="invalid"),
-            lambda: archive._save_atom(atom),
+            lambda: archive._save_run(record),
         ):
             with (
                 self.subTest(operation=operation),
@@ -218,41 +225,41 @@ class ArchiveReadTests(unittest.TestCase):
             ):
                 operation()
         self.assertEqual(self.inventory(), before)
-        (archive.attempts_dir / f"{atom.id}.json").write_text("{}", encoding="utf-8")
+        (archive.attempts_dir / f"{record.id}.json").write_text("{}", encoding="utf-8")
         with self.assertRaisesRegex(StoreError, "1 unfinished attempt.*recover"):
             archive.verify_state()
-        result = self.invoke("logs", atom.id, "--archive")
+        result = self.invoke("logs", record.id, "--archive")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b"")
 
     def test_normal_reads_skip_locks_only_where_none_can_be_taken(self):
         data = b"evidence " * 100
-        atom = self.record(data).atom
+        record = self.record(data).record
         for denied in (
             PermissionError("lock denied"),
             OSError(errno.EROFS, "read-only"),
             locking.LockUnavailable(errno.ENOLCK, "no locks available"),
         ):
             for change, encoding in (
-                (lambda store: store.compress_logs(atom_id=atom.id, min_bytes=1), "raw"),
-                (lambda store: store.decompress_logs(atom_id=atom.id), "gzip"),
+                (lambda store: store.compress_logs(run_id=record.id, min_bytes=1), "raw"),
+                (lambda store: store.decompress_logs(run_id=record.id), "gzip"),
             ):
                 with self.subTest(denied=denied, encoding=encoding):
-                    self.store.decompress_logs(atom_id=atom.id)
+                    self.store.decompress_logs(run_id=record.id)
                     if encoding == "gzip":
-                        self.store.compress_logs(atom_id=atom.id, min_bytes=1)
+                        self.store.compress_logs(run_id=record.id, min_bytes=1)
                     store = Store(self.root)
                     with patch("ocura_oss.locking.hold", side_effect=denied) as hold:
-                        self.assertEqual(store.read_verified_log(atom.id), data)
+                        self.assertEqual(store.read_verified_log(record.id), data)
                         self.assertTrue(store.verify_state().ok)
                         self.assertEqual(hold.call_count, 1)
                         with self.assertRaisesRegex(StoreError, "unreadable"):
                             change(store)
-                    self.assertEqual(self.store.log_info(atom.id).encoding, encoding)
+                    self.assertEqual(self.store.log_info(record.id).encoding, encoding)
         with (
             patch("ocura_oss.locking.hold", side_effect=OSError(errno.EIO, "lock failed")),
             self.assertRaisesRegex(StoreError, "log is unreadable"),
-            Store(self.root).open_verified_log(atom.id),
+            Store(self.root).open_verified_log(record.id),
         ):
             self.fail("normal read skipped writer coordination")
 

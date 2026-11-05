@@ -162,7 +162,7 @@ class ReplayEvidenceTests(unittest.TestCase):
             **overrides,
         }
         child = branch(
-            (parent or self.parent).chokepoint.id,
+            (parent or self.parent).branch_point.id,
             root=self.root,
             reason="fixture segment",
             parameters=labels,
@@ -212,7 +212,7 @@ class ReplayEvidenceTests(unittest.TestCase):
 
     def test_changed_log_fails_before_policy_execution(self):
         execution = self.segment()
-        path = Store(self.root).resolve_log_path(execution.atom, "stdout")
+        path = Store(self.root).resolve_log_path(execution.record, "stdout")
         path.write_bytes(path.read_bytes() + b" ")
         with self.assertRaisesRegex(Exception, "verification failed"):
             replay.load_history(self.root)
@@ -342,7 +342,7 @@ class OrchestrationTests(unittest.TestCase):
                 "batch_trace_sha256": "b" * 64,
                 "input_sha256": previous["checkpoint_sha256"] if previous else None,
             }
-            child = branch(parent.chokepoint.id, root=root, reason=kind, parameters=labels)
+            child = branch(parent.branch_point.id, root=root, reason=kind, parameters=labels)
             execution = run(
                 [sys.executable, "-c", "import sys; print(sys.argv[1])", json.dumps(result)],
                 root=root,

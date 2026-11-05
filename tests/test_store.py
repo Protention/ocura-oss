@@ -25,7 +25,7 @@ def temp_root():
 
 def new_store(root: Path) -> Store:
     store = Store(root)
-    store.initialize_state(name="test den")
+    store.initialize_state(name="test ledger")
     return store
 
 
@@ -33,39 +33,39 @@ class InitializationTests(unittest.TestCase):
     def test_init_creates_layout_and_valid_default_records(self):
         with temp_root() as root:
             store = new_store(root)
-            self.assertTrue((store.state_dir / "den.json").is_file())
-            for sub in ("pathways", "atoms", "chokepoints", "attempts", "logs"):
+            self.assertTrue((store.state_dir / "ledger.json").is_file())
+            for sub in ("pathways", "runs", "branch-points", "attempts", "logs"):
                 self.assertTrue((store.state_dir / sub).is_dir())
 
-            den = store.load_den()
-            self.assertEqual(den.name, "test den")
-            self.assertTrue(model.is_valid_id(den.id, "den"))
-            parsed = model.parse_timestamp(den.created_at, "created_at")
+            ledger = store.load_ledger()
+            self.assertEqual(ledger.name, "test ledger")
+            self.assertTrue(model.is_valid_id(ledger.id, "ledger"))
+            parsed = model.parse_timestamp(ledger.created_at, "created_at")
             self.assertIsNotNone(parsed.utcoffset())
 
             pathways = store.list_pathways()
             self.assertEqual(len(pathways), 1)
             pathway = pathways[0]
-            self.assertEqual(pathway.id, den.default_pathway_id)
+            self.assertEqual(pathway.id, ledger.default_pathway_id)
             self.assertIsNone(pathway.parent_pathway_id)
-            self.assertIsNone(pathway.source_chokepoint_id)
+            self.assertIsNone(pathway.source_branch_point_id)
             self.assertEqual(pathway.parameters, {})
             self.assertTrue(model.is_valid_id(pathway.id, "pathway"))
 
-            envelope = json.loads((store.state_dir / "den.json").read_text("utf-8"))
-            self.assertEqual(envelope["schema_version"], 2)
-            self.assertEqual(envelope["kind"], "den")
-            expected = model.checksum_for(2, "den", envelope["payload"])["value"]
+            envelope = json.loads((store.state_dir / "ledger.json").read_text("utf-8"))
+            self.assertEqual(envelope["schema_version"], 3)
+            self.assertEqual(envelope["kind"], "ledger")
+            expected = model.checksum_for(3, "ledger", envelope["payload"])["value"]
             self.assertEqual(envelope["checksum"]["algorithm"], "sha256")
             self.assertEqual(envelope["checksum"]["value"], expected)
 
     def test_init_refuses_existing_state(self):
         with temp_root() as root:
             store = new_store(root)
-            before = (store.state_dir / "den.json").read_bytes()
+            before = (store.state_dir / "ledger.json").read_bytes()
             with self.assertRaises(StoreError):
                 store.initialize_state(name="again")
-            self.assertEqual((store.state_dir / "den.json").read_bytes(), before)
+            self.assertEqual((store.state_dir / "ledger.json").read_bytes(), before)
 
     def test_init_refuses_existing_empty_state_dir(self):
         with temp_root() as root:
@@ -107,42 +107,42 @@ class ReadValidationTests(unittest.TestCase):
     def test_tampered_payload_fails_checksum(self):
         with temp_root() as root:
             store = new_store(root)
-            path = store.state_dir / "den.json"
+            path = store.state_dir / "ledger.json"
             envelope = json.loads(path.read_text("utf-8"))
             envelope["payload"]["name"] = "rewritten"
             path.write_text(json.dumps(envelope), "utf-8")
             with self.assertRaises(StoreError):
-                store.load_den()
+                store.load_ledger()
 
     def test_wrong_kind_is_rejected(self):
         with temp_root() as root:
             store = new_store(root)
-            den_path = store.state_dir / "den.json"
-            envelope = json.loads(den_path.read_text("utf-8"))
-            self._rewrite(den_path, model.SCHEMA_VERSION, "atom", envelope["payload"])
+            ledger_path = store.state_dir / "ledger.json"
+            envelope = json.loads(ledger_path.read_text("utf-8"))
+            self._rewrite(ledger_path, model.SCHEMA_VERSION, "run", envelope["payload"])
             with self.assertRaises(StoreError):
-                store.load_den()
+                store.load_ledger()
 
     def test_unsupported_schema_version_is_rejected(self):
         with temp_root() as root:
             store = new_store(root)
-            den_path = store.state_dir / "den.json"
-            envelope = json.loads(den_path.read_text("utf-8"))
-            for version in (1, 3):
+            ledger_path = store.state_dir / "ledger.json"
+            envelope = json.loads(ledger_path.read_text("utf-8"))
+            for version in (2, 4):
                 with self.subTest(version=version):
-                    self._rewrite(den_path, version, "den", envelope["payload"])
+                    self._rewrite(ledger_path, version, "ledger", envelope["payload"])
                     with self.assertRaises(StoreError) as ctx:
-                        store.load_den()
+                        store.load_ledger()
                     self.assertIn(f"unsupported schema version {version}", str(ctx.exception))
 
     def test_schema_one_rejection_names_the_writing_versions(self):
         with temp_root() as root:
             store = new_store(root)
-            den_path = store.state_dir / "den.json"
-            envelope = json.loads(den_path.read_text("utf-8"))
-            self._rewrite(den_path, 1, "den", envelope["payload"])
+            ledger_path = store.state_dir / "ledger.json"
+            envelope = json.loads(ledger_path.read_text("utf-8"))
+            self._rewrite(ledger_path, 1, "ledger", envelope["payload"])
             with self.assertRaises(StoreError) as ctx:
-                store.load_den()
+                store.load_ledger()
             message = str(ctx.exception)
             self.assertIn("Ocura OSS 0.4 and earlier wrote this state", message)
             self.assertIn('Keep using "ocura-oss<0.5" for it', message)
@@ -151,11 +151,11 @@ class ReadValidationTests(unittest.TestCase):
     def test_every_entry_point_rejects_state_from_an_earlier_schema(self):
         with temp_root() as root:
             store = new_store(root)
-            den_path = store.state_dir / "den.json"
-            envelope = json.loads(den_path.read_text("utf-8"))
-            self._rewrite(den_path, 1, "den", envelope["payload"])
+            ledger_path = store.state_dir / "ledger.json"
+            envelope = json.loads(ledger_path.read_text("utf-8"))
+            self._rewrite(ledger_path, 1, "ledger", envelope["payload"])
             for operation in (
-                store.load_den,
+                store.load_ledger,
                 store.verify_state,
                 store.list_attempts,
                 store.recover,
@@ -168,12 +168,12 @@ class ReadValidationTests(unittest.TestCase):
     def test_missing_required_field_is_rejected(self):
         with temp_root() as root:
             store = new_store(root)
-            den_path = store.state_dir / "den.json"
-            envelope = json.loads(den_path.read_text("utf-8"))
+            ledger_path = store.state_dir / "ledger.json"
+            envelope = json.loads(ledger_path.read_text("utf-8"))
             del envelope["payload"]["default_pathway_id"]
-            self._rewrite(den_path, model.SCHEMA_VERSION, "den", envelope["payload"])
+            self._rewrite(ledger_path, model.SCHEMA_VERSION, "ledger", envelope["payload"])
             with self.assertRaises(StoreError):
-                store.load_den()
+                store.load_ledger()
 
     def test_malformed_identifier_is_rejected(self):
         with temp_root() as root:
@@ -181,7 +181,7 @@ class ReadValidationTests(unittest.TestCase):
             with self.assertRaises(StoreError):
                 store.load_pathway("../escape")
             with self.assertRaises(StoreError):
-                store.load_chokepoint("chokepoint-not-hex")
+                store.load_branch_point("branch-point-not-hex")
 
 
 class ListingTests(unittest.TestCase):
@@ -195,18 +195,18 @@ class ListingTests(unittest.TestCase):
 
         with temp_root() as root:
             store = new_store(root)
-            den = store.load_den()
-            ids = [den.default_pathway_id]
+            ledger = store.load_ledger()
+            ids = [ledger.default_pathway_id]
             for index in range(3):
                 identifier = model.make_id("pathway")
                 ids.append(identifier)
                 store._save_pathway(
                     model.Pathway(
                         id=identifier,
-                        den_id=den.id,
+                        ledger_id=ledger.id,
                         created_at=model.format_timestamp(clock()),
                         parent_pathway_id=None,
-                        source_chokepoint_id=None,
+                        source_branch_point_id=None,
                         reason=f"extra {index}",
                         parameters={},
                     )
@@ -219,22 +219,22 @@ class ListingTests(unittest.TestCase):
     def test_invalid_records_fail_listings_closed(self):
         with temp_root() as root:
             store = new_store(root)
-            good = model.make_id("chokepoint")
-            store._save_chokepoint(
-                model.Chokepoint(
+            good = model.make_id("branch_point")
+            store._save_branch_point(
+                model.BranchPoint(
                     id=good,
-                    pathway_id=store.load_den().default_pathway_id,
-                    atom_id=model.make_id("atom"),
+                    pathway_id=store.load_ledger().default_pathway_id,
+                    run_id=model.make_id("run"),
                     created_at=model.format_timestamp(model.utc_now()),
                     kind="terminal",
                     outcome=model.Outcome.PASSED,
                     branchable=True,
                 )
             )
-            bad = store.chokepoints_dir / "chokepoint-ffffffffffffffffffffffffffffffff.json"
+            bad = store.branch_points_dir / "branch-point-ffffffffffffffffffffffffffffffff.json"
             bad.write_text("{not json", "utf-8")
             with self.assertRaises(StoreError) as ctx:
-                store.list_chokepoints()
+                store.list_branch_points()
             self.assertIn(bad.name, str(ctx.exception))
 
 
@@ -243,13 +243,13 @@ class PayloadValidationTests(unittest.TestCase):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.store = new_store(Path(self._temporary.name) / "proj")
-        self.pathway_id = self.store.load_den().default_pathway_id
+        self.pathway_id = self.store.load_ledger().default_pathway_id
 
     @staticmethod
-    def valid_atom_payload(pathway_id):
+    def valid_run_payload(pathway_id):
         empty = hashlib.sha256(b"").hexdigest()
         return {
-            "id": model.make_id("atom"),
+            "id": model.make_id("run"),
             "pathway_id": pathway_id,
             "started_at": "2026-01-01T00:00:00.000000+00:00",
             "finished_at": "2026-01-01T00:00:01.000000+00:00",
@@ -269,14 +269,14 @@ class PayloadValidationTests(unittest.TestCase):
             "stderr_sha256": empty,
         }
 
-    def _write_atom_payload(self, payload):
-        path = self.store.atoms_dir / f"{payload['id']}.json"
-        checksum = model.checksum_for(model.SCHEMA_VERSION, "atom", payload)
+    def _write_run_payload(self, payload):
+        path = self.store.runs_dir / f"{payload['id']}.json"
+        checksum = model.checksum_for(model.SCHEMA_VERSION, "run", payload)
         path.write_text(
             json.dumps(
                 {
                     "schema_version": model.SCHEMA_VERSION,
-                    "kind": "atom",
+                    "kind": "run",
                     "payload": payload,
                     "checksum": checksum,
                 }
@@ -285,14 +285,14 @@ class PayloadValidationTests(unittest.TestCase):
         )
         return payload["id"]
 
-    def test_malformed_atom_payloads_are_rejected(self):
-        base = self.valid_atom_payload(self.pathway_id)
+    def test_malformed_run_payloads_are_rejected(self):
+        base = self.valid_run_payload(self.pathway_id)
 
         missing = copy.deepcopy(base)
         del missing["command"]
 
         wrong_prefix = copy.deepcopy(base)
-        wrong_prefix["id"] = model.make_id("den")
+        wrong_prefix["id"] = model.make_id("ledger")
 
         bad_outcome = copy.deepcopy(base)
         bad_outcome["outcome"] = "exploded"
@@ -353,28 +353,28 @@ class PayloadValidationTests(unittest.TestCase):
         ]
         for label, payload in cases:
             with self.subTest(case=label):
-                atom_id = self._write_atom_payload(payload)
+                run_id = self._write_run_payload(payload)
                 with self.assertRaises(StoreError):
-                    self.store.load_atom(atom_id)
+                    self.store.load_run(run_id)
 
-    def test_valid_atom_payload_round_trips(self):
-        payload = self.valid_atom_payload(self.pathway_id)
-        atom_id = self._write_atom_payload(payload)
-        atom = self.store.load_atom(atom_id)
-        self.assertEqual(atom.command, ("x",))
-        self.assertEqual(atom.outcome, model.Outcome.PASSED)
-        self.assertIs(atom.output_capture, model.OutputCapture.FULL)
-        self.assertEqual(atom.masked_arguments, ())
+    def test_valid_run_payload_round_trips(self):
+        payload = self.valid_run_payload(self.pathway_id)
+        run_id = self._write_run_payload(payload)
+        record = self.store.load_run(run_id)
+        self.assertEqual(record.command, ("x",))
+        self.assertEqual(record.outcome, model.Outcome.PASSED)
+        self.assertIs(record.output_capture, model.OutputCapture.FULL)
+        self.assertEqual(record.masked_arguments, ())
 
     def test_fields_added_by_a_newer_writer_are_ignored(self):
-        payload = self.valid_atom_payload(self.pathway_id)
+        payload = self.valid_run_payload(self.pathway_id)
         payload["added_later"] = {"any": ["shape"]}
-        atom = self.store.load_atom(self._write_atom_payload(payload))
-        self.assertEqual(atom.command, ("x",))
-        self.assertFalse(hasattr(atom, "added_later"))
+        record = self.store.load_run(self._write_run_payload(payload))
+        self.assertEqual(record.command, ("x",))
+        self.assertFalse(hasattr(record, "added_later"))
 
-    def test_uncaptured_and_masked_atom_payloads_round_trip(self):
-        payload = self.valid_atom_payload(self.pathway_id)
+    def test_uncaptured_and_masked_run_payloads_round_trip(self):
+        payload = self.valid_run_payload(self.pathway_id)
         payload.update(
             command=["tool", "<masked>", "--flag", "<masked>"],
             masked_arguments=[1, 3],
@@ -386,29 +386,29 @@ class PayloadValidationTests(unittest.TestCase):
             stdout_sha256=None,
             stderr_sha256=None,
         )
-        atom = self.store.load_atom(self._write_atom_payload(payload))
-        self.assertIs(atom.output_capture, model.OutputCapture.NONE)
-        self.assertEqual(atom.masked_arguments, (1, 3))
-        self.assertIsNone(atom.stdout_log)
-        self.assertIsNone(atom.stderr_sha256)
-        self.store.verify_atom_evidence(atom)
+        record = self.store.load_run(self._write_run_payload(payload))
+        self.assertIs(record.output_capture, model.OutputCapture.NONE)
+        self.assertEqual(record.masked_arguments, (1, 3))
+        self.assertIsNone(record.stdout_log)
+        self.assertIsNone(record.stderr_sha256)
+        self.store.verify_run_evidence(record)
 
-    def test_abandoned_atom_payload_round_trips(self):
-        payload = self.valid_atom_payload(self.pathway_id)
+    def test_abandoned_run_payload_round_trips(self):
+        payload = self.valid_run_payload(self.pathway_id)
         payload.update(
             outcome="abandoned", return_code=None, finished_at=None, duration_seconds=None
         )
-        atom = self.store.load_atom(self._write_atom_payload(payload))
-        self.assertIs(atom.outcome, model.Outcome.ABANDONED)
-        self.assertIsNone(atom.finished_at)
-        self.assertIsNone(atom.duration_seconds)
+        record = self.store.load_run(self._write_run_payload(payload))
+        self.assertIs(record.outcome, model.Outcome.ABANDONED)
+        self.assertIsNone(record.finished_at)
+        self.assertIsNone(record.duration_seconds)
 
     def test_incoherent_capture_masking_and_abandonment_are_rejected(self):
-        base = self.valid_atom_payload(self.pathway_id)
+        base = self.valid_run_payload(self.pathway_id)
 
         def variant(**changes):
             payload = copy.deepcopy(base)
-            payload["id"] = model.make_id("atom")
+            payload["id"] = model.make_id("run")
             payload.update(changes)
             return payload
 
@@ -433,17 +433,17 @@ class PayloadValidationTests(unittest.TestCase):
         ]
         for label, payload in cases:
             with self.subTest(case=label):
-                atom_id = self._write_atom_payload(payload)
+                run_id = self._write_run_payload(payload)
                 with self.assertRaises(StoreError):
-                    self.store.load_atom(atom_id)
+                    self.store.load_run(run_id)
 
 
 class FuzzReaderTests(unittest.TestCase):
     def test_seeded_mutations_always_raise_store_error(self):
         with temp_root() as root:
             store = new_store(root)
-            den_path = store.state_dir / "den.json"
-            pristine = json.loads(den_path.read_text("utf-8"))
+            ledger_path = store.state_dir / "ledger.json"
+            pristine = json.loads(ledger_path.read_text("utf-8"))
 
             def mutate(envelope, rng):
                 mutated = copy.deepcopy(envelope)
@@ -454,9 +454,9 @@ class FuzzReaderTests(unittest.TestCase):
                 elif choice == 1:
                     mutated["extra"] = True
                 elif choice == 2:
-                    mutated["schema_version"] = rng.choice([1, 3, True, "2", 2.0, None])
+                    mutated["schema_version"] = rng.choice([2, 4, True, "3", 3.0, None])
                 elif choice == 3:
-                    mutated["kind"] = rng.choice(["atom", "", None, "DEN"])
+                    mutated["kind"] = rng.choice(["run", "", None, "LEDGER"])
                 elif choice == 4:
                     value = mutated["checksum"]["value"]
                     digit = "0" if value[0] != "0" else "1"
@@ -481,9 +481,9 @@ class FuzzReaderTests(unittest.TestCase):
                     text = json.dumps(corrupted)
                 else:
                     text = json.dumps(corrupted)[: max(1, len(json.dumps(corrupted)) // 2)]
-                den_path.write_text(text, "utf-8")
+                ledger_path.write_text(text, "utf-8")
                 try:
-                    store.load_den()
+                    store.load_ledger()
                 except StoreError:
                     pass
                 except Exception as exc:
@@ -491,8 +491,8 @@ class FuzzReaderTests(unittest.TestCase):
                 else:
                     self.fail(f"seed {seed} accepted a corrupted record")
 
-            den_path.write_text(json.dumps(pristine), "utf-8")
-            self.assertEqual(store.load_den().name, "test den")
+            ledger_path.write_text(json.dumps(pristine), "utf-8")
+            self.assertEqual(store.load_ledger().name, "test ledger")
 
 
 class LineageIntegrityTests(unittest.TestCase):
@@ -500,13 +500,13 @@ class LineageIntegrityTests(unittest.TestCase):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.store = new_store(Path(self._temporary.name) / "proj")
-        self.pathway_id = self.store.load_den().default_pathway_id
+        self.pathway_id = self.store.load_ledger().default_pathway_id
         self.empty_digest = hashlib.sha256(b"").hexdigest()
 
-    def _save_atom(self, atom_id, pathway_id):
-        self.store._save_atom(
-            model.Atom(
-                id=atom_id,
+    def _save_run(self, run_id, pathway_id):
+        self.store._save_run(
+            model.RunRecord(
+                id=run_id,
                 pathway_id=pathway_id,
                 started_at="2026-01-01T00:00:00.000000+00:00",
                 finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -516,8 +516,8 @@ class LineageIntegrityTests(unittest.TestCase):
                 launch_error_category=None,
                 declared_parameters={},
                 command=("x",),
-                stdout_log=f"{STATE_DIR_NAME}/logs/{atom_id}.stdout.log",
-                stderr_log=f"{STATE_DIR_NAME}/logs/{atom_id}.stderr.log",
+                stdout_log=f"{STATE_DIR_NAME}/logs/{run_id}.stdout.log",
+                stderr_log=f"{STATE_DIR_NAME}/logs/{run_id}.stderr.log",
                 stdout_bytes=0,
                 stderr_bytes=0,
                 stdout_sha256=self.empty_digest,
@@ -526,14 +526,14 @@ class LineageIntegrityTests(unittest.TestCase):
         )
 
     def test_cyclic_lineage_is_rejected(self):
-        atom_id = model.make_id("atom")
-        chokepoint_id = model.make_id("chokepoint")
-        self._save_atom(atom_id, self.pathway_id)
-        self.store._save_chokepoint(
-            model.Chokepoint(
-                id=chokepoint_id,
+        run_id = model.make_id("run")
+        branch_point_id = model.make_id("branch_point")
+        self._save_run(run_id, self.pathway_id)
+        self.store._save_branch_point(
+            model.BranchPoint(
+                id=branch_point_id,
                 pathway_id=self.pathway_id,
-                atom_id=atom_id,
+                run_id=run_id,
                 created_at="2026-01-01T00:00:02.000000+00:00",
                 kind="terminal",
                 outcome=model.Outcome.PASSED,
@@ -541,7 +541,7 @@ class LineageIntegrityTests(unittest.TestCase):
             )
         )
         pathway = self.store.load_pathway(self.pathway_id)
-        cyclic = replace(pathway, source_chokepoint_id=chokepoint_id)
+        cyclic = replace(pathway, source_branch_point_id=branch_point_id)
         self.store._write_record(
             self.store.pathways_dir / f"{self.pathway_id}.json",
             "pathway",
@@ -552,19 +552,19 @@ class LineageIntegrityTests(unittest.TestCase):
 
     def test_iterated_branch_chain_validates_each_record_once(self):
         # Each generation branches from a run on the previous one, so a pathway
-        # reaches its parent both directly and through its source chokepoint.
-        den_id = self.store.load_den().id
+        # reaches its parent both directly and through its source branch point.
+        ledger_id = self.store.load_ledger().id
         pathway_id = self.pathway_id
         depth = 12
         for generation in range(depth):
-            atom_id = model.make_id("atom")
-            chokepoint_id = model.make_id("chokepoint")
-            self._save_atom(atom_id, pathway_id)
-            self.store._save_chokepoint(
-                model.Chokepoint(
-                    id=chokepoint_id,
+            run_id = model.make_id("run")
+            branch_point_id = model.make_id("branch_point")
+            self._save_run(run_id, pathway_id)
+            self.store._save_branch_point(
+                model.BranchPoint(
+                    id=branch_point_id,
                     pathway_id=pathway_id,
-                    atom_id=atom_id,
+                    run_id=run_id,
                     created_at="2026-01-01T00:00:02.000000+00:00",
                     kind="terminal",
                     outcome=model.Outcome.PASSED,
@@ -575,10 +575,10 @@ class LineageIntegrityTests(unittest.TestCase):
             self.store._save_pathway(
                 model.Pathway(
                     id=child,
-                    den_id=den_id,
+                    ledger_id=ledger_id,
                     created_at="2026-01-01T00:00:03.000000+00:00",
                     parent_pathway_id=pathway_id,
-                    source_chokepoint_id=chokepoint_id,
+                    source_branch_point_id=branch_point_id,
                     reason=f"generation {generation}",
                     parameters={},
                 )
@@ -594,27 +594,27 @@ class LineageIntegrityTests(unittest.TestCase):
         self.assertLess(loaded, 5 * depth)
         self.assertLess(reads.call_count, 30 * depth)
 
-    def test_chokepoint_atom_pathway_disagreement_is_rejected(self):
+    def test_branch_point_run_pathway_disagreement_is_rejected(self):
         other = model.make_id("pathway")
         self.store._save_pathway(
             model.Pathway(
                 id=other,
-                den_id=self.store.load_den().id,
+                ledger_id=self.store.load_ledger().id,
                 created_at="2026-01-01T00:00:00.000000+00:00",
                 parent_pathway_id=None,
-                source_chokepoint_id=None,
+                source_branch_point_id=None,
                 reason="other",
                 parameters={},
             )
         )
-        atom_id = model.make_id("atom")
-        self._save_atom(atom_id, other)
-        chokepoint_id = model.make_id("chokepoint")
-        self.store._save_chokepoint(
-            model.Chokepoint(
-                id=chokepoint_id,
+        run_id = model.make_id("run")
+        self._save_run(run_id, other)
+        branch_point_id = model.make_id("branch_point")
+        self.store._save_branch_point(
+            model.BranchPoint(
+                id=branch_point_id,
                 pathway_id=self.pathway_id,
-                atom_id=atom_id,
+                run_id=run_id,
                 created_at="2026-01-01T00:00:02.000000+00:00",
                 kind="terminal",
                 outcome=model.Outcome.PASSED,
@@ -622,30 +622,30 @@ class LineageIntegrityTests(unittest.TestCase):
             )
         )
         with self.assertRaises(StoreError):
-            self.store.load_chokepoint(chokepoint_id)
+            self.store.load_branch_point(branch_point_id)
 
 
 class TieBreakTests(unittest.TestCase):
-    def test_chokepoints_with_equal_timestamps_sort_by_id_descending(self):
+    def test_branch_points_with_equal_timestamps_sort_by_id_descending(self):
         with temp_root() as root:
             store = new_store(root)
-            pathway_id = store.load_den().default_pathway_id
-            first = "chokepoint-" + "0" * 31 + "a"
-            second = "chokepoint-" + "0" * 31 + "b"
+            pathway_id = store.load_ledger().default_pathway_id
+            first = "branch-point-" + "0" * 31 + "a"
+            second = "branch-point-" + "0" * 31 + "b"
             created = "2026-01-01T00:00:00.000000+00:00"
             for identifier in (first, second):
-                store._save_chokepoint(
-                    model.Chokepoint(
+                store._save_branch_point(
+                    model.BranchPoint(
                         id=identifier,
                         pathway_id=pathway_id,
-                        atom_id=model.make_id("atom"),
+                        run_id=model.make_id("run"),
                         created_at=created,
                         kind="terminal",
                         outcome=model.Outcome.PASSED,
                         branchable=True,
                     )
                 )
-            listed = [item.id for item in store.list_chokepoints()]
+            listed = [item.id for item in store.list_branch_points()]
             self.assertEqual(listed, [second, first])
 
 
@@ -654,7 +654,7 @@ class EvidenceVerificationTests(unittest.TestCase):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.store = new_store(Path(self._temporary.name) / "proj")
-        self.pathway_id = self.store.load_den().default_pathway_id
+        self.pathway_id = self.store.load_ledger().default_pathway_id
         self.empty_digest = hashlib.sha256(b"").hexdigest()
 
     def _run_once(self):
@@ -669,42 +669,42 @@ class EvidenceVerificationTests(unittest.TestCase):
 
     def test_intact_evidence_passes(self):
         execution = self._run_once()
-        self.store.verify_atom_evidence(execution.atom)
+        self.store.verify_run_evidence(execution.record)
         report = self.store.verify_state()
         self.assertTrue(report.ok)
         self.assertEqual(report.pathways, 1)
-        self.assertEqual(report.atoms, 1)
-        self.assertEqual(report.chokepoints, 1)
+        self.assertEqual(report.run_records, 1)
+        self.assertEqual(report.branch_points, 1)
         self.assertEqual(report.logs_checked, 2)
 
     def test_missing_log_is_rejected(self):
         execution = self._run_once()
-        (self.store.logs_dir / f"{execution.atom.id}.stdout.log").unlink()
+        (self.store.logs_dir / f"{execution.record.id}.stdout.log").unlink()
         with self.assertRaises(StoreError):
-            self.store.verify_atom_evidence(execution.atom)
+            self.store.verify_run_evidence(execution.record)
 
     def test_size_mismatch_is_rejected(self):
         execution = self._run_once()
-        log = self.store.logs_dir / f"{execution.atom.id}.stderr.log"
+        log = self.store.logs_dir / f"{execution.record.id}.stderr.log"
         log.write_bytes(b"x")
         with self.assertRaises(StoreError):
-            self.store.verify_atom_evidence(execution.atom)
+            self.store.verify_run_evidence(execution.record)
 
     def test_content_tamper_is_rejected(self):
         execution = self._run_once()
-        log = self.store.logs_dir / f"{execution.atom.id}.stdout.log"
+        log = self.store.logs_dir / f"{execution.record.id}.stdout.log"
         data = bytearray(log.read_bytes())
         data[0] = data[0] ^ 0x20
         log.write_bytes(bytes(data))
         with self.assertRaises(StoreError):
-            self.store.verify_atom_evidence(execution.atom)
+            self.store.verify_run_evidence(execution.record)
 
     def test_escaping_log_paths_are_rejected(self):
         cases = ["../escape.log", ".ocura-oss/logs/../../escape.log", "C:\\evil\\x.log"]
         for index, stdout_log in enumerate(cases):
             with self.subTest(path=stdout_log):
-                atom = model.Atom(
-                    id=model.make_id("atom"),
+                record = model.RunRecord(
+                    id=model.make_id("run"),
                     pathway_id=self.pathway_id,
                     started_at="2026-01-01T00:00:00.000000+00:00",
                     finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -721,21 +721,21 @@ class EvidenceVerificationTests(unittest.TestCase):
                     stdout_sha256=self.empty_digest,
                     stderr_sha256=self.empty_digest,
                 )
-                self.store._save_atom(atom)
+                self.store._save_run(record)
                 with self.assertRaises(StoreError):
-                    self.store.verify_atom_evidence(atom)
+                    self.store.verify_run_evidence(record)
 
     def test_verify_state_counts_only_logs_it_checked(self):
         execution = self._run_once()
-        (self.store.logs_dir / f"{execution.atom.id}.stdout.log").unlink()
+        (self.store.logs_dir / f"{execution.record.id}.stdout.log").unlink()
         report = self.store.verify_state()
         self.assertFalse(report.ok)
-        self.assertEqual(report.atoms, 1)
+        self.assertEqual(report.run_records, 1)
         self.assertEqual(report.logs_checked, 1)
 
     def test_verify_state_keeps_checksum_mismatch_out_of_orphan_report(self):
         execution = self._run_once()
-        log = self.store.logs_dir / f"{execution.atom.id}.stdout.log"
+        log = self.store.logs_dir / f"{execution.record.id}.stdout.log"
         contents = bytearray(log.read_bytes())
         contents[0] ^= 0x20
         log.write_bytes(contents)
@@ -766,7 +766,7 @@ class EvidenceVerificationTests(unittest.TestCase):
 
     def test_verify_state_reports_problems_with_record_names(self):
         self._run_once()
-        target = sorted(self.store.chokepoints_dir.glob("*.json"))[0]
+        target = sorted(self.store.branch_points_dir.glob("*.json"))[0]
         target.write_text("{broken", "utf-8")
         report = self.store.verify_state()
         self.assertFalse(report.ok)
@@ -784,27 +784,27 @@ class DuplicateRecordTests(unittest.TestCase):
 
         return runner.run_command(
             self.store,
-            pathway_id=self.store.load_den().default_pathway_id,
+            pathway_id=self.store.load_ledger().default_pathway_id,
             argv=[sys.executable, "-c", "print('duplicate test')"],
             declared_parameters={},
         )
 
-    def _copy_atom_under_new_name(self):
+    def _copy_run_under_new_name(self):
         execution = self._run_once()
-        original = self.store.atoms_dir / f"{execution.atom.id}.json"
-        other_id = model.make_id("atom")
-        copy_path = self.store.atoms_dir / f"{other_id}.json"
+        original = self.store.runs_dir / f"{execution.record.id}.json"
+        other_id = model.make_id("run")
+        copy_path = self.store.runs_dir / f"{other_id}.json"
         copy_path.write_bytes(original.read_bytes())
         return other_id
 
     def test_listing_fails_closed_on_duplicated_record(self):
-        other_id = self._copy_atom_under_new_name()
+        other_id = self._copy_run_under_new_name()
         with self.assertRaises(StoreError) as ctx:
-            self.store.list_atoms()
+            self.store.list_run_records()
         self.assertIn(f"{other_id}.json", str(ctx.exception))
 
     def test_verify_state_reports_copied_filename_while_original_passes(self):
-        other_id = self._copy_atom_under_new_name()
+        other_id = self._copy_run_under_new_name()
         report = self.store.verify_state()
         self.assertFalse(report.ok)
         self.assertTrue(any(record == f"{other_id}.json" for record, _problem in report.problems))
@@ -815,13 +815,13 @@ class DuplicateRecordTests(unittest.TestCase):
         ]
         self.assertEqual(mismatch_records, [f"{other_id}.json"])
 
-    def test_chokepoint_copy_fails_chokepoint_listing(self):
+    def test_branch_point_copy_fails_branch_point_listing(self):
         self._run_once()
-        original = sorted(self.store.chokepoints_dir.glob("*.json"))[0]
-        other_id = model.make_id("chokepoint")
-        (self.store.chokepoints_dir / f"{other_id}.json").write_bytes(original.read_bytes())
+        original = sorted(self.store.branch_points_dir.glob("*.json"))[0]
+        other_id = model.make_id("branch_point")
+        (self.store.branch_points_dir / f"{other_id}.json").write_bytes(original.read_bytes())
         with self.assertRaises(StoreError):
-            self.store.list_chokepoints()
+            self.store.list_branch_points()
 
 
 class SemanticInvariantTests(unittest.TestCase):
@@ -829,16 +829,16 @@ class SemanticInvariantTests(unittest.TestCase):
         self._temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary.cleanup)
         self.store = new_store(Path(self._temporary.name) / "proj")
-        self.pathway_id = self.store.load_den().default_pathway_id
-        self.den_id = self.store.load_den().id
+        self.pathway_id = self.store.load_ledger().default_pathway_id
+        self.ledger_id = self.store.load_ledger().id
         self.empty_digest = hashlib.sha256(b"").hexdigest()
 
-    def _craft_atom(self, pathway_id, *, outcome=model.Outcome.PASSED, return_code=0):
-        atom_id = model.make_id("atom")
+    def _craft_run(self, pathway_id, *, outcome=model.Outcome.PASSED, return_code=0):
+        run_id = model.make_id("run")
         for suffix in ("stdout", "stderr"):
-            (self.store.logs_dir / f"{atom_id}.{suffix}.log").write_bytes(b"")
-        atom = model.Atom(
-            id=atom_id,
+            (self.store.logs_dir / f"{run_id}.{suffix}.log").write_bytes(b"")
+        record = model.RunRecord(
+            id=run_id,
             pathway_id=pathway_id,
             started_at="2026-01-01T00:00:00.000000+00:00",
             finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -848,57 +848,57 @@ class SemanticInvariantTests(unittest.TestCase):
             launch_error_category=None,
             declared_parameters={},
             command=("x",),
-            stdout_log=f"{STATE_DIR_NAME}/logs/{atom_id}.stdout.log",
-            stderr_log=f"{STATE_DIR_NAME}/logs/{atom_id}.stderr.log",
+            stdout_log=f"{STATE_DIR_NAME}/logs/{run_id}.stdout.log",
+            stderr_log=f"{STATE_DIR_NAME}/logs/{run_id}.stderr.log",
             stdout_bytes=0,
             stderr_bytes=0,
             stdout_sha256=self.empty_digest,
             stderr_sha256=self.empty_digest,
         )
-        self.store._save_atom(atom)
-        return atom
+        self.store._save_run(record)
+        return record
 
-    def _craft_chokepoint(self, atom_id, outcome=model.Outcome.PASSED):
-        chokepoint = model.Chokepoint(
-            id=model.make_id("chokepoint"),
+    def _craft_branch_point(self, run_id, outcome=model.Outcome.PASSED):
+        branch_point = model.BranchPoint(
+            id=model.make_id("branch_point"),
             pathway_id=self.pathway_id,
-            atom_id=atom_id,
+            run_id=run_id,
             created_at="2026-01-01T00:00:02.000000+00:00",
             kind="terminal",
             outcome=outcome,
             branchable=True,
         )
-        self.store._save_chokepoint(chokepoint)
-        return chokepoint
+        self.store._save_branch_point(branch_point)
+        return branch_point
 
-    def test_atom_with_nonexistent_pathway_fails_verification(self):
+    def test_run_with_nonexistent_pathway_fails_verification(self):
         ghost = "pathway-" + "f" * 32
-        atom = self._craft_atom(ghost)
+        record = self._craft_run(ghost)
         report = self.store.verify_state()
         self.assertFalse(report.ok)
         self.assertTrue(
             any(
-                record == f"{atom.id}.json" and "pathway" in problem
-                for record, problem in report.problems
+                name == f"{record.id}.json" and "pathway" in problem
+                for name, problem in report.problems
             )
         )
 
     def test_filename_id_mismatch_is_rejected(self):
-        atom = self._craft_atom(self.pathway_id)
-        original = self.store.atoms_dir / f"{atom.id}.json"
-        other_id = model.make_id("atom")
-        copied = self.store.atoms_dir / f"{other_id}.json"
+        record = self._craft_run(self.pathway_id)
+        original = self.store.runs_dir / f"{record.id}.json"
+        other_id = model.make_id("run")
+        copied = self.store.runs_dir / f"{other_id}.json"
         copied.write_bytes(original.read_bytes())
         with self.assertRaises(StoreError):
-            self.store.load_atom(other_id)
+            self.store.load_run(other_id)
 
-    def test_chokepoint_outcome_must_match_atom_outcome(self):
-        atom = self._craft_atom(self.pathway_id, outcome=model.Outcome.PASSED)
-        chokepoint = self._craft_chokepoint(atom.id, outcome=model.Outcome.FAILED)
+    def test_branch_point_outcome_must_match_run_outcome(self):
+        record = self._craft_run(self.pathway_id, outcome=model.Outcome.PASSED)
+        branch_point = self._craft_branch_point(record.id, outcome=model.Outcome.FAILED)
         with self.assertRaises(StoreError):
-            self.store.load_chokepoint(chokepoint.id)
+            self.store.load_branch_point(branch_point.id)
 
-    def test_source_chokepoint_must_belong_to_parent_pathway(self):
+    def test_source_branch_point_must_belong_to_parent_pathway(self):
         from ocura_oss import runner
 
         execution = runner.run_command(
@@ -909,20 +909,20 @@ class SemanticInvariantTests(unittest.TestCase):
         )
         legitimate = model.Pathway(
             id=model.make_id("pathway"),
-            den_id=self.den_id,
-            created_at=execution.chokepoint.created_at,
+            ledger_id=self.ledger_id,
+            created_at=execution.branch_point.created_at,
             parent_pathway_id=self.pathway_id,
-            source_chokepoint_id=execution.chokepoint.id,
+            source_branch_point_id=execution.branch_point.id,
             reason="legitimate branch",
             parameters={},
         )
         self.store._save_pathway(legitimate)
         swapped = model.Pathway(
             id=model.make_id("pathway"),
-            den_id=self.den_id,
+            ledger_id=self.ledger_id,
             created_at=legitimate.created_at,
             parent_pathway_id=legitimate.id,
-            source_chokepoint_id=execution.chokepoint.id,
+            source_branch_point_id=execution.branch_point.id,
             reason="source belongs to grandparent, not parent",
             parameters={},
         )
