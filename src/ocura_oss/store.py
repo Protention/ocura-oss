@@ -1151,6 +1151,8 @@ class Store:
         _atomic_write_bytes(path, text.encode("utf-8"))
 
     def _list_typed(self, directory: Path, kind: str, converter: Callable[[dict], _T]) -> list[_T]:
+        # Without this, state from before 0.8 would list as empty directories.
+        self.require()
         return list(self._iter_typed(directory, kind, converter))
 
     def _iter_typed(

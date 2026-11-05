@@ -160,7 +160,14 @@ class SchemaTwoLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             shutil.copytree(old, root / STATE_DIR_NAME)
-            for call in (lambda: ocura_oss.verify(root), lambda: ocura_oss.run(["x"], root=root)):
+            store = Store(root)
+            for call in (
+                lambda: ocura_oss.verify(root),
+                lambda: ocura_oss.run(["x"], root=root),
+                store.list_pathways,
+                store.list_run_records,
+                store.list_branch_points,
+            ):
                 with self.subTest(call=call), self.assertRaises(ocura_oss.StoreError) as caught:
                     call()
                 self.assertEqual(caught.exception.code, "unsupported_schema")
