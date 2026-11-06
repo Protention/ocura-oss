@@ -1,7 +1,7 @@
 # Record and inspect a small history
 
 This repository-only example uses the discovery and naming interfaces from Ocura OSS 0.8.
-Run it with Ocura OSS 0.8 installed from this checkout or its built wheel. It needs no
+Run it with Ocura OSS 0.8 installed from PyPI or this checkout. It needs no
 optional dependencies and is excluded from the package distributions.
 
 From the checkout root, create a small demonstration and inspect it:

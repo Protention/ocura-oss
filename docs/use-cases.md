@@ -24,14 +24,13 @@ how to inspect your own ledger. No optional dependencies are needed.
 ## Fuller demonstrations
 
 These examples use **Ocura OSS 0.8.0**. Use a separate checkout and an activated
-virtual environment. Until 0.8 is released, build and install the branch's wheel:
+virtual environment, then install the matching release:
 
 ```console
 git clone --branch examples/0.8 --single-branch https://github.com/Protention/ocura-oss.git ocura-oss-examples
 cd ocura-oss-examples
 git rev-parse HEAD
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 ```
 
 Follow the selected guide for any optional dependencies. The branch's package

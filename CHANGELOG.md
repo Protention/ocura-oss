@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.8.0 - 2026-11-04
+## 0.8.0 - 2026-11-06
 
 This release renames stored state and cannot read ledgers written by earlier versions.
 
