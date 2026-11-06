@@ -40,6 +40,37 @@ class ErrorProvenanceTests(unittest.TestCase):
             ("permission_denied", "not_started"),
         )
 
+    def test_run_marks_only_pre_runner_store_errors_as_not_started(self):
+        with self.assertRaises(StoreError) as missing:
+            run([sys.executable, "-c", "pass"], root=self.root / "absent")
+        self.assertEqual(missing.exception.execution, "not_started")
+        denied = PermissionError("preflight access denied")
+        with (
+            patch("ocura_oss.api._required_store", side_effect=denied),
+            self.assertRaises(StoreError) as inaccessible,
+        ):
+            run([sys.executable, "-c", "pass"], root=self.root)
+        self.assertEqual(
+            (inaccessible.exception.code, inaccessible.exception.execution),
+            ("permission_denied", "not_started"),
+        )
+        self.assertEqual(str(inaccessible.exception), str(denied))
+        self.assertIs(inaccessible.exception.__cause__, denied)
+        with (
+            patch("ocura_oss.api.Store.load_ledger", side_effect=StoreError("bad ledger")),
+            self.assertRaises(StoreError) as unreadable,
+        ):
+            run([sys.executable, "-c", "pass"], root=self.root)
+        self.assertEqual(unreadable.exception.execution, "not_started")
+        uncertain = StoreError("recorder failed", execution="unknown")
+        with (
+            patch("ocura_oss.api.runner.run_command", side_effect=uncertain),
+            self.assertRaises(StoreError) as launched,
+        ):
+            run([sys.executable, "-c", "pass"], root=self.root)
+        self.assertIs(launched.exception, uncertain)
+        self.assertEqual(launched.exception.execution, "unknown")
+
     def test_failure_after_launch_retains_ids_and_recovery_does_not_resubmit(self):
         command = [
             sys.executable,
@@ -48,7 +79,7 @@ class ErrorProvenanceTests(unittest.TestCase):
             "p.write_text(p.read_text()+'x' if p.exists() else 'x'); print('evidence')",
         ]
         with (
-            patch.object(Store, "_save_chokepoint", side_effect=PermissionError("denied")),
+            patch.object(Store, "_save_branch_point", side_effect=PermissionError("denied")),
             self.assertRaises(StoreError) as failure,
         ):
             run(command, root=self.root)
@@ -86,10 +117,10 @@ class ErrorProvenanceTests(unittest.TestCase):
         ):
             self.store.load_ledger()
         self.assertEqual(denied.exception.code, "permission_denied")
-        den_path = self.root / ".ocura-oss" / "den.json"
-        envelope = json.loads(den_path.read_text())
+        ledger_path = self.root / ".ocura-oss" / "ledger.json"
+        envelope = json.loads(ledger_path.read_text())
         envelope["payload"]["name"] = "changed without checksum"
-        den_path.write_text(json.dumps(envelope))
+        ledger_path.write_text(json.dumps(envelope))
         with self.assertRaises(StoreError) as damaged:
             self.store.load_ledger()
         self.assertEqual(damaged.exception.code, "integrity_error")

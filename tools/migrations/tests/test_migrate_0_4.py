@@ -423,30 +423,6 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
 
-    def test_current_package_reads_compares_and_extends_converted_state(self):
-        migration.migrate(self.source, self.destination)
-        code = """import json, pathlib, sys
-sys.path.insert(0, sys.argv[1])
-import ocura_oss
-root = pathlib.Path(sys.argv[2])
-report = ocura_oss.verify(root)
-assert report.ok, report.problems
-comparison = ocura_oss.compare(root=root)
-assert comparison.children
-execution = ocura_oss.run([sys.executable, '-c', "print('new work')"], root=root)
-assert execution.atom.outcome.value == 'passed'
-assert ocura_oss.verify(root).ok
-print(json.dumps({'version': ocura_oss.__version__, 'verified': True}))
-"""
-        result = subprocess.run(
-            [sys.executable, "-I", "-B", "-c", code, str(REPO / "src"), str(self.destination)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(json.loads(result.stdout)["verified"])
-
 
 if __name__ == "__main__":
     unittest.main()

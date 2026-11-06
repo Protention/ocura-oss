@@ -45,8 +45,8 @@ class ProvenanceTestCase(unittest.TestCase):
             code = cli.main([arguments[0], "--root", str(self.root), *arguments[1:]])
         return code, stdout.getvalue(), stderr.getvalue()
 
-    def output(self, atom):
-        return self.store.read_verified_log(atom.id).decode("utf-8")
+    def output(self, record):
+        return self.store.read_verified_log(record.id).decode("utf-8")
 
 
 class SubstitutionTests(ProvenanceTestCase):
@@ -56,56 +56,56 @@ class SubstitutionTests(ProvenanceTestCase):
             root=self.root,
             substitute=True,
             **options,
-        ).atom
+        ).record
 
     def test_placeholders_take_declared_values_and_are_recorded_as_run(self):
-        atom = self.run_substituted(
+        record = self.run_substituted(
             "--batch", "{batch}", "--name=run-{batch}-{lr}", parameters={"batch": "4", "lr": "0.1"}
         )
-        self.assertEqual(self.output(atom), "--batch|4|--name=run-4-0.1")
-        self.assertEqual(atom.command[3:], ("--batch", "4", "--name=run-4-0.1"))
-        self.assertEqual(atom.declared_parameters, {"batch": "4", "lr": "0.1"})
+        self.assertEqual(self.output(record), "--batch|4|--name=run-4-0.1")
+        self.assertEqual(record.command[3:], ("--batch", "4", "--name=run-4-0.1"))
+        self.assertEqual(record.declared_parameters, {"batch": "4", "lr": "0.1"})
 
     def test_pathway_parameters_fill_placeholders_and_become_run_labels(self):
         baseline = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root)
         child = ocura_oss.branch(
-            baseline.chokepoint.id,
+            baseline.branch_point.id,
             root=self.root,
             reason="larger batch",
             parameters={"batch": "8", "unused": "not-in-command"},
         )
-        atom = self.run_substituted("{batch}", pathway_id=child.id)
-        self.assertEqual(self.output(atom), "8")
-        self.assertEqual(atom.declared_parameters, {"batch": "8", "unused": "not-in-command"})
+        record = self.run_substituted("{batch}", pathway_id=child.id)
+        self.assertEqual(self.output(record), "8")
+        self.assertEqual(record.declared_parameters, {"batch": "8", "unused": "not-in-command"})
 
     def test_declared_value_overrides_the_pathway_value(self):
         baseline = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root)
         child = ocura_oss.branch(
-            baseline.chokepoint.id, root=self.root, reason="vary", parameters={"batch": "8"}
+            baseline.branch_point.id, root=self.root, reason="vary", parameters={"batch": "8"}
         )
-        atom = self.run_substituted("{batch}", pathway_id=child.id, parameters={"batch": "16"})
-        self.assertEqual(self.output(atom), "16")
-        self.assertEqual(atom.declared_parameters, {"batch": "16"})
+        record = self.run_substituted("{batch}", pathway_id=child.id, parameters={"batch": "16"})
+        self.assertEqual(self.output(record), "16")
+        self.assertEqual(record.declared_parameters, {"batch": "16"})
 
     def test_declared_labels_need_not_appear_in_the_command(self):
-        atom = self.run_substituted("{batch}", parameters={"batch": "2", "note": "label only"})
-        self.assertEqual(atom.declared_parameters, {"batch": "2", "note": "label only"})
+        record = self.run_substituted("{batch}", parameters={"batch": "2", "note": "label only"})
+        self.assertEqual(record.declared_parameters, {"batch": "2", "note": "label only"})
 
     def test_doubled_braces_are_literal(self):
-        atom = self.run_substituted("{{batch}}={batch}", "{{}}", parameters={"batch": "2"})
-        self.assertEqual(self.output(atom), "{batch}=2|{}")
+        record = self.run_substituted("{{batch}}={batch}", "{{}}", parameters={"batch": "2"})
+        self.assertEqual(self.output(record), "{batch}=2|{}")
 
     def test_keys_may_contain_periods_and_hyphens(self):
-        atom = self.run_substituted("{model.hidden-size}", parameters={"model.hidden-size": "64"})
-        self.assertEqual(self.output(atom), "64")
+        record = self.run_substituted("{model.hidden-size}", parameters={"model.hidden-size": "64"})
+        self.assertEqual(self.output(record), "64")
 
     def test_braces_are_untouched_unless_substitution_is_requested(self):
-        atom = ocura_oss.run(
+        record = ocura_oss.run(
             [sys.executable, "-c", PRINT_ARGUMENTS, "{batch}", "{"],
             root=self.root,
             parameters={"batch": "4"},
-        ).atom
-        self.assertEqual(self.output(atom), "{batch}|{")
+        ).record
+        self.assertEqual(self.output(record), "{batch}|{")
 
     def test_unknown_or_unbalanced_placeholders_stop_before_anything_runs(self):
         cases = (
@@ -120,16 +120,16 @@ class SubstitutionTests(ProvenanceTestCase):
                 with self.assertRaises(StoreError) as ctx:
                     self.run_substituted(token, parameters={"batch": "4"})
                 self.assertIn(message, str(ctx.exception))
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
         self.assertEqual(list(self.store.attempts_dir.iterdir()), [])
 
     def test_masking_hides_the_token_but_not_the_substituted_label(self):
-        atom = self.run_substituted(
+        record = self.run_substituted(
             "{batch}", "plain", parameters={"batch": "4"}, masked_arguments=[3]
         )
-        self.assertEqual(atom.command[3:], (model.MASKED_ARGUMENT, "plain"))
-        self.assertEqual(self.output(atom), "4|plain")
-        self.assertEqual(atom.declared_parameters, {"batch": "4"})
+        self.assertEqual(record.command[3:], (model.MASKED_ARGUMENT, "plain"))
+        self.assertEqual(self.output(record), "4|plain")
+        self.assertEqual(record.declared_parameters, {"batch": "4"})
 
     def test_command_line_flag_substitutes(self):
         code, stdout, stderr = self.invoke(
@@ -146,8 +146,8 @@ class SubstitutionTests(ProvenanceTestCase):
             "{batch}",
         )
         self.assertEqual(code, 0, stderr)
-        atom = self.store.load_atom(json.loads(stdout)["atom_id"])
-        self.assertEqual(self.output(atom), "--batch|4")
+        record = self.store.load_run(json.loads(stdout)["run_id"])
+        self.assertEqual(self.output(record), "--batch|4")
 
         code, stdout, stderr = self.invoke(
             "run", "--json", "--substitute", "--", sys.executable, "-c", "pass", "{absent}"
@@ -163,9 +163,9 @@ class ManifestTests(ProvenanceTestCase):
             [sys.executable, "-c", "print('kept')"], root=self.root, parameters={"batch": "1"}
         )
 
-    def rewrite_atom(self, atom_id, **changes):
+    def rewrite_run(self, run_id, **changes):
         """Rewrite a record and its checksum together, as a writer of the state could."""
-        path = self.store.atoms_dir / f"{atom_id}.json"
+        path = self.store.runs_dir / f"{run_id}.json"
         envelope = json.loads(path.read_text("utf-8"))
         envelope["payload"].update(changes)
         envelope["checksum"] = model.checksum_for(
@@ -179,12 +179,16 @@ class ManifestTests(ProvenanceTestCase):
         self.assertEqual(list(report.manifest), sorted(report.manifest))
         self.assertEqual(
             sorted(entry.split(" ")[0] for entry in report.manifest),
-            ["atom", "chokepoint", "den", "pathway"],
+            ["branch_point", "ledger", "pathway", "run"],
         )
         for entry in report.manifest:
             kind, record_id, checksum = entry.split(" ")
-            directory = self.store.state_dir if kind == "den" else self.store.state_dir / f"{kind}s"
-            name = "den.json" if kind == "den" else f"{record_id}.json"
+            directory = (
+                self.store.state_dir
+                if kind == "ledger"
+                else self.store.state_dir / f"{kind.replace('_', '-')}s"
+            )
+            name = "ledger.json" if kind == "ledger" else f"{record_id}.json"
             stored = json.loads((directory / name).read_text("utf-8"))
             self.assertEqual(stored["checksum"]["value"], checksum)
         text = "".join(f"{entry}\n" for entry in report.manifest).encode("utf-8")
@@ -199,7 +203,7 @@ class ManifestTests(ProvenanceTestCase):
         self.assertTrue(set(before.manifest) < set(after.manifest))
 
     def test_failed_verification_has_no_manifest_or_digest(self):
-        (self.root / self.baseline.atom.stdout_log).write_bytes(b"changed")
+        (self.root / self.baseline.record.stdout_log).write_bytes(b"changed")
         report = ocura_oss.verify(self.root)
         self.assertFalse(report.ok)
         self.assertEqual(report.manifest, ())
@@ -207,7 +211,7 @@ class ManifestTests(ProvenanceTestCase):
 
     def test_retained_manifest_accepts_later_records(self):
         retained = ocura_oss.verify(self.root).manifest
-        child = ocura_oss.branch(self.baseline.chokepoint.id, root=self.root, reason="more")
+        child = ocura_oss.branch(self.baseline.branch_point.id, root=self.root, reason="more")
         ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, pathway_id=child.id)
         report = ocura_oss.verify(self.root, against=retained)
         self.assertTrue(report.ok, report.problems)
@@ -215,22 +219,22 @@ class ManifestTests(ProvenanceTestCase):
 
     def test_retained_manifest_detects_a_record_rewritten_with_its_checksum(self):
         retained = ocura_oss.verify(self.root).manifest
-        self.rewrite_atom(self.baseline.atom.id, declared_parameters={"batch": "64"})
+        self.rewrite_run(self.baseline.record.id, declared_parameters={"batch": "64"})
         self.assertTrue(ocura_oss.verify(self.root).ok, "checksums alone cannot see this change")
 
         report = ocura_oss.verify(self.root, against=retained)
         self.assertEqual(
             report.problems,
-            ((f"{self.baseline.atom.id}.json", "retained atom record is missing or was changed"),),
+            ((f"{self.baseline.record.id}.json", "retained run record is missing or was changed"),),
         )
         self.assertEqual((report.manifest, report.digest), ((), None))
 
     def test_retained_manifest_detects_a_replaced_log(self):
         retained = ocura_oss.verify(self.root).manifest
-        log = self.root / self.baseline.atom.stdout_log
+        log = self.root / self.baseline.record.stdout_log
         log.write_bytes(b"forged\n")
-        self.rewrite_atom(
-            self.baseline.atom.id,
+        self.rewrite_run(
+            self.baseline.record.id,
             stdout_bytes=7,
             stdout_sha256=hashlib.sha256(b"forged\n").hexdigest(),
         )
@@ -240,17 +244,17 @@ class ManifestTests(ProvenanceTestCase):
     def test_retained_manifest_detects_a_removed_run(self):
         extra = ocura_oss.run([sys.executable, "-c", "pass"], root=self.root)
         retained = ocura_oss.verify(self.root).manifest
-        (self.store.atoms_dir / f"{extra.atom.id}.json").unlink()
-        (self.store.chokepoints_dir / f"{extra.chokepoint.id}.json").unlink()
-        for relative in (extra.atom.stdout_log, extra.atom.stderr_log):
+        (self.store.runs_dir / f"{extra.record.id}.json").unlink()
+        (self.store.branch_points_dir / f"{extra.branch_point.id}.json").unlink()
+        for relative in (extra.record.stdout_log, extra.record.stderr_log):
             (self.root / relative).unlink()
         self.assertTrue(ocura_oss.verify(self.root).ok)
         report = ocura_oss.verify(self.root, against=retained)
         self.assertEqual(
             sorted(problem for _record, problem in report.problems),
             [
-                "retained atom record is missing or was changed",
-                "retained chokepoint record is missing or was changed",
+                "retained branch point record is missing or was changed",
+                "retained run record is missing or was changed",
             ],
         )
 
@@ -259,7 +263,7 @@ class ManifestTests(ProvenanceTestCase):
         self.assertTrue(ocura_oss.verify(self.root, against=retained).ok)
 
     def test_retained_manifest_without_entries_is_rejected(self):
-        self.rewrite_atom(self.baseline.atom.id, declared_parameters={"batch": "64"})
+        self.rewrite_run(self.baseline.record.id, declared_parameters={"batch": "64"})
         for lines in ([], [""], ["# exported 2026-10-07", "   "]):
             with self.subTest(lines=lines), self.assertRaises(StoreError) as ctx:
                 ocura_oss.verify(self.root, against=lines)
@@ -267,7 +271,7 @@ class ManifestTests(ProvenanceTestCase):
         self.assertTrue(ocura_oss.verify(self.root).ok, "no manifest at all is still allowed")
 
     def test_empty_retained_file_from_a_failed_export_is_an_error(self):
-        (self.root / self.baseline.atom.stdout_log).write_bytes(b"changed")
+        (self.root / self.baseline.record.stdout_log).write_bytes(b"changed")
         retained = Path(self._temporary.name) / "retained.manifest"
         code, stdout, _stderr = self.invoke("manifest")
         self.assertEqual((code, stdout), (2, ""))
@@ -278,16 +282,16 @@ class ManifestTests(ProvenanceTestCase):
         self.assertIn("error: retained manifest lists no records", stderr)
 
     def test_malformed_retained_entries_are_rejected(self):
-        den = self.store.load_den().id
+        ledger = self.store.load_ledger().id
         digest = "0" * 64
         for entry in (
-            "atom",
-            f"den {den}",
-            f"den {den} {digest} extra",
-            f"atom {den} {digest}",
-            f"den {den} {digest[:-1]}",
-            f"den {den} {digest[:-1]}G",
-            f"thing {den} {digest}",
+            "run",
+            f"ledger {ledger}",
+            f"ledger {ledger} {digest} extra",
+            f"run {ledger} {digest}",
+            f"ledger {ledger} {digest[:-1]}",
+            f"ledger {ledger} {digest[:-1]}G",
+            f"thing {ledger} {digest}",
         ):
             with self.subTest(entry=entry), self.assertRaises(StoreError) as ctx:
                 ocura_oss.verify(self.root, against=[entry])
@@ -313,18 +317,18 @@ class ManifestTests(ProvenanceTestCase):
         code, stdout, _stderr = self.invoke("verify", "--json", "--against", str(retained))
         self.assertEqual(code, 0, stdout)
 
-        self.rewrite_atom(self.baseline.atom.id, declared_parameters={"batch": "64"})
+        self.rewrite_run(self.baseline.record.id, declared_parameters={"batch": "64"})
         code, stdout, _stderr = self.invoke("verify", "--json", "--against", str(retained))
         self.assertEqual(code, 2)
         result = json.loads(stdout)
         self.assertEqual(result["status"], "failed")
         self.assertIsNone(result["digest"])
         self.assertEqual(
-            result["problems"][0]["problem"], "retained atom record is missing or was changed"
+            result["problems"][0]["problem"], "retained run record is missing or was changed"
         )
 
     def test_command_line_manifest_refuses_an_unverified_state(self):
-        (self.root / self.baseline.atom.stdout_log).write_bytes(b"changed")
+        (self.root / self.baseline.record.stdout_log).write_bytes(b"changed")
         code, stdout, stderr = self.invoke("manifest")
         self.assertEqual((code, stdout), (2, ""))
         self.assertIn("a manifest requires a fully verified state", stderr)
@@ -346,7 +350,7 @@ class ManifestTests(ProvenanceTestCase):
 
     def test_retained_file_that_is_not_text_is_an_error(self):
         retained = Path(self._temporary.name) / "retained.manifest"
-        retained.write_bytes(b"den \xff\xff\xff")
+        retained.write_bytes(b"ledger \xff\xff\xff")
         code, stdout, stderr = self.invoke("verify", "--against", str(retained))
         self.assertEqual((code, stdout), (2, ""))
         self.assertIn("is not UTF-8 or UTF-16 text", stderr)
@@ -354,7 +358,7 @@ class ManifestTests(ProvenanceTestCase):
 
 class ContextTests(ProvenanceTestCase):
     def run_plain(self, **options):
-        return ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, **options).atom
+        return ocura_oss.run([sys.executable, "-c", "pass"], root=self.root, **options).record
 
     def git(self, *arguments):
         subprocess.run(
@@ -364,8 +368,8 @@ class ContextTests(ProvenanceTestCase):
             capture_output=True,
         )
 
-    def stored_payload(self, atom):
-        path = self.store.atoms_dir / f"{atom.id}.json"
+    def stored_payload(self, record):
+        path = self.store.runs_dir / f"{record.id}.json"
         return json.loads(path.read_text("utf-8"))["payload"]
 
     def test_nothing_is_captured_or_executed_unless_requested(self):
@@ -373,38 +377,38 @@ class ContextTests(ProvenanceTestCase):
             mock.patch.object(context.subprocess, "run", side_effect=AssertionError("git ran")),
             mock.patch.object(platform, "system", side_effect=AssertionError("platform read")),
         ):
-            atom = self.run_plain()
-        self.assertIsNone(atom.context)
-        self.assertNotIn("context", self.stored_payload(atom))
+            record = self.run_plain()
+        self.assertIsNone(record.context)
+        self.assertNotIn("context", self.stored_payload(record))
 
     def test_platform_is_recorded_on_request(self):
-        atom = self.run_plain(context=True)
+        record = self.run_plain(context=True)
         self.assertEqual(
-            atom.context.platform,
+            record.context.platform,
             {
                 "system": platform.system(),
                 "release": platform.release(),
                 "machine": platform.machine(),
             },
         )
-        self.assertEqual(atom.context.files, {})
-        self.assertEqual(self.store.load_atom(atom.id), atom)
+        self.assertEqual(record.context.files, {})
+        self.assertEqual(self.store.load_run(record.id), record)
         self.assertTrue(self.store.verify_state().ok)
 
     def test_git_is_absent_outside_a_work_tree_or_without_git(self):
         with mock.patch.object(context.subprocess, "run", side_effect=FileNotFoundError):
-            atom = self.run_plain(context=True)
-        self.assertIsNone(atom.context.git_revision)
-        self.assertIsNone(atom.context.git_dirty)
-        self.assertIsNone(self.stored_payload(atom)["context"]["git"])
-        self.assertIsNotNone(atom.context.platform)
+            record = self.run_plain(context=True)
+        self.assertIsNone(record.context.git_revision)
+        self.assertIsNone(record.context.git_dirty)
+        self.assertIsNone(self.stored_payload(record)["context"]["git"])
+        self.assertIsNotNone(record.context.platform)
 
     def test_unexpected_git_output_is_not_recorded_as_a_revision(self):
         completed = subprocess.CompletedProcess([], 0, stdout=b"not a revision\n", stderr=b"")
         with mock.patch.object(context.subprocess, "run", return_value=completed):
-            atom = self.run_plain(context=True)
-        self.assertIsNone(atom.context.git_revision)
-        self.assertEqual(self.store.load_atom(atom.id), atom)
+            record = self.run_plain(context=True)
+        self.assertIsNone(record.context.git_revision)
+        self.assertEqual(self.store.load_run(record.id), record)
 
     @unittest.skipUnless(GIT, "requires git")
     def test_git_revision_and_dirty_state_are_recorded(self):
@@ -459,10 +463,10 @@ class ContextTests(ProvenanceTestCase):
         # them are undefined in the Windows default code page.
         self.git("config", "core.quotePath", "false")
         (self.root / "\u0141\u00f3d\u017a \u6771\u4eac.txt").write_text("untracked\n", "utf-8")
-        atom = self.run_plain(context=True)
-        self.assertIs(atom.outcome, model.Outcome.PASSED)
-        self.assertIs(atom.context.git_dirty, True)
-        self.assertEqual(len(atom.context.git_revision), 40)
+        record = self.run_plain(context=True)
+        self.assertIs(record.outcome, model.Outcome.PASSED)
+        self.assertIs(record.context.git_dirty, True)
+        self.assertEqual(len(record.context.git_revision), 40)
 
     def test_git_output_is_never_decoded_as_text(self):
         revision = b"a" * 40 + b"\n"
@@ -472,9 +476,9 @@ class ContextTests(ProvenanceTestCase):
             subprocess.CompletedProcess([], 0, stdout=status, stderr=b""),
         ]
         with mock.patch.object(context.subprocess, "run", side_effect=completed) as run:
-            atom = self.run_plain(context=True)
-        self.assertEqual(atom.context.git_revision, "a" * 40)
-        self.assertIs(atom.context.git_dirty, True)
+            record = self.run_plain(context=True)
+        self.assertEqual(record.context.git_revision, "a" * 40)
+        self.assertIs(record.context.git_dirty, True)
         for call in run.call_args_list:
             self.assertNotIn("text", call.kwargs)
             self.assertNotIn("encoding", call.kwargs)
@@ -486,9 +490,9 @@ class ContextTests(ProvenanceTestCase):
     @unittest.skipUnless(GIT, "requires git")
     def test_repository_without_commits_has_no_git_state(self):
         self.git("init", "--quiet")
-        atom = self.run_plain(context=True)
-        self.assertIsNone(atom.context.git_revision)
-        self.assertIsNone(atom.context.git_dirty)
+        record = self.run_plain(context=True)
+        self.assertIsNone(record.context.git_revision)
+        self.assertIsNone(record.context.git_dirty)
 
     def test_named_files_are_measured_without_other_context(self):
         (self.root / "configs").mkdir()
@@ -496,12 +500,12 @@ class ContextTests(ProvenanceTestCase):
         inside.write_bytes(b"batch: 4\n")
         outside = Path(self._temporary.name) / "data.bin"
         outside.write_bytes(b"\x00\x01\x02")
-        atom = self.run_plain(context_files=[Path("configs") / "run.yaml", outside])
+        record = self.run_plain(context_files=[Path("configs") / "run.yaml", outside])
 
-        self.assertIsNone(atom.context.platform)
-        self.assertIsNone(atom.context.git_revision)
+        self.assertIsNone(record.context.platform)
+        self.assertIsNone(record.context.git_revision)
         self.assertEqual(
-            atom.context.files,
+            record.context.files,
             {
                 "configs/run.yaml": model.FileDigest(
                     bytes=9, sha256=hashlib.sha256(b"batch: 4\n").hexdigest()
@@ -511,7 +515,7 @@ class ContextTests(ProvenanceTestCase):
                 ),
             },
         )
-        self.assertEqual(self.store.load_atom(atom.id), atom)
+        self.assertEqual(self.store.load_run(record.id), record)
         inside.write_bytes(b"batch: 8\n")
         self.assertTrue(self.store.verify_state().ok, "context describes launch, not the present")
 
@@ -519,7 +523,7 @@ class ContextTests(ProvenanceTestCase):
         with self.assertRaises(StoreError) as ctx:
             self.run_plain(context_files=["absent.yaml"])
         self.assertIn("cannot read context file absent.yaml", str(ctx.exception))
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
         self.assertEqual(list(self.store.attempts_dir.iterdir()), [])
 
     def test_context_survives_abandonment_and_recovery(self):
@@ -533,24 +537,24 @@ class ContextTests(ProvenanceTestCase):
         ((attempt, _state),) = self.store.list_attempts()
         self.assertEqual(set(attempt.context.files), {"config.json"})
         self.store.recover()
-        atom = self.store.load_atom(attempt.id)
-        self.assertIs(atom.outcome, model.Outcome.ABANDONED)
-        self.assertEqual(atom.context, attempt.context)
+        record = self.store.load_run(attempt.id)
+        self.assertIs(record.outcome, model.Outcome.ABANDONED)
+        self.assertEqual(record.context, attempt.context)
 
     def test_context_fields_from_a_newer_writer_are_ignored(self):
-        atom = self.run_plain(context=True)
-        path = self.store.atoms_dir / f"{atom.id}.json"
+        record = self.run_plain(context=True)
+        path = self.store.runs_dir / f"{record.id}.json"
         envelope = json.loads(path.read_text("utf-8"))
         envelope["payload"]["context"]["added_later"] = [1, 2]
         envelope["payload"]["context"]["platform"]["added_later"] = "value"
-        envelope["checksum"] = model.checksum_for(2, "atom", envelope["payload"])
+        envelope["checksum"] = model.checksum_for(model.SCHEMA_VERSION, "run", envelope["payload"])
         path.write_text(json.dumps(envelope), "utf-8")
-        loaded = self.store.load_atom(atom.id)
+        loaded = self.store.load_run(record.id)
         self.assertEqual(loaded.context.platform["system"], platform.system())
         self.assertEqual(loaded.context.platform["added_later"], "value")
 
     def test_malformed_context_is_rejected(self):
-        base = model.atom_to_payload(self.run_plain(context=True, context_files=[]))
+        base = model.run_to_payload(self.run_plain(context=True, context_files=[]))
         digest = "0" * 64
         cases = {
             "context not an object": [],
@@ -567,7 +571,7 @@ class ContextTests(ProvenanceTestCase):
         }
         for label, value in cases.items():
             with self.subTest(case=label), self.assertRaises(model.ValidationError):
-                model.atom_from_payload({**base, "context": value})
+                model.run_from_payload({**base, "context": value})
 
     def test_command_line_flags_record_context(self):
         (self.root / "config.json").write_text("{}", "utf-8")
@@ -583,9 +587,9 @@ class ContextTests(ProvenanceTestCase):
             "pass",
         )
         self.assertEqual(code, 0, stderr)
-        atom = self.store.load_atom(json.loads(stdout)["atom_id"])
-        self.assertEqual(atom.context.platform["system"], platform.system())
-        self.assertEqual(set(atom.context.files), {"config.json"})
+        record = self.store.load_run(json.loads(stdout)["run_id"])
+        self.assertEqual(record.context.platform["system"], platform.system())
+        self.assertEqual(set(record.context.files), {"config.json"})
 
         code, stdout, stderr = self.invoke(
             "run", "--json", "--context-file", "absent.json", "--", sys.executable, "-c", "pass"

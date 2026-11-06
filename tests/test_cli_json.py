@@ -37,8 +37,8 @@ class CliJsonTests(unittest.TestCase):
         store = Store(self.root)
         self.assertEqual(self.initial["root"], str(self.root.resolve()))
         self.assertEqual(self.initial["state_dir"], str(store.state_dir))
-        self.assertEqual(self.initial["den_id"], store.load_den().id)
-        self.assertEqual(self.initial["default_pathway_id"], store.load_den().default_pathway_id)
+        self.assertEqual(self.initial["ledger_id"], store.load_ledger().id)
+        self.assertEqual(self.initial["default_pathway_id"], store.load_ledger().default_pathway_id)
 
     def test_noisy_command_keeps_json_clean_and_exact_logs(self):
         command = (
@@ -71,9 +71,11 @@ class CliJsonTests(unittest.TestCase):
                     (self.root / payload["stderr_log"]).read_bytes(), b"error output\n"
                 )
                 store = Store(self.root)
-                atom = store.load_atom(payload["atom_id"])
-                self.assertEqual(store.load_chokepoint(payload["chokepoint_id"]).atom_id, atom.id)
-                self.assertEqual(payload["pathway_id"], atom.pathway_id)
+                record = store.load_run(payload["run_id"])
+                self.assertEqual(
+                    store.load_branch_point(payload["branch_point_id"]).run_id, record.id
+                )
+                self.assertEqual(payload["pathway_id"], record.pathway_id)
                 self.assertTrue(store.verify_state().ok)
 
     def test_nonzero_and_launch_failure_still_return_json(self):
@@ -91,7 +93,7 @@ class CliJsonTests(unittest.TestCase):
                 self.assertTrue(Store(self.root).verify_state().ok)
 
     def test_invalid_input_has_no_result_and_does_not_launch(self):
-        before = Store(self.root).list_atoms()
+        before = Store(self.root).list_run_records()
         for command, arguments in (
             ("init", ("--json",)),
             ("run", ("--json", "--")),
@@ -102,7 +104,7 @@ class CliJsonTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, "")
                 self.assertIn("error:", result.stderr)
-        self.assertEqual(Store(self.root).list_atoms(), before)
+        self.assertEqual(Store(self.root).list_run_records(), before)
 
     def test_recorded_interruption_returns_json_and_exit_one(self):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -130,7 +132,7 @@ class CliJsonTests(unittest.TestCase):
                 "branch",
                 "--json",
                 "--from",
-                baseline["chokepoint_id"],
+                baseline["branch_point_id"],
                 "--reason",
                 "try two",
                 "--param",
@@ -151,10 +153,10 @@ class CliJsonTests(unittest.TestCase):
         )
         self.assertEqual(attempt.returncode, 0, attempt.stderr)
         comparison = json.loads(
-            self.invoke("compare", "--json", "--from", baseline["chokepoint_id"]).stdout
+            self.invoke("compare", "--json", "--from", baseline["branch_point_id"]).stdout
         )
         self.assertEqual(comparison["state"], "ready")
         self.assertEqual(
-            comparison["children"][0]["child_run"]["id"], json.loads(attempt.stdout)["atom_id"]
+            comparison["children"][0]["child_run"]["id"], json.loads(attempt.stdout)["run_id"]
         )
         self.assertEqual(self.invoke("verify", "--json").returncode, 0)

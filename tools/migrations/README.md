@@ -6,6 +6,9 @@ required. It uses only the standard library; Ocura OSS does not need to be insta
 to run it. The script, its tests, and its fixtures are repository-only and are
 excluded from both pip distributions.
 
+Schema 2 is read by Ocura OSS 0.5 to 0.7, so use the result with
+`ocura-oss<0.8`. Version 0.8 stores schema 3 and has no conversion from either.
+
 [Download the standalone script](migrate_0_4.py?raw=1) from a reviewed repository
 revision, or run it from a checkout.
 No account or network connection is needed when migrating. Recorded commands are

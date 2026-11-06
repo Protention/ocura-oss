@@ -70,7 +70,7 @@ class RunFromCliTests(unittest.TestCase):
         ordinary_code, ordinary, _ = self.invoke("--json", "--", sys.executable, "-c", "pass")
         self.assertEqual(ordinary_code, 0)
         self.assertEqual(set(data), set(json.loads(ordinary)))
-        record = self.store.load_run(data["atom_id"])
+        record = self.store.load_run(data["run_id"])
         child = self.store.load_pathway(data["pathway_id"])
         self.assertEqual(child.source_branch_point_id, self.baseline.branch_point.id)
         self.assertEqual(child.parameters, {"mode": "normalize"})
@@ -86,7 +86,9 @@ class RunFromCliTests(unittest.TestCase):
         # Two points make the valid common prefix deliberately ambiguous.
         numbers = itertools.count(1)
         with patch.object(
-            model, "make_id", side_effect=lambda kind: f"{kind}-abcd{next(numbers):028x}"
+            model,
+            "make_id",
+            side_effect=lambda kind: f"{model.ID_PREFIXES[kind]}-abcd{next(numbers):028x}",
         ):
             for _ in range(2):
                 run([sys.executable, "-c", "pass"], root=self.root)
@@ -100,7 +102,7 @@ class RunFromCliTests(unittest.TestCase):
                 ["never"],
                 "invalid_input",
             ),
-            (["--from", "chokepoint-abcd", "--reason", "x"], ["never"], "ambiguous_id"),
+            (["--from", "branch-point-abcd", "--reason", "x"], ["never"], "ambiguous_id"),
             (["--from", source, "--reason", "x"], [], "invalid_input"),
             (["--from", source, "--reason", "x", "--param", "bad"], ["never"], "invalid_input"),
         )
@@ -143,7 +145,7 @@ class RunFromCliTests(unittest.TestCase):
             result = json.loads(text)
             self.assertEqual(result["outcome"], outcome)
             self.assertNotIn("error", result)
-            self.assertEqual(self.store.load_run(result["atom_id"]).outcome.value, outcome)
+            self.assertEqual(self.store.load_run(result["run_id"]).outcome.value, outcome)
         self.assertEqual(len(self.store.list_runs(limit=None).runs), 4)
         self.assertTrue(self.store.verify_state().ok)
 
@@ -184,7 +186,7 @@ class RunFromCliTests(unittest.TestCase):
             self.assertEqual(error["ids"]["source_branch_point_id"], source)
 
     def test_combined_cli_appends_to_frozen_ledger_without_rewriting_old_evidence(self):
-        fixture = Path(__file__).parent / "fixtures" / "ledger-0.5.0" / "state"
+        fixture = Path(__file__).parent / "fixtures" / "ledger-0.8.0" / "state"
         self.root = self.root.parent / "old ledger"
         shutil.copytree(fixture, self.root / ".ocura-oss")
         old_store = Store(self.root)
@@ -196,7 +198,7 @@ class RunFromCliTests(unittest.TestCase):
         }
         code, text, _ = self.invoke(
             "--from",
-            "chokepoint-1592911372f143208bfd75af9a5c83a5",
+            "branch-point-1592911372f143208bfd75af9a5c83a5",
             "--reason",
             "continue old ledger",
             "--param",
@@ -209,9 +211,7 @@ class RunFromCliTests(unittest.TestCase):
         )
         self.assertEqual(code, 0, text)
         result = json.loads(text)
-        self.assertEqual(
-            old_store.load_atom(result["atom_id"]), old_store.load_run(result["atom_id"])
-        )
+        self.assertEqual(old_store.load_run(result["run_id"]), old_store.load_run(result["run_id"]))
         self.assertTrue(old_store.verify_state(against=manifest).ok)
         for relative, contents in original.items():
             self.assertEqual((old_store.state_dir / relative).read_bytes(), contents, str(relative))

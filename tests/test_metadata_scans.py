@@ -28,16 +28,22 @@ class MetadataScanTests(unittest.TestCase):
             pathway_id=pathway,
         )
 
-    def test_pathway_and_comparison_discovery_scan_atoms_once(self):
+    def test_pathway_and_comparison_discovery_scan_runs_once(self):
         baseline = self.record()
         for reason in ("first", "second", "third"):
-            child = branch(baseline.chokepoint.id, root=self.root, reason=reason)
+            child = branch(baseline.branch_point.id, root=self.root, reason=reason)
             self.record(pathway=child.id)
-        with patch.object(self.store, "list_atoms", wraps=self.store.list_atoms) as scans:
+        with patch.object(
+            self.store, "list_run_records", wraps=self.store.list_run_records
+        ) as scans:
             self.assertEqual(len(cli._pathway_summaries(self.store)), 4)
             self.assertEqual(scans.call_count, 1)
-        with patch.object(self.store, "list_atoms", wraps=self.store.list_atoms) as scans:
-            self.assertEqual(len(branching.compare(self.store, baseline.chokepoint.id).children), 3)
+        with patch.object(
+            self.store, "list_run_records", wraps=self.store.list_run_records
+        ) as scans:
+            self.assertEqual(
+                len(branching.compare(self.store, baseline.branch_point.id).children), 3
+            )
             self.assertEqual(scans.call_count, 1)
 
 

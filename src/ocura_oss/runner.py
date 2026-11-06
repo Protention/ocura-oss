@@ -39,19 +39,11 @@ _LAUNCH_CATEGORIES: tuple[tuple[type[BaseException], str], ...] = (
 
 @dataclass(frozen=True)
 class RunExecution:
-    """Atom and terminal chokepoint produced by one command attempt."""
+    """Run and terminal branch point produced by one command attempt."""
 
-    atom: model.Atom
-    chokepoint: model.Chokepoint
+    record: model.RunRecord
+    branch_point: model.BranchPoint
     storage_warnings: tuple[str, ...] = ()
-
-    @property
-    def record(self) -> model.RunRecord:
-        return self.atom
-
-    @property
-    def branch_point(self) -> model.BranchPoint:
-        return self.chokepoint
 
 
 def categorize_launch_error(exc: BaseException) -> str:
@@ -86,7 +78,7 @@ def run_command(
     serialized into records.
 
     When ``mirror`` is true the command's stdout/stderr are echoed to the
-    terminal. When ``capture`` is false no output is retained and the atom
+    terminal. When ``capture`` is false no output is retained and the run
     records that it has no logs. ``masked_arguments`` names command token
     positions whose values are replaced by a placeholder in every record; the
     command itself still receives them.
@@ -107,7 +99,7 @@ def run_command(
 
     The attempt is journaled before the command launches. A Ctrl+C
     interruption stops the command and is recorded as an ``interrupted``
-    atom and chokepoint. If this process stops before it can finalize, the
+    run and branch point. If this process stops before it can finalize, the
     journal entry remains and :meth:`Store.recover` closes the attempt as
     ``abandoned``; on Windows and Linux the command is then ended by the
     operating system, as :mod:`ocura_oss.supervise` describes.
@@ -146,19 +138,19 @@ def run_command(
             pathway = create_pathway()
             ids["pathway_id"] = pathway.id
 
-        atom_id = model.make_id("atom")
-        chokepoint_id = model.make_id("chokepoint")
-        stdout_path = store.logs_dir / f"{atom_id}.stdout.log"
-        stderr_path = store.logs_dir / f"{atom_id}.stderr.log"
+        run_id = model.make_id("run")
+        branch_point_id = model.make_id("branch_point")
+        stdout_path = store.logs_dir / f"{run_id}.stdout.log"
+        stderr_path = store.logs_dir / f"{run_id}.stderr.log"
         stdout_log = f"{STATE_DIR_NAME}/logs/{stdout_path.name}" if capture else None
         stderr_log = f"{STATE_DIR_NAME}/logs/{stderr_path.name}" if capture else None
         output_capture = model.OutputCapture.FULL if capture else model.OutputCapture.NONE
 
         started_at = clock()
         attempt = model.Attempt(
-            id=atom_id,
+            id=run_id,
             pathway_id=pathway.id,
-            chokepoint_id=chokepoint_id,
+            branch_point_id=branch_point_id,
             started_at=model.format_timestamp(started_at),
             declared_parameters=parameters,
             command=recorded_command,
@@ -168,7 +160,7 @@ def run_command(
             masked_arguments=masked,
             context=run_context,
         )
-        ids = {"run_id": atom_id, "branch_point_id": chokepoint_id, "pathway_id": pathway.id}
+        ids = {"run_id": run_id, "branch_point_id": branch_point_id, "pathway_id": pathway.id}
         storage_warnings: tuple[str, ...] = ()
         with store._recording(attempt), contextlib.ExitStack() as logs:
             stdout_handle: BinaryIO | None = None
@@ -211,8 +203,8 @@ def run_command(
 
             stdout_size, stdout_digest = size_and_sha256(stdout_path) if capture else (None, None)
             stderr_size, stderr_digest = size_and_sha256(stderr_path) if capture else (None, None)
-            atom = model.Atom(
-                id=atom_id,
+            record = model.RunRecord(
+                id=run_id,
                 pathway_id=pathway.id,
                 started_at=attempt.started_at,
                 finished_at=model.format_timestamp(finished_at),
@@ -232,25 +224,25 @@ def run_command(
                 masked_arguments=masked,
                 context=run_context,
             )
-            store._save_atom(atom)
-            chokepoint = model.Chokepoint(
-                id=chokepoint_id,
+            store._save_run(record)
+            branch_point = model.BranchPoint(
+                id=branch_point_id,
                 pathway_id=pathway.id,
-                atom_id=atom.id,
+                run_id=record.id,
                 created_at=model.format_timestamp(finished_at),
                 kind=model.TERMINAL_KIND,
                 outcome=outcome,
                 branchable=True,
             )
-            store._save_chokepoint(chokepoint)
+            store._save_branch_point(branch_point)
             execution = "recorded"
-            # Only our own finalized streams are considered. The atom is already
+            # Only our own finalized streams are considered. The run is already
             # durable, so recovery never treats compressed output as an absent
             # unfinished log. The attempt lock still excludes manual maintenance.
             if capture and compress:
                 try:
-                    store._change_atom_storage(
-                        atom, min_bytes=compression_min_bytes, eligible_only=True
+                    store._change_run_storage(
+                        record, min_bytes=compression_min_bytes, eligible_only=True
                     )
                 except StoreError as exc:
                     storage_warnings = (f"log compression failed: {exc}",)
@@ -258,9 +250,11 @@ def run_command(
                     # A stop request ends this optional step, not the finished run.
                     storage_warnings = ("log compression stopped; `compress` can finish it",)
             # Last, and while still holding the attempt's lock: a reader then sees
-            # either a live attempt or a complete atom and chokepoint.
+            # either a live attempt or a complete run and branch point.
             store._remove_attempt(attempt.id)
-        return RunExecution(atom=atom, chokepoint=chokepoint, storage_warnings=storage_warnings)
+        return RunExecution(
+            record=record, branch_point=branch_point, storage_warnings=storage_warnings
+        )
     except (StoreError, model.ValidationError, OSError) as exc:
         raise with_execution(exc, execution, ids)  # noqa: B904 - it sets the cause
 

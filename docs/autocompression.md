@@ -1,6 +1,6 @@
 # Log compression
 
-Version 0.7.2.
+Version 0.8.0.
 
 Ocura OSS can store captured stdout and stderr losslessly as gzip. Compression is
 opt-in: logs stay raw unless a run or an explicit `compress` pass asks for it.
@@ -10,7 +10,7 @@ standard-library only. Compression manages captured logs; it does not manage
 workload checkpoints or impose a disk quota.
 
 Raw is the default because raw logs stay readable at their recorded paths by
-standard tools and by Ocura OSS 0.6, and because compressing a large log adds time
+standard tools, and because compressing a large log adds time
 before `run` returns. Turn compression on when disk space matters more.
 
 ## Compressing a run's logs
@@ -44,16 +44,16 @@ artifacts, datasets, and checkpoints are never compressed.
 Use the run ID returned by `run`, or listed by `runs`:
 
 ```console
-ocura-oss logs atom-<id>
-ocura-oss logs atom-<id> --stream stderr
-ocura-oss logs atom-<id> --info
-ocura-oss logs atom-<id> --json
+ocura-oss logs run-<id>
+ocura-oss logs run-<id> --stream stderr
+ocura-oss logs run-<id> --info
+ocura-oss logs run-<id> --json
 ```
 
 Without `--info` or `--json`, `logs` writes the exact verified original bytes to
 stdout, with no extra newline or summary. It handles raw and compressed storage
 transparently. The terminal or receiving tool decides how to display those bytes.
-`Store(root).read_verified_log(atom_id, stream="stdout")` returns the same bytes
+`Store(root).read_verified_log(run_id, stream="stdout")` returns the same bytes
 to Python; decoding and metric interpretation remain the caller's responsibility.
 
 The complete selected stream is verified before any content is released. `logs`
@@ -72,7 +72,7 @@ need writable temporary storage outside the archive. See
 `--info` shows storage metadata, including the run's outcome and start time,
 original and stored sizes, actual backing path, and full original SHA-256.
 `--json` emits this metadata as JSON and never includes log contents or commands.
-The atom's recorded `stdout_log` and `stderr_log` remain logical paths; after
+The run's recorded `stdout_log` and `stderr_log` remain logical paths; after
 compression, the physical file has an additional `.gz` suffix. Use `logs --info`
 to see which file currently holds the evidence.
 
@@ -87,10 +87,10 @@ logs together. These tools do not check the recorded SHA-256; `ocura-oss logs` a
 The metadata includes a readable fingerprint, in this form:
 
 ```text
-stdout/<short-atom-id>/sha256:0123456789ab
+stdout/<short-run-id>/sha256:0123456789ab
 ```
 
-The stream and short atom ID help identify the log, and the final part is a
+The stream and short run ID help identify the log, and the final part is a
 prefix of its original SHA-256. A hash cannot tell you what a log says or recreate
 the log. This descriptor helps you recognize and refer to a verified log; the
 full 64-character digest remains the integrity check. The fingerprint stays the
@@ -104,17 +104,15 @@ Preview a pass over finalized logs, then apply it explicitly:
 ```console
 ocura-oss compress --dry-run
 ocura-oss compress
-ocura-oss compress --run atom-<id> --min-bytes 262144 --json
+ocura-oss compress --run run-<id> --min-bytes 262144 --json
 ocura-oss decompress --dry-run
 ocura-oss decompress
 ocura-oss verify
 ```
 
-`--run` limits either operation to one finalized run record. The legacy `--atom`
-option remains accepted; supplying both requires them to resolve to the same run.
-These commands accept
+`--run` limits either operation to one finalized run record. These commands accept
 unique ID prefixes, `--root PATH`, and `--json`; Python `Store.compress_logs()`
-and `Store.decompress_logs()` take full atom IDs. A dry run verifies the selected
+and `Store.decompress_logs()` take full run IDs. A dry run verifies the selected
 evidence and calculates prospective changes without replacing stored files.
 Compression is lossless, and decompression restores the original log bytes.
 Each stream is converted independently. If a later stream fails, earlier
@@ -139,12 +137,8 @@ conversion needs room for its temporary compressed copy alongside that raw file.
 Decompression likewise needs space for restored bytes while compressed storage
 still exists. Already compressed or high-entropy output may save nothing.
 
-Records keep **schema 2**, but gzip backing is a **physical storage
-extension**. Ocura OSS 0.6 and earlier do not understand `.log.gz` files: their
-`verify` reports the log as missing and the `.gz` file as orphaned, and they
-refuse to branch from or compare those runs. Before opening a ledger with an
-older version, run `ocura-oss decompress`, then `ocura-oss verify`. A ledger that
-never uses compression stays readable by them.
+Gzip backing is a **physical storage extension**: records and their schema
+version do not change when logs are compressed or restored.
 
 Retained manifests cover the original records and digests, so they remain valid
 across compression and decompression. The hash still checks local consistency;

@@ -10,16 +10,18 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## New in 0.7.0
+## New in 0.8.0
 
-Version 0.7 adds descriptive Python names, `runs` and `show` for history
+Version 0.8 uses the names ledger, run, and branch point throughout, including
+stored IDs, directories, and JSON keys, and removes the older names. It does not
+read state written by 0.7 or earlier; the [naming guide](https://github.com/Protention/ocura-oss/blob/main/docs/naming-migration.md) maps the old names.
+
+Version 0.7 added `runs` and `show` for history
 discovery, bounded verified log reads, opt-in [log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md), and
 opt-in `--json-errors` for structured failures. It also adds
 `run --from ID --reason TEXT` to create and execute a variation in one call. The
 [history example](https://github.com/Protention/ocura-oss/blob/main/examples/history/README.md) starts with only a project root, retains failed
 retries and empty variations, and returns verified excerpts with stable references.
-The [naming guide](https://github.com/Protention/ocura-oss/blob/main/docs/naming-migration.md) maps descriptive names to compatible legacy names
-and unchanged JSON fields. Existing ledgers and callers remain compatible.
 
 ## Why use it
 
@@ -59,13 +61,13 @@ run `python -m pip install .` from its root.
 ```console
 ocura-oss init --name example --json
 ocura-oss run --json --param count=1 -- python -c "print(1)"
-ocura-oss branch --json --from <chokepoint-id> --reason "try count 2" --param count=2
+ocura-oss branch --json --from <branch-point-id> --reason "try count 2" --param count=2
 ocura-oss run --json --pathway <child-pathway-id> -- python -c "print(2)"
 ocura-oss verify --json
 ocura-oss compare --json
 ```
 
-Use the baseline's `chokepoint_id` to branch and the branch result's `id` for the
+Use the baseline's `branch_point_id` to branch and the branch result's `id` for the
 child run. When typing an ID by hand, its first four or more hexadecimal characters
 are enough if they match one record.
 
@@ -73,7 +75,7 @@ You can replace the separate `branch` and child `run` calls
 with one command:
 
 ```console
-ocura-oss run --json-errors --from <chokepoint-id> --reason "try count 2" --param count=2 -- python -c "print(2)"
+ocura-oss run --json-errors --from <branch-point-id> --reason "try count 2" --param count=2 -- python -c "print(2)"
 ```
 
 This creates a child pathway and runs there, returning the usual run result and
@@ -87,7 +89,7 @@ Without `--json`, `compare` prints:
 
 ```text
 comparison: ready
-source branch point: chokepoint-eb61ef56491042ae94e61d1387f3f0d5
+source branch point: branch-point-eb61ef56491042ae94e61d1387f3f0d5
 source pathway: pathway-1378d1d28cb54987b9e80d59d61aec74
 source run: passed 0.056063s
 child pathway: pathway-ce4c71137dd449398fe2b4e0198c83c3
@@ -120,8 +122,7 @@ Logs stay raw unless you ask for lossless gzip storage: `run --compress` stores
 that run's logs of at least 1 MiB as gzip when this saves at least 10%, and
 `compress --dry-run` previews a pass over older logs; `decompress` restores raw
 files. `ocura-oss logs <run-id>` prints the verified original bytes either way,
-and `--info` shows sizes, the storage path, and a readable fingerprint. Ocura OSS
-0.6 cannot read compressed logs; see [log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md).
+and `--info` shows sizes, the storage path, and a readable fingerprint. See [log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md).
 
 ## When to use something else
 
@@ -157,7 +158,7 @@ command. The [history guide](https://github.com/Protention/ocura-oss/blob/main/e
 JSON report and how to inspect your own ledger. No optional dependencies are needed.
 
 The fuller CI-report, autoregressive, and Dream demonstrations live on the
-semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7).
+semi-permanent [`examples/0.8` branch](https://github.com/Protention/ocura-oss/tree/examples/0.8).
 See [use cases](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
@@ -207,7 +208,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
 - [Log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
-- [Examples](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
+- [Examples](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.8`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The documentation for the published release is at [protention.dev](https://protention.dev/).
@@ -218,8 +219,7 @@ The repository's `docs/` directory follows `main`.
 State lives under `.ocura-oss/` in the project root. A **ledger** identifies that
 state; a **pathway** groups runs in a lineage; a **run record** retains one command
 attempt; a **branch point** identifies terminal evidence from which a branch can
-be created. Older names (`Den`, `Atom`, and `Chokepoint`) remain Python aliases;
-stored IDs, directories, and JSON keys retain their existing spellings.
+be created.
 
 Each branch records its source and reason. It represents a new line of work;
 workspace files, process state, and model weights are managed by the workload.

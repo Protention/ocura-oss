@@ -1,7 +1,7 @@
 # Record and inspect a small history
 
-This repository-only example uses the discovery and naming interfaces from Ocura OSS 0.7.
-Run it with Ocura OSS installed from PyPI or from this checkout. It needs no
+This repository-only example uses the discovery and naming interfaces from Ocura OSS 0.8.
+Run it with Ocura OSS 0.8 installed from PyPI or this checkout. It needs no
 optional dependencies and is excluded from the package distributions.
 
 From the checkout root, create a small demonstration and inspect it:
@@ -18,7 +18,7 @@ ran the demo, use only the second command. Archive mode requires a stable ledger
 with no writers or unfinished attempts.
 
 This is the core repository's primary example. Fuller development, training, and
-replay demonstrations live on [`examples/0.7`](https://github.com/Protention/ocura-oss/tree/examples/0.7);
+replay demonstrations live on [`examples/0.8`](https://github.com/Protention/ocura-oss/tree/examples/0.8);
 see the [use-case catalog](../../docs/use-cases.md).
 
 ## Inspect your own ledger

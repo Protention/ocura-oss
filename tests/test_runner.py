@@ -29,26 +29,26 @@ class RunnerTests(unittest.TestCase):
             argv=[sys.executable, "-c", "print('hello'); import sys; sys.stderr.write('oops')"],
             declared_parameters={},
         )
-        atom = execution.atom
-        self.assertEqual(atom.outcome, model.Outcome.PASSED)
-        self.assertEqual(atom.return_code, 0)
-        self.assertIsNone(atom.launch_error_category)
-        self.assertGreaterEqual(atom.duration_seconds, 0.0)
-        model.parse_timestamp(atom.started_at, "started_at")
-        model.parse_timestamp(atom.finished_at, "finished_at")
+        record = execution.record
+        self.assertEqual(record.outcome, model.Outcome.PASSED)
+        self.assertEqual(record.return_code, 0)
+        self.assertIsNone(record.launch_error_category)
+        self.assertGreaterEqual(record.duration_seconds, 0.0)
+        model.parse_timestamp(record.started_at, "started_at")
+        model.parse_timestamp(record.finished_at, "finished_at")
 
-        stdout_path = self.store.root / atom.stdout_log
-        stderr_path = self.store.root / atom.stderr_log
-        self.assertNotEqual(atom.stdout_log, atom.stderr_log)
+        stdout_path = self.store.root / record.stdout_log
+        stderr_path = self.store.root / record.stderr_log
+        self.assertNotEqual(record.stdout_log, record.stderr_log)
         self.assertIn(b"hello", stdout_path.read_bytes())
         self.assertIn(b"oops", stderr_path.read_bytes())
-        self.assertEqual(atom.stdout_bytes, stdout_path.stat().st_size)
-        self.assertEqual(atom.stderr_bytes, stderr_path.stat().st_size)
+        self.assertEqual(record.stdout_bytes, stdout_path.stat().st_size)
+        self.assertEqual(record.stderr_bytes, stderr_path.stat().st_size)
 
-        chokepoint = self.store.load_chokepoint(execution.chokepoint.id)
-        self.assertEqual(chokepoint.kind, "terminal")
-        self.assertTrue(chokepoint.branchable)
-        self.assertEqual(chokepoint.outcome, model.Outcome.PASSED)
+        branch_point = self.store.load_branch_point(execution.branch_point.id)
+        self.assertEqual(branch_point.kind, "terminal")
+        self.assertTrue(branch_point.branchable)
+        self.assertEqual(branch_point.outcome, model.Outcome.PASSED)
 
     def test_nonzero_run_retains_exact_return_code(self):
         execution = runner.run_command(
@@ -57,9 +57,9 @@ class RunnerTests(unittest.TestCase):
             argv=[sys.executable, "-c", "import sys; sys.exit(7)"],
             declared_parameters={},
         )
-        self.assertEqual(execution.atom.outcome, model.Outcome.FAILED)
-        self.assertEqual(execution.atom.return_code, 7)
-        self.assertEqual(execution.chokepoint.outcome, model.Outcome.FAILED)
+        self.assertEqual(execution.record.outcome, model.Outcome.FAILED)
+        self.assertEqual(execution.record.return_code, 7)
+        self.assertEqual(execution.branch_point.outcome, model.Outcome.FAILED)
 
     def test_launch_failure_still_creates_terminal_evidence(self):
         missing = "definitely-not-a-real-executable-ocura-oss"
@@ -69,21 +69,21 @@ class RunnerTests(unittest.TestCase):
             argv=[missing],
             declared_parameters={},
         )
-        atom = execution.atom
-        self.assertEqual(atom.outcome, model.Outcome.LAUNCH_FAILED)
-        self.assertIsNone(atom.return_code)
-        self.assertEqual(atom.launch_error_category, "executable_not_found")
-        stdout_path = self.store.root / atom.stdout_log
-        stderr_path = self.store.root / atom.stderr_log
+        record = execution.record
+        self.assertEqual(record.outcome, model.Outcome.LAUNCH_FAILED)
+        self.assertIsNone(record.return_code)
+        self.assertEqual(record.launch_error_category, "executable_not_found")
+        stdout_path = self.store.root / record.stdout_log
+        stderr_path = self.store.root / record.stderr_log
         self.assertTrue(stdout_path.is_file())
         self.assertTrue(stderr_path.is_file())
         self.assertEqual(stdout_path.read_bytes(), b"")
         self.assertEqual(stderr_path.read_bytes(), b"")
-        chokepoint = self.store.load_chokepoint(execution.chokepoint.id)
-        self.assertEqual(chokepoint.kind, "terminal")
-        self.assertTrue(chokepoint.branchable)
+        branch_point = self.store.load_branch_point(execution.branch_point.id)
+        self.assertEqual(branch_point.kind, "terminal")
+        self.assertTrue(branch_point.branchable)
 
-    def test_every_attempt_yields_one_atom_and_one_terminal_chokepoint(self):
+    def test_every_attempt_yields_one_run_and_one_terminal_branch_point(self):
         cases = [
             [sys.executable, "-c", "print('ok')"],
             [sys.executable, "-c", "import sys; sys.exit(1)"],
@@ -96,14 +96,14 @@ class RunnerTests(unittest.TestCase):
                 argv=argv,
                 declared_parameters={},
             )
-        atoms = self.store.list_atoms()
-        chokepoints = self.store.list_chokepoints()
-        self.assertEqual(len(atoms), 3)
-        self.assertEqual(len(chokepoints), 3)
-        for chokepoint in chokepoints:
-            self.assertEqual(chokepoint.kind, "terminal")
-            self.assertTrue(chokepoint.branchable)
-        self.assertEqual({item.atom_id for item in chokepoints}, {item.id for item in atoms})
+        records = self.store.list_run_records()
+        branch_points = self.store.list_branch_points()
+        self.assertEqual(len(records), 3)
+        self.assertEqual(len(branch_points), 3)
+        for branch_point in branch_points:
+            self.assertEqual(branch_point.kind, "terminal")
+            self.assertTrue(branch_point.branchable)
+        self.assertEqual({item.run_id for item in branch_points}, {item.id for item in records})
 
     def test_unknown_pathway_is_rejected_before_launch(self):
         with self.assertRaises(StoreError):
@@ -113,17 +113,17 @@ class RunnerTests(unittest.TestCase):
                 argv=[sys.executable, "-c", "print('nope')"],
                 declared_parameters={},
             )
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
 
-    def test_declared_parameters_belong_to_the_atom_not_the_pathway(self):
+    def test_declared_parameters_belong_to_the_run_not_the_pathway(self):
         runner.run_command(
             self.store,
             pathway_id=self.pathway.id,
             argv=[sys.executable, "-c", "print('params')"],
             declared_parameters={"batch": "2"},
         )
-        atoms = self.store.list_atoms()
-        self.assertEqual(atoms[0].declared_parameters, {"batch": "2"})
+        records = self.store.list_run_records()
+        self.assertEqual(records[0].declared_parameters, {"batch": "2"})
         unchanged = self.store.load_pathway(self.pathway.id)
         self.assertEqual(unchanged.parameters, {})
 
@@ -134,7 +134,7 @@ class RunnerTests(unittest.TestCase):
             argv=[sys.executable, "-c", "import os; print(os.getcwd())"],
             declared_parameters={},
         )
-        reported = (self.store.root / execution.atom.stdout_log).read_bytes()
+        reported = (self.store.root / execution.record.stdout_log).read_bytes()
         self.assertEqual(Path(reported.decode("utf-8").strip()), self.store.root)
 
     def test_environment_is_inherited_but_never_serialized(self):
@@ -159,14 +159,14 @@ class RunnerTests(unittest.TestCase):
             else:
                 os.environ[sentinel_name] = old
 
-        stdout_log = (self.store.root / execution.atom.stdout_log).read_bytes()
+        stdout_log = (self.store.root / execution.record.stdout_log).read_bytes()
         self.assertIn(sentinel_value.encode("utf-8"), stdout_log)
-        atom_record = (self.store.atoms_dir / f"{execution.atom.id}.json").read_bytes()
-        chokepoint_record = (
-            self.store.chokepoints_dir / f"{execution.chokepoint.id}.json"
+        run_record = (self.store.runs_dir / f"{execution.record.id}.json").read_bytes()
+        branch_point_record = (
+            self.store.branch_points_dir / f"{execution.branch_point.id}.json"
         ).read_bytes()
-        self.assertNotIn(sentinel_value.encode("utf-8"), atom_record)
-        self.assertNotIn(sentinel_value.encode("utf-8"), chokepoint_record)
+        self.assertNotIn(sentinel_value.encode("utf-8"), run_record)
+        self.assertNotIn(sentinel_value.encode("utf-8"), branch_point_record)
 
     def test_large_logs_are_hashed_correctly(self):
         execution = runner.run_command(
@@ -179,11 +179,11 @@ class RunnerTests(unittest.TestCase):
             ],
             declared_parameters={},
         )
-        stdout_path = self.store.root / execution.atom.stdout_log
+        stdout_path = self.store.root / execution.record.stdout_log
         data = stdout_path.read_bytes()
         self.assertGreaterEqual(len(data), 1_000_000)
-        self.assertEqual(execution.atom.stdout_bytes, len(data))
-        self.assertEqual(execution.atom.stdout_sha256, hashlib.sha256(data).hexdigest())
+        self.assertEqual(execution.record.stdout_bytes, len(data))
+        self.assertEqual(execution.record.stdout_sha256, hashlib.sha256(data).hexdigest())
 
     def test_unicode_argv_is_preserved_in_the_raw_record(self):
         word = "caf\u00e9-\u00fcmlaut"
@@ -193,11 +193,11 @@ class RunnerTests(unittest.TestCase):
             argv=[sys.executable, "-c", "import sys; print(len(sys.argv[1]))", word],
             declared_parameters={},
         )
-        self.assertEqual(execution.atom.outcome, model.Outcome.PASSED)
-        self.assertIn(word, execution.atom.command)
-        record = (self.store.atoms_dir / f"{execution.atom.id}.json").read_text("utf-8")
+        self.assertEqual(execution.record.outcome, model.Outcome.PASSED)
+        self.assertIn(word, execution.record.command)
+        record = (self.store.runs_dir / f"{execution.record.id}.json").read_text("utf-8")
         self.assertIn(word, record)
-        stdout_log = (self.store.root / execution.atom.stdout_log).read_bytes()
+        stdout_log = (self.store.root / execution.record.stdout_log).read_bytes()
         self.assertIn(str(len(word)).encode("utf-8"), stdout_log.strip().splitlines()[-1])
 
     def test_blank_argv_tokens_are_rejected(self):
@@ -209,7 +209,7 @@ class RunnerTests(unittest.TestCase):
                     argv=argv,
                     declared_parameters={},
                 )
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
 
     def test_string_argv_is_rejected_instead_of_split_into_characters(self):
         with self.assertRaisesRegex(StoreError, "argument tokens"):
@@ -219,7 +219,7 @@ class RunnerTests(unittest.TestCase):
                 argv="python -V",
                 declared_parameters={},
             )
-        self.assertEqual(self.store.list_atoms(), [])
+        self.assertEqual(self.store.list_run_records(), [])
 
     def test_parameter_values_may_contain_equals_signs(self):
         execution = runner.run_command(
@@ -228,7 +228,7 @@ class RunnerTests(unittest.TestCase):
             argv=[sys.executable, "-c", "print('eq')"],
             declared_parameters={"eq": "a=b"},
         )
-        self.assertEqual(execution.atom.declared_parameters, {"eq": "a=b"})
+        self.assertEqual(execution.record.declared_parameters, {"eq": "a=b"})
 
     def test_failed_run_log_hashes_match_files(self):
         execution = runner.run_command(
@@ -241,9 +241,9 @@ class RunnerTests(unittest.TestCase):
             ],
             declared_parameters={},
         )
-        stderr_data = (self.store.root / execution.atom.stderr_log).read_bytes()
-        self.assertEqual(execution.atom.stderr_bytes, len(stderr_data))
-        self.assertEqual(execution.atom.stderr_sha256, hashlib.sha256(stderr_data).hexdigest())
+        stderr_data = (self.store.root / execution.record.stderr_log).read_bytes()
+        self.assertEqual(execution.record.stderr_bytes, len(stderr_data))
+        self.assertEqual(execution.record.stderr_sha256, hashlib.sha256(stderr_data).hexdigest())
 
     def test_mirror_streams_output_to_terminal_and_log(self):
         import contextlib
@@ -263,10 +263,10 @@ class RunnerTests(unittest.TestCase):
                 declared_parameters={},
                 mirror=True,
             )
-        log = (self.store.root / execution.atom.stdout_log).read_bytes()
+        log = (self.store.root / execution.record.stdout_log).read_bytes()
         self.assertIn(b"tee-marker", log)
         self.assertIn(b"tee-marker", console.getvalue())
-        self.assertEqual(execution.atom.outcome, model.Outcome.PASSED)
+        self.assertEqual(execution.record.outcome, model.Outcome.PASSED)
 
     def test_quiet_mode_keeps_output_out_of_the_console(self):
         console = io.StringIO()
@@ -279,7 +279,7 @@ class RunnerTests(unittest.TestCase):
                 mirror=False,
             )
         self.assertNotIn("quiet-marker", console.getvalue())
-        log = (self.store.root / execution.atom.stdout_log).read_bytes()
+        log = (self.store.root / execution.record.stdout_log).read_bytes()
         self.assertIn(b"quiet-marker", log)
 
     def test_injected_clocks_drive_recorded_times(self):
@@ -296,8 +296,8 @@ class RunnerTests(unittest.TestCase):
             now=lambda: fixed_start,
             monotonic=lambda: next(ticks),
         )
-        self.assertEqual(execution.atom.started_at, execution.atom.finished_at)
-        self.assertEqual(execution.atom.duration_seconds, 2.5)
+        self.assertEqual(execution.record.started_at, execution.record.finished_at)
+        self.assertEqual(execution.record.duration_seconds, 2.5)
 
 
 class _FakeProcess:
@@ -343,24 +343,24 @@ class InterruptedEvidenceTests(unittest.TestCase):
                 declared_parameters={},
                 mirror=False,
             )
-        atom = execution.atom
-        self.assertEqual(atom.outcome, model.Outcome.INTERRUPTED)
-        self.assertIsNone(atom.return_code)
-        self.assertEqual(atom.launch_error_category, "interrupted")
-        chokepoint = self.store.load_chokepoint(execution.chokepoint.id)
-        self.assertEqual(chokepoint.outcome, model.Outcome.INTERRUPTED)
-        self.assertEqual(chokepoint.kind, "terminal")
-        self.assertTrue(chokepoint.branchable)
-        for relative in (atom.stdout_log, atom.stderr_log):
+        record = execution.record
+        self.assertEqual(record.outcome, model.Outcome.INTERRUPTED)
+        self.assertIsNone(record.return_code)
+        self.assertEqual(record.launch_error_category, "interrupted")
+        branch_point = self.store.load_branch_point(execution.branch_point.id)
+        self.assertEqual(branch_point.outcome, model.Outcome.INTERRUPTED)
+        self.assertEqual(branch_point.kind, "terminal")
+        self.assertTrue(branch_point.branchable)
+        for relative in (record.stdout_log, record.stderr_log):
             self.assertTrue((self.store.root / relative).is_file())
         report = self.store.verify_state()
         self.assertTrue(report.ok, report.problems)
 
     def test_interrupted_payload_coherence(self):
         digest = hashlib.sha256(b"").hexdigest()
-        atom_id = model.make_id("atom")
-        valid = model.Atom(
-            id=atom_id,
+        run_id = model.make_id("run")
+        valid = model.RunRecord(
+            id=run_id,
             pathway_id=self.pathway.id,
             started_at="2026-01-01T00:00:00.000000+00:00",
             finished_at="2026-01-01T00:00:01.000000+00:00",
@@ -370,26 +370,26 @@ class InterruptedEvidenceTests(unittest.TestCase):
             launch_error_category="interrupted",
             declared_parameters={},
             command=("x",),
-            stdout_log=f".ocura-oss/logs/{atom_id}.stdout.log",
-            stderr_log=f".ocura-oss/logs/{atom_id}.stderr.log",
+            stdout_log=f".ocura-oss/logs/{run_id}.stdout.log",
+            stderr_log=f".ocura-oss/logs/{run_id}.stderr.log",
             stdout_bytes=0,
             stderr_bytes=0,
             stdout_sha256=digest,
             stderr_sha256=digest,
         )
-        self.store._save_atom(valid)
-        loaded = self.store.load_atom(atom_id)
+        self.store._save_run(valid)
+        loaded = self.store.load_run(run_id)
         self.assertIs(loaded.outcome, model.Outcome.INTERRUPTED)
 
-        wrong_category = model.atom_to_payload(valid)
+        wrong_category = model.run_to_payload(valid)
         wrong_category["launch_error_category"] = "something_else"
         with self.assertRaises(model.ValidationError):
-            model.atom_from_payload(wrong_category)
+            model.run_from_payload(wrong_category)
 
-        with_return_code = model.atom_to_payload(valid)
+        with_return_code = model.run_to_payload(valid)
         with_return_code["return_code"] = 15
         with self.assertRaises(model.ValidationError):
-            model.atom_from_payload(with_return_code)
+            model.run_from_payload(with_return_code)
 
 
 if __name__ == "__main__":
