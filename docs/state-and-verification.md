@@ -151,6 +151,12 @@ An `abandoned` run record states what is known and nothing else. It keeps the st
 
 Running attempts are never touched by recovery. Recovery needs each abandoned attempt's lock to itself, and waits about a quarter of a second for a reader that is checking the same attempt. If a reader holds on longer than that, recovery leaves that attempt for the next call; verification keeps reporting it as abandoned in the meantime.
 
+### When the command finishes
+
+For captured runs, wait for child processes that inherit stdout or stderr before the command returns. If a child must keep running, launch it with both streams redirected elsewhere; that output is outside the captured logs. A command that finishes normally leaves any surviving child processes running.
+
+With streamed CLI output, an inherited output stream left open by a child can keep the recorder waiting after the command exits. With `--quiet` or `--json`, the recorder can instead finalize while a child still holds the log files open. If that child writes afterward, later verification reports the log as changed. These modes do not remove the need to finish captured output before the command returns.
+
 ### When the recorder stops
 
 `ocura-oss run` treats a request to stop it as it treats the first Ctrl+C: it stops the command, records the run as `interrupted`, and exits with status 1. The requests are `SIGTERM` and `SIGHUP` on Linux and macOS, and Ctrl+Break on Windows. A signal the caller already ignores stays ignored, so a run started under `nohup` survives its terminal. On Windows, stopping the command also ends the processes it started; on Linux and macOS only the command itself is signaled.
@@ -165,7 +171,7 @@ A recorder that is killed outright records nothing, and its attempt becomes `aba
 | Linux | The kernel kills it; processes it started keep running |
 | macOS | It keeps running |
 
-On Linux this applies when the recording process has a single thread as it launches the command, which is always true of `ocura-oss run`. A command that finishes on its own is not affected on any system: processes it left running stay running.
+On Linux this applies when the recording process has a single thread as it launches the command, which is always true of `ocura-oss run`.
 
 These operating-system mechanisms are best effort: a command still runs when one is unavailable. On Linux the kernel request is also skipped in hosts that cannot use a pre-exec hook, such as Python subinterpreters.
 

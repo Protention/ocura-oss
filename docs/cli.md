@@ -304,7 +304,7 @@ If log-file lookup fails, `run` preserves the recorded result, IDs, and exit sta
 returns empty `log_files`, and reports a storage warning. Text output marks the
 current log files as unavailable; the recorded logical paths remain in JSON.
 
-Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.7` branch.
+Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.8` branch.
 
 #### Exit status
 

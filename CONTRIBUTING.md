@@ -50,9 +50,9 @@ The test suite uses `unittest`; pytest is not required. Please add or update tes
 
 The primary [history example](examples/history/README.md) is covered by the normal
 test suite and the Ruff checks above. Fuller demonstrations and their tests live
-on the semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7);
+on the semi-permanent [`examples/0.8` branch](https://github.com/Protention/ocura-oss/tree/examples/0.8);
 make changes to those examples on that branch and follow the selected guide's
-checks. The [autoregressive guide](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md)
+checks. The [autoregressive guide](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/autoregressive/README.md)
 describes its optional backend checks. The examples branch runs PyTorch and JAX
 on Linux in CI; it does not run the Ray check. Core CI requires no training frameworks.
 
