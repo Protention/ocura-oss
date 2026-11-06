@@ -18,8 +18,7 @@ recording the failure, the reason for the change, and the passing result.
 From the repository root, in a virtual environment:
 
 ```console
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 python examples/ci_report/workflow.py run --root ./ci-report-run
 python examples/ci_report/workflow.py report --root ./ci-report-run --json
 ```
@@ -123,7 +122,7 @@ not establish correctness for every possible input.
 
 ## Install a wheel and copy the example separately
 
-PowerShell commands from a checkout of this same development version, using new
+PowerShell commands from a checkout of this same version, using new
 destination names:
 
 ```powershell
@@ -136,7 +135,7 @@ $env:PYTHONPATH = ''
 .\.venv-example\Scripts\python.exe ./ci-report-wheel-run/sources/workflow.py report --root ./ci-report-wheel-run --json
 ```
 
-The first command builds the development wheel; it may install build-time
+The first command builds a wheel from the checkout; it may install build-time
 requirements. An already supplied matching wheel can be installed directly instead.
 The wheel has no runtime dependencies. On POSIX, use `.venv-example/bin/python`
 and `cp -R` in place of the Windows executable path and `Copy-Item`.

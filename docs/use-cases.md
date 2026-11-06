@@ -6,9 +6,10 @@ The `examples/0.8` branch holds the fuller demonstrations separately
 from the primary demo and history walkthrough on
 [`main`](https://github.com/Protention/ocura-oss/tree/main). These examples show how
 a caller uses Ocura to retain execution evidence and explain a variation. They
-use the draft 0.8.0 interfaces. Follow the [catalog setup](../README.md#install-and-try)
-to check out this branch and install its built wheel. `python -m pip install .`
-also works for package development. Keep the example directories when using a separate wheel.
+use the 0.8.0 interfaces. Follow the [catalog setup](../README.md#install-and-try)
+to check out this branch and install `ocura-oss==0.8.0` from PyPI.
+`python -m pip install .` also works for package development. Keep the example
+directories when using a separately installed package.
 Example scripts and optional frameworks are not installed with the package.
 
 Start new ledgers with 0.8. To inspect older work, keep the

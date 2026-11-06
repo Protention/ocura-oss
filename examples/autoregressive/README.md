@@ -1,6 +1,6 @@
 # Small autoregressive experiment
 
-For the draft Ocura OSS 0.8.0 interfaces.
+For Ocura OSS 0.8.0.
 
 This guide belongs to the [0.8 example catalog](../../docs/use-cases.md)
 on `examples/0.8`. Use the [catalog setup](../../README.md#install-and-try) to obtain
@@ -37,8 +37,7 @@ From a repository checkout, use a virtual
 environment with Python 3.11 or later, subject to your framework's platform support:
 
 ```console
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 ```
 
 The driver uses the combined branch-and-run interface with 0.8's JSON fields.

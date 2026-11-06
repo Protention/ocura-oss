@@ -1,7 +1,7 @@
 # Record and inspect a small history
 
 This repository-only example uses the discovery and naming interfaces from Ocura OSS 0.8.
-Install the matching wheel with the [catalog setup](../../README.md#install-and-try). It needs no
+Install the matching release with the [catalog setup](../../README.md#install-and-try). It needs no
 optional dependencies and is excluded from the package distributions.
 
 From the checkout root, create a small demonstration and inspect it:

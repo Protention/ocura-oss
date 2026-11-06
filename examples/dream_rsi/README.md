@@ -3,7 +3,7 @@
 Version 0.8.0.
 
 This experimental example belongs to the [0.8 catalog](../../docs/use-cases.md)
-on `examples/0.8` and uses the draft 0.8.0 package. Use the
+on `examples/0.8` and uses the 0.8.0 package. Use the
 [catalog setup](../../README.md#install-and-try) to obtain the matching checkout.
 The pilot and its published evidence summary remain historical 0.4.0 results;
 updating the adapter does not revalidate those results or establish a policy benefit.
@@ -47,11 +47,10 @@ Use a repository checkout and an activated Python 3.12 virtual environment.
 The live runner supports Windows and Linux host-capacity checks. Other operating
 systems defer when that check is unavailable. Docker and a GPU are not required.
 
-Build and install the matching package from the repository root:
+Install the matching release from the repository root:
 
 ```console
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 python -m unittest discover -s tests -p "test_dream_rsi_*.py" -v
 ```
 

@@ -1,11 +1,11 @@
 # Ocura OSS 0.8 example catalog
 
 This is the example catalog on **`examples/0.8`**, a long-lived branch
-for fuller demonstrations of **Ocura OSS 0.8.0**. It includes the draft package
-from [PR #31](https://github.com/Protention/ocura-oss/pull/31).
+for fuller demonstrations of **Ocura OSS 0.8.0**. It includes the package source
+from the [0.8.0 release](https://github.com/Protention/ocura-oss/releases/tag/v0.8.0).
 [`main`](https://github.com/Protention/ocura-oss/tree/main) retains the primary
 `ocura-oss demo` and history walkthrough; this catalog stays on its own branch.
-Until 0.8 is released, build and install this checkout's wheel as shown below.
+Install the matching release from PyPI as shown below.
 
 | Example | What it demonstrates | Additional requirements |
 | --- | --- | --- |
@@ -30,16 +30,22 @@ the pinned Dream training setup uses Python 3.12 and CPU PyTorch.
 git clone --branch examples/0.8 --single-branch https://github.com/Protention/ocura-oss.git ocura-oss-examples
 cd ocura-oss-examples
 git rev-parse HEAD
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 ocura-oss demo --root ./ocura-oss-demo
 ```
 
 The demo destination must be new. Keep the checkout for its example scripts;
 they and their optional frameworks are not installed with the package. Install
 only the backend needed by the selected guide. To work on the package itself,
-`python -m pip install .` also works. The wheel build may install build-time
-requirements; the resulting package has no runtime dependencies.
+`python -m pip install .` also works, or build and install this checkout's wheel:
+
+```console
+python -m pip wheel --no-deps --wheel-dir dist .
+python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+```
+
+The wheel build may install build-time requirements; the resulting package has
+no runtime dependencies.
 
 Record the commit printed by `git rev-parse HEAD` with retained results. The branch
 can advance; keep the exact revision when sharing or reproducing a run.

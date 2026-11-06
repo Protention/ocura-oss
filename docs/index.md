@@ -4,7 +4,7 @@ Version 0.8.0.
 
 This documentation accompanies the **`examples/0.8`** branch. See the
 [example catalog](use-cases.md) for the fuller demonstrations and the
-[checkout setup](../README.md#install-and-try) for the matching development package.
+[checkout setup](../README.md#install-and-try) for the matching package release.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -91,16 +91,15 @@ Python 3.11 or later is required. Ocura OSS uses only the standard library at ru
 From the `examples/0.8` checkout root, in an activated virtual environment:
 
 ```console
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 ocura-oss demo --root ./ocura-oss-demo
 ```
 
 The demo runs the complete workflow and retains a new directory for inspection.
 Its destination must not already exist. Keep this checkout for its example
-scripts. This branch uses the draft 0.8.0 package; the setup above installs its
-matching wheel. The [published documentation](https://protention.dev/) describes
-the latest released version, which may differ from this draft.
+scripts. This branch uses the 0.8.0 package; the setup above installs that release.
+For package development, follow the [source installation](../README.md#install-and-try).
+The [published documentation](https://protention.dev/) describes the latest release.
 
 ## Compare two runs
 

@@ -3,8 +3,8 @@
 Version 0.8.0.
 
 This experimental example is part of the [0.8 catalog](../../docs/use-cases.md)
-on `examples/0.8` and uses the draft 0.8.0 interfaces. Follow the
-[catalog setup](../../README.md#install-and-try) for the scripts and matching wheel.
+on `examples/0.8` and uses the 0.8.0 interfaces. Follow the
+[catalog setup](../../README.md#install-and-try) for the scripts and matching release.
 Installing this checkout also works.
 
 Which training run should get the next block of CPU time? This example records
@@ -31,8 +31,7 @@ CPU PyTorch.
 From the repository root, in an activated virtual environment:
 
 ```console
-python -m pip wheel --no-deps --wheel-dir dist .
-python -m pip install --no-index --no-deps dist/ocura_oss-0.8.0-py3-none-any.whl
+python -m pip install ocura-oss==0.8.0
 python -m pip install -r examples/dream_replay/requirements.txt --index-url https://download.pytorch.org/whl/cpu
 python examples/dream_replay/experiment.py prepare --root .tmp-tests/dream-inputs --download
 ```
