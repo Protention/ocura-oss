@@ -50,21 +50,28 @@ declaration does both. A program that builds the argument list itself needs no
 quoting; a PowerShell command line must quote the placeholder. Handle nonzero exits: `run` still returns a recorded result for a failed
 command, interruption, or launch failure. See [CLI](cli.md).
 
+Keep captured workloads in the foreground. Wait for children that inherit stdout
+or stderr before the command returns. Launch any child that must keep running with
+both streams redirected elsewhere.
+JSON output does not change this requirement; see
+[when the command finishes](state-and-verification.md#when-the-command-finishes).
+
 To stop a run early, send the `run` process `SIGTERM`, or Ctrl+Break on Windows:
 it stops the command and still returns a recorded `interrupted` result. If a `run`
 process is killed instead, its attempt remains unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
 `recover --json` closes it as `abandoned` once the command itself has stopped.
 
-On the `examples/0.7` branch, the [CI-report example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/ci_report/README.md) demonstrates a failed test
+On the `examples/0.8` branch, the [CI-report example](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/ci_report/README.md) demonstrates a failed test
 run, a reasoned fix through the combined operation, and later inspection without
-rerunning the work. The [autoregressive example](https://github.com/Protention/ocura-oss/blob/examples/0.7/examples/autoregressive/README.md) is an executable
+rerunning the work. The [autoregressive example](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/autoregressive/README.md) is an executable
 client of this interface, with PyTorch/JAX choices and an optional Ray Core executor.
 See [use cases](use-cases.md) for the separate checkout and requirements.
 The [Python API](python-api.md) provides the same operations with typed results.
 
 ### From a run result to the next command
 
-Descriptive names coexist with the existing JSON fields and ID prefixes:
+Version 0.8 uses these JSON fields. Earlier field names are no longer returned;
+the [naming guide](naming-migration.md) lists the replaced names and ID prefixes.
 
 | Returned field | Meaning | Use it for |
 | --- | --- | --- |

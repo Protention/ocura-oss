@@ -184,7 +184,7 @@ explains the JSON report and how to inspect your own ledger. No optional depende
 are needed.
 
 The fuller CI-report, autoregressive, and Dream demonstrations live on the
-semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7).
+semi-permanent [`examples/0.8` branch](https://github.com/Protention/ocura-oss/tree/examples/0.8).
 See [use cases](use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
@@ -216,7 +216,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Python API](python-api.md): functions, typed results, and `Store`
 - [State and verification](state-and-verification.md): records and checks
 - [Log compression](autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
-- [Examples](use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
+- [Examples](use-cases.md): the primary walkthrough and demonstrations on `examples/0.8`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The documentation for the published release is at [protention.dev](https://protention.dev/).

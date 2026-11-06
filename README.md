@@ -158,7 +158,7 @@ command. The [history guide](https://github.com/Protention/ocura-oss/blob/main/e
 JSON report and how to inspect your own ledger. No optional dependencies are needed.
 
 The fuller CI-report, autoregressive, and Dream demonstrations live on the
-semi-permanent [`examples/0.7` branch](https://github.com/Protention/ocura-oss/tree/examples/0.7).
+semi-permanent [`examples/0.8` branch](https://github.com/Protention/ocura-oss/tree/examples/0.8).
 See [use cases](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
@@ -208,7 +208,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
 - [Log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
-- [Examples](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.7`
+- [Examples](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.8`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The documentation for the published release is at [protention.dev](https://protention.dev/).
