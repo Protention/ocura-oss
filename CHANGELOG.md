@@ -30,6 +30,8 @@ uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
   and counts it in `newer_runs`; runs branched from it are read as usual. A record may
   list what a reader needs in a `requires` array.
 - Add `notices` to JSON results when a command prints a `note:` line.
+- Show a command's output, and write it to its log, as the command writes it. `run`
+  used to hold output back until 64 KiB had arrived or the command had exited.
 
 ## 0.8.0 - 2026-11-06
 

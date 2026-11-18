@@ -250,7 +250,7 @@ a variation before executing it.
 
 The command runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment. Environment keys and values are not serialized.
 
-Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal.
+Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal as the command writes them. A command that buffers its own output when it is not writing to a terminal appears late: Python does this for `print()`, so run it as `python -u` or set `PYTHONUNBUFFERED=1`.
 
 Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given.
 Then, after finalization, logs of at least 1 MiB (or `N`) are considered once for

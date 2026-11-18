@@ -139,7 +139,9 @@ the command.
 
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
-the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
+the logs without streaming. Output appears as the command writes it. Python holds
+`print()` output back when it is not writing to a terminal, so run it as `python -u`
+or set `PYTHONUNBUFFERED=1` to see it live. A first Ctrl+C, or a `SIGTERM` sent to
 `ocura-oss run`, stops the command and records an interrupted attempt; a second
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
