@@ -1,6 +1,6 @@
 # Scripts and AI agents
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.8 renamed stored IDs and JSON keys; the [naming guide](naming-migration.md)
 maps the names used before 0.8.

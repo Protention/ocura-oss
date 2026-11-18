@@ -1,6 +1,6 @@
 # Ocura OSS
 
-Version 0.8.0.
+Version 0.9.0.
 
 A local execution ledger for recording, branching, and comparing command runs.
 
@@ -33,7 +33,7 @@ runs in a new project, especially for local development:
 - **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
   it adds no runtime dependencies to your project.
 - **Easy setup.** `pip install ocura-oss`, then `ocura-oss init`. There is no
-  server, database, account, or configuration file. Every command accepts `--json`
+  server, database, or account, and nothing to configure. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
 - **Easy to inspect and adapt.** Records are plain JSON files, and the typed

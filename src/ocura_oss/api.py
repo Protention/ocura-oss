@@ -114,6 +114,7 @@ def run(
                 )
             known_ids["source_branch_point_id"] = source_branch_point_id
         store = _required_store(root)
+        store.upgrade_if_enabled()
         create_child = None
         if source_branch_point_id is None:
             selected_pathway = pathway_id or store.load_ledger().default_pathway_id
@@ -163,6 +164,7 @@ def branch(
 ) -> Pathway:
     """Create a metadata-only child pathway from verified terminal evidence."""
     store = _required_store(root)
+    store.upgrade_if_enabled()
     source_branch_point, _source_run, source_pathway = branching.load_verified_source(
         store, source_branch_point_id
     )

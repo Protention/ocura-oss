@@ -14,7 +14,10 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+OLDEST_READABLE_SCHEMA = 3
+# Features a record may name under ``requires`` that this version understands.
+FEATURES: frozenset[str] = frozenset()
 CHECKSUM_ALGORITHM = "sha256"
 TERMINAL_KIND = "terminal"
 MASKED_ARGUMENT = "<masked>"
@@ -770,6 +773,62 @@ def attempt_from_payload(payload: object) -> Attempt:
         masked_arguments=masked,
         context=_context(payload.get("context")),
     )
+
+
+_STREAMS = ("stdout", "stderr")
+_STREAM_FIELDS = ("log", "bytes", "sha256")
+
+
+def stored_payload(kind: str, payload: Mapping[str, object]) -> dict:
+    """Return the format 4 stored form of a payload in the shape the package works with.
+
+    A run's captured output moves from six flat fields into one ``streams`` map,
+    the single place a record names its files. Every other field, including one
+    this version does not recognize, is carried over unchanged.
+    """
+    if kind != "run":
+        return dict(payload)
+    stored = {key: value for key, value in payload.items() if key not in _LOG_FIELDS}
+    stored["streams"] = {
+        name: {field: payload.get(f"{name}_{field}") for field in _STREAM_FIELDS}
+        for name in _STREAMS
+        if payload.get(f"{name}_log") is not None
+    }
+    return stored
+
+
+def working_payload(schema_version: int, kind: str, payload: Mapping[str, object]) -> dict:
+    """Return a stored payload of any readable format in the shape the package works with."""
+    if kind != "run" or schema_version < 4:
+        return dict(payload)
+    streams = payload.get("streams")
+    _require(isinstance(streams, dict), "streams must be an object")
+    assert isinstance(streams, dict)
+    working = {key: value for key, value in payload.items() if key != "streams"}
+    for name in _STREAMS:
+        entry = streams.get(name, {})
+        _require(isinstance(entry, dict), f"streams.{name} must be an object")
+        for field in _STREAM_FIELDS:
+            working[f"{name}_{field}"] = entry.get(field)
+    return working
+
+
+def unmet_requirements(schema_version: int, payload: Mapping[str, object]) -> tuple[str, ...]:
+    """Name what a record needs that this version lacks; empty when it can be read."""
+    if schema_version > SCHEMA_VERSION:
+        return (f"schema {schema_version}",)
+    required = payload.get("requires", [])
+    if not isinstance(required, list):
+        return ()
+    return tuple(sorted(str(item) for item in required if item not in FEATURES))
+
+
+def stream_logs(payload: Mapping[str, object]) -> list[str]:
+    """Return the log paths a stored payload names, without interpreting the record."""
+    streams = payload.get("streams")
+    entries = list(streams.values()) if isinstance(streams, dict) else []
+    logs = [entry.get("log") for entry in entries if isinstance(entry, dict)]
+    return [log for log in logs if isinstance(log, str)]
 
 
 def branch_point_to_payload(branch_point: BranchPoint) -> dict:

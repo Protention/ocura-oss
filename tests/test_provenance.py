@@ -167,7 +167,8 @@ class ManifestTests(ProvenanceTestCase):
         """Rewrite a record and its checksum together, as a writer of the state could."""
         path = self.store.runs_dir / f"{run_id}.json"
         envelope = json.loads(path.read_text("utf-8"))
-        envelope["payload"].update(changes)
+        payload = model.working_payload(envelope["schema_version"], "run", envelope["payload"])
+        envelope["payload"] = model.stored_payload("run", {**payload, **changes})
         envelope["checksum"] = model.checksum_for(
             envelope["schema_version"], envelope["kind"], envelope["payload"]
         )

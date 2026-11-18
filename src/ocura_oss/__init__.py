@@ -2,7 +2,7 @@
 
 """Public Python interface for Ocura OSS."""
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from ocura_oss.api import (
     Initialization,

@@ -85,6 +85,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.json = True
     retained = False
     try:
+        _NOTICES[:] = _ledger_notices(args)
+        for notice in _NOTICES:
+            print(f"note: {notice}", file=sys.stderr)
         return _dispatch(args, command_tail)
     except (StoreError, ModelError, OSError) as exc:
         error = exc if isinstance(exc, StoreError) else with_execution(exc, "not_applicable", {})
@@ -602,6 +605,21 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         "--json", action="store_true", help="print a JSON report of steps and comparison"
     )
 
+    settings_parser = subparsers.add_parser(
+        "settings",
+        help="show or change this project's settings",
+        description=(
+            "Shows the project's settings, or stores each KEY=VALUE given."
+            " upgrade=off (default) keeps an older ledger in its own schema;"
+            " upgrade=overwrite converts it in place on the next run or branch."
+        ),
+    )
+    settings_parser.add_argument("assignments", nargs="*", metavar="KEY=VALUE")
+    settings_parser.add_argument(
+        "--root", default=None, metavar="PATH", help="project root directory"
+    )
+    settings_parser.add_argument("--json", action="store_true", help="print settings as JSON")
+
     for read_parser in (
         pathways_parser,
         branch_points_parser,
@@ -662,6 +680,8 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _change_log_storage(args)
     if name == "demo":
         return _demo(args)
+    if name == "settings":
+        return _settings(args)
     raise StoreError(f"unknown command: {name}", code="invalid_input")
 
 
@@ -685,7 +705,81 @@ def _collect_parameters(tokens: Sequence[str]) -> dict:
     return parameters
 
 
+_NOTICES: list[str] = []
+_WRITING_COMMANDS = ("run", "branch", "recover")
+_FORMAT_WRITERS = {3: "0.8"}
+
+
+def _ledger_notices(args: argparse.Namespace) -> list[str]:
+    """Upgrade an older ledger when its setting allows; otherwise say how to allow it.
+
+    Only the commands that record, and ``verify``, mention an older ledger: the
+    others read it the same either way.
+    """
+    if args.command_name not in (*_WRITING_COMMANDS, "verify"):
+        return []
+    state = store.Store(store.resolve_root(args.root), archive=getattr(args, "archive", False))
+    try:
+        older = state.older_format() if state.ledger_path.is_file() else None
+        if older is None:
+            return []
+        writing = args.command_name in _WRITING_COMMANDS and not state.archive
+        upgrade = state.setting("upgrade") == "overwrite"
+        chosen = "upgrade" in state.settings()
+        result = state.upgrade_records() if writing and upgrade else None
+    except StoreError:
+        return []  # The command itself reports what is wrong with the ledger.
+    current = model.SCHEMA_VERSION
+    if result is not None:
+        converted, busy = result
+        if busy:
+            return [
+                f"upgrading this ledger from schema {older} to {current}: {converted} records"
+                " converted. A run is still being recorded, or a file was in use, so a"
+                " later `run` or `branch` finishes the upgrade"
+            ]
+        return [
+            f"upgraded ledger from schema {older} to {current} ({converted} records)."
+            " Output logs were not changed. Manifests saved before this upgrade no longer"
+            " match; save a new one with `ocura-oss manifest`"
+        ]
+    if upgrade:
+        return [
+            f"this ledger uses schema {older}; the next `run` or `branch` upgrades it"
+            f" to schema {current}"
+        ]
+    if chosen:
+        return []  # The project stored `upgrade=off`: it keeps this schema on purpose.
+    writer = _FORMAT_WRITERS.get(older, "an earlier version")
+    return [
+        f"this ledger uses schema {older}, which ocura-oss {writer} also reads, and new"
+        " records keep it. To upgrade it in place: `ocura-oss settings upgrade=overwrite`"
+        f" (for every project: set {store.UPGRADE_ENV}=overwrite). To keep schema {older}"
+        " and stop this note: `ocura-oss settings upgrade=off`"
+    ]
+
+
+def _settings(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    for token in args.assignments:
+        key, separator, value = token.partition("=")
+        if not separator:
+            raise StoreError(f"expected KEY=VALUE, got {token!r}", code="invalid_input")
+        state.set_setting(key, value)
+    values = {key: state.setting(key) for key in store.SETTINGS}
+    stored = state.settings()
+    if args.json:
+        _emit_json({"settings": values, "stored": stored})
+        return EXIT_OK
+    for key, value in values.items():
+        source = "project" if key in stored else "default or environment"
+        print(f"{key}: {value} ({source})")
+    return EXIT_OK
+
+
 def _emit_json(payload: dict) -> None:
+    if _NOTICES and "error" not in payload:
+        payload = {**payload, "notices": list(_NOTICES)}
     # Escaped Unicode round-trips through JSON even on legacy Windows stdout encodings.
     print(json.dumps(payload, ensure_ascii=True, indent=2))
 
@@ -926,6 +1020,8 @@ def _runs(args: argparse.Namespace) -> int:
             print(f"next after: {page.next_after}")
         if page.unfinished_attempts:
             print(f"unfinished attempts: {page.unfinished_attempts} (may finish behind this page)")
+        if page.newer_runs:
+            print(f"runs not listed: {page.newer_runs} (need a newer ocura-oss; see `verify`)")
         print("verification: records checked; logs not checked")
     return EXIT_OK
 
@@ -1052,6 +1148,9 @@ def _verify(args: argparse.Namespace) -> int:
                 "problems": [
                     {"record": record, "problem": problem} for record, problem in report.problems
                 ],
+                "newer_records": [
+                    {"record": record, "needs": needs} for record, needs in report.newer
+                ],
             }
         )
         return EXIT_OK if report.ok else EXIT_INVALID
@@ -1062,6 +1161,8 @@ def _verify(args: argparse.Namespace) -> int:
     )
     if report.running_attempts:
         print(f"running attempts: {len(report.running_attempts)}")
+    for record, needs in report.newer:
+        print(f"newer record: {record}: {needs}")
     for record, problem in report.problems:
         print(f"problem: {record}: {problem}")
     if report.digest is not None:

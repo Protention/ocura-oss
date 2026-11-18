@@ -1,6 +1,6 @@
 # Command-line reference
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.7 adds opt-in compression and the `logs`, `compress`, and
 `decompress` commands. See [log compression](autocompression.md).
@@ -34,6 +34,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `manifest` | Print one checksum line per verified record, to keep elsewhere |
 | `attempts` | List runs that have started and are not yet finalized |
 | `recover` | Close attempts whose recording process stopped |
+| `settings` | Show or change this project's settings |
 | `logs` | Read verified original log bytes or inspect storage metadata |
 | `compress` | Compress eligible finalized captured logs losslessly |
 | `decompress` | Restore finalized compressed logs to their original bytes |
@@ -72,6 +73,8 @@ Declared parameters do not configure the child process. Pass process arguments a
 ### JSON output
 
 Every command accepts `--json`. JSON mode writes one result document to standard output, with Unicode escaped so it also works on legacy Windows encodings. Diagnostic messages go to standard error.
+
+A command that prints a `note:` line on standard error, as `run`, `branch`, `recover`, and `verify` do in a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08), also returns those messages in a `notices` array in its result document. The key is absent when there are none.
 
 `run --json` retains child stdout and stderr in their logs without streaming them. A recorded command failure, interruption, or launch failure still returns a JSON result with its existing nonzero exit status. Invalid input or a state error returns no result document.
 
@@ -457,7 +460,10 @@ a branch point, normally the previous page's `next_after`.
 
 JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id`),
 `next_after` (the last returned branch point ID when more matches exist, otherwise
-null), `unfinished_attempts`, and `verification: {"scope": "records", "logs_checked": 0}`.
+null), `unfinished_attempts`, `newer_runs`, and
+`verification: {"scope": "records", "logs_checked": 0}`. `newer_runs` counts runs
+left out of the page because they [need a later version](state-and-verification.md#records-from-a-later-version)
+to read; the text view prints `runs not listed: N` when it is not zero.
 Every branch point record's envelope and fields must validate, even when filters
 exclude it, and each returned run's records and lineage are checked. Log contents
 are not read. There is no persistent index: each page scans the branch point records
@@ -703,6 +709,7 @@ Verification covers:
 - referenced log containment, existence, byte count, and SHA-256 digest
 - unreferenced files and unexpected directories under `.ocura-oss/logs/`
 - unfinished attempts
+- records that [need a later version](state-and-verification.md#records-from-a-later-version): their checksums are checked and they are listed, without counting as problems
 - with `--against`, that every retained manifest entry is still present with the same checksum
 
 `logs_checked` counts individual logs that passed verification. A valid run record normally contributes two logs, and none when it was recorded without capture.
@@ -723,8 +730,9 @@ Verification may run while other processes record runs under the same root. An a
 | `attempts.running` | array | Identifiers of attempts a live process is still recording |
 | `attempts.abandoned` | array | Identifiers of attempts whose recorder stopped; each is also a problem |
 | `problems` | array | Objects containing `record` and `problem` strings |
+| `newer_records` | array | Objects containing `record` and `needs` strings, one for each record that needs a later version |
 
-The text view prints the digest on its own line when the state is intact.
+The text view prints the digest on its own line when the state is intact, and one `newer record: FILE: NEEDS` line for each entry in `newer_records`.
 
 Verification establishes consistency among local records and logs. It does not establish authorship or reproduce external execution conditions. Checksums kept inside the state cannot show that a record was rewritten together with its checksum; `--against` with a manifest kept elsewhere can.
 
@@ -848,6 +856,27 @@ The text view prints one line per closed attempt and a final `recovered: N` coun
 | --- | --- |
 | 0 | Every abandoned attempt was closed, including when there were none |
 | 2 | State was missing, or an attempt record or its evidence was malformed or unreadable |
+
+## `settings`
+
+Show this project's settings, or store new values.
+
+```text
+ocura-oss settings [KEY=VALUE ...] [--root PATH] [--json]
+```
+
+| Setting | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `upgrade` | `off`, `overwrite` | `off` | `off` keeps a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08) in schema 3, which 0.8 also reads; storing `off` also stops the note about it. `overwrite` converts it in place on the next `run`, `branch`, or `recover` |
+
+Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variable `OCURA_OSS_UPGRADE`, which sets `upgrade` for every project that has not stored one.
+
+JSON mode returns `settings` (the value in effect for each setting) and `stored` (the values the project stored). An unknown setting or value returns exit status 2.
+
+```console
+$ ocura-oss settings upgrade=overwrite
+upgrade: overwrite (project)
+```
 
 ## `demo`
 

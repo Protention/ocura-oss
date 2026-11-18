@@ -1,6 +1,6 @@
 # Python API reference
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.7 adds opt-in compression, storage metadata, and conversion
 methods. See [log compression](autocompression.md).
@@ -774,6 +774,25 @@ A list sorted by `started_at`, then `id`.
 
 `load_run()` adds pathway validation. `verify_state()` adds complete relationship and log verification.
 
+### Settings and upgrading a 0.8 ledger
+
+```python
+store.setting(key: str) -> str
+store.settings() -> dict[str, str]
+store.set_setting(key: str, value: str) -> None
+store.older_format() -> int | None
+store.upgrade_if_enabled() -> tuple[int, int] | None
+```
+
+`setting("upgrade")` returns the value in effect: the one the project stored, else
+`OCURA_OSS_UPGRADE`, else `"off"`. `settings()` returns only what the project stored, and
+`set_setting()` stores one value. `older_format()` returns the ledger record's schema
+version while an [upgrade](state-and-verification.md#ledgers-written-by-08) is still
+possible, otherwise `None`. `upgrade_if_enabled()` converts the records when the setting
+is `overwrite` and returns `(converted, waiting)`, or `None` when there was nothing to do.
+`ocura_oss.run()` and `ocura_oss.branch()` call it before they record, without printing
+anything.
+
 ### `Store.list_runs` and `Store.inspect_run`
 
 ```python
@@ -784,8 +803,9 @@ store.list_runs(
 store.inspect_run(run_id: str) -> RunInspection
 ```
 
-`RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`, and
-`unfinished_attempts: int`. Each `ListedRun` holds `branch_point_id: str` and
+`RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`,
+`unfinished_attempts: int`, and `newer_runs: int`, the number of runs left out because
+they need a later version to read. Each `ListedRun` holds `branch_point_id: str` and
 `run: RunSummary`. `RunInspection` contains `record: RunRecord`, `pathway: Pathway`,
 `branch_point: BranchPoint | None`, and `children: tuple[Pathway, ...]`. These result
 types live in `ocura_oss.store`. Their `to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
@@ -1588,6 +1608,7 @@ StateVerification(
     logs_checked: int,
     problems: tuple[tuple[str, str], ...],
     running_attempts: tuple[str, ...] = (),
+    newer: tuple[tuple[str, str], ...] = (),
     abandoned_attempts: tuple[str, ...] = (),
     manifest: tuple[str, ...] = (),
     digest: str | None = None,
@@ -1606,6 +1627,7 @@ Result of verifying records and referenced logs under one state directory.
 | `logs_checked` | integer | Individual referenced logs that passed verification |
 | `problems` | tuple of pairs | `(record, problem)` entries collected during verification |
 | `running_attempts` | tuple of strings | Attempts a live process is still recording; not problems |
+| `newer` | tuple of pairs | `(record, needs)` for each record that [needs a later version](state-and-verification.md#records-from-a-later-version); not problems |
 | `abandoned_attempts` | tuple of strings | Attempts whose recorder stopped; each also appears in `problems` |
 | `manifest` | tuple of strings | Sorted `KIND ID CHECKSUM` lines for every verified record; empty when there are problems |
 | `digest` | string or None | SHA-256 of the manifest lines, each newline-terminated; `None` when there are problems |
@@ -1714,6 +1736,12 @@ String enum describing evidence completeness for one comparison.
 
 ## Exceptions
 
+### `ocura_oss.store.NewerRecord`
+
+A `StoreError` with code `newer_record`, raised when a record is intact but
+[needs a later version](state-and-verification.md#records-from-a-later-version) to read.
+`needs` is a tuple naming what is missing, such as `("schema 5",)`.
+
 ### `ocura_oss.StoreError`
 
 In 0.7, `StoreError` also exposes `code`, `execution`, `ids`,
@@ -1767,7 +1795,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. This release reports `"0.8.0"`.
+Installed package version. This release reports `"0.9.0"`.
 
 ## Typing
 
