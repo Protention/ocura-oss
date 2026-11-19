@@ -478,11 +478,13 @@ null), `unfinished_attempts`, `newer_runs`, and
 `verification: {"scope": "records", "logs_checked": 0}`. `newer_runs` counts runs
 left out of the page because they [need a later version](state-and-verification.md#records-from-a-later-version)
 to read; the text view prints `runs not listed: N` when it is not zero.
-Every branch point record's envelope and fields must validate, even when filters
-exclude it, and each returned run's records and lineage are checked. Log contents
-are not read. There is no persistent index: each page scans the branch point records
-once, so walking a long history page by page repeats that scan, and `--all` does it
-once.
+Each returned run's records and lineage are checked. Log contents are not read.
+
+In a ledger with fewer than 500 finished runs, each page scans the branch point
+records once, and every one must validate, even when filters exclude it. A larger
+ledger gets an [index](state-and-verification.md#the-index), and a page then opens
+only the records it returns plus any whose files are new or changed. `verify` still
+checks every record.
 
 Each page reads the clock and counts unfinished attempts before it scans, and
 lists only runs that finished before then; a run stamped with that same clock
@@ -502,8 +504,9 @@ lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
 still succeeds, because the run record itself is valid.
 The pathway includes the reason and source relationship. `branch_point` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
-pathways branched from it, oldest first. Finding them scans the branch point and
-pathway records. Command arguments and masking positions are omitted unless
+pathways branched from it, oldest first. Finding them scans the pathway records, and
+the branch point records unless the ledger has an
+[index](state-and-verification.md#the-index). Command arguments and masking positions are omitted unless
 `--command` is supplied. No log contents are read.
 
 Both commands accept unique ID prefixes in their ID options. Agents should retain
@@ -883,8 +886,9 @@ ocura-oss settings [KEY=VALUE ...] [--root PATH] [--json]
 | --- | --- | --- | --- |
 | `upgrade` | `off`, `overwrite` | `off` | `off` keeps a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08) in schema 3, which 0.8 also reads; storing `off` also stops the note about it. `overwrite` converts it in place on the next `run`, `branch`, or `recover` |
 | `compress` | `off`, `on` | `off` | `on` stores each run's large captured logs as gzip, as [`run --compress`](#run) does. `run --no-compress` keeps one run's logs raw |
+| `index` | `on`, `off` | `on` | `on` lets `runs` and `show` keep and use the [index](state-and-verification.md#the-index) of a large ledger. `off` makes them scan the records |
 
-Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variables `OCURA_OSS_UPGRADE` and `OCURA_OSS_COMPRESS`, which set `upgrade` and `compress` for every project that has not stored one.
+Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variables `OCURA_OSS_UPGRADE`, `OCURA_OSS_COMPRESS`, and `OCURA_OSS_INDEX`, which set `upgrade`, `compress`, and `index` for every project that has not stored one.
 
 JSON mode returns `settings` (the value in effect for each setting) and `stored` (the values the project stored). An unknown setting or value returns exit status 2.
 

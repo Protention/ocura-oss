@@ -16,6 +16,7 @@ before 0.8.
 .ocura-oss/
   ledger.json
   settings.json
+  index.sqlite
   pathways/
     <pathway-id>.json
   runs/
@@ -38,6 +39,29 @@ before 0.8.
 `attempts/` holds one entry for each run that has started and is not yet finalized. It is empty when nothing is running and nothing was abandoned.
 
 `settings.json` exists only after [`ocura-oss settings`](cli.md#settings) has stored a value. It is a plain JSON object, not a record: it has no envelope and is not part of verification or the manifest.
+
+### The index
+
+`index.sqlite` appears once a ledger holds 500 finished runs. It is a cache, not part
+of the ledger: verification and the manifest ignore it, and deleting it loses nothing.
+
+It records where each branch point falls in finish order, so `runs` and `show` open
+only the records they return instead of every one. For example, `runs --limit 20` on
+a ledger of 20,000 runs reads about 20 branch point records where a scan reads 20,000.
+Every run those commands return is still read from its JSON record and checked, so a
+wrong index cannot change what a run says.
+
+Each row is tied to its record file's size and modification time. A record that is
+new or changed is read again the next time `runs` or `show` is used; `run` itself
+never touches the index. An index that is damaged, locked by another process, or
+written by a later version is not used, and the command scans the records as it does
+in a small ledger. The same happens under `--archive`, on a read-only project, and
+when Python was built without SQLite.
+
+`ocura-oss settings index=off` stops a project from keeping or using one. The file's
+layout can change between releases, so read the ledger through the commands or the
+Python API. Keep the file out of version control and out of copies you sign or
+compare; earlier releases ignore it.
 
 Each finalized captured stream normally has either its raw `.log` file or a
 losslessly compressed `.log.gz` backing file. A conversion interrupted after

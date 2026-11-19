@@ -41,6 +41,11 @@ uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
   `verify`, and `attempts`; recording still goes through `run`. It adds no dependency.
 - Add `logs --tail N` and `logs --search TEXT`, which print the last lines of a log
   or its numbered lines containing the text.
+- Keep an index for a ledger of 500 or more finished runs, so `runs` and `show` open
+  only the records they return. `.ocura-oss/index.sqlite` is a cache built from the
+  records: `verify` ignores it, deleting it loses nothing, and
+  `ocura-oss settings index=off` or `OCURA_OSS_INDEX=off` turns it off. It uses the
+  `sqlite3` module that ships with Python, so there is still no dependency.
 - Add `notices` to JSON results when a command prints a `note:` line.
 - Show a command's output, and write it to its log, as the command writes it. `run`
   used to hold output back until 64 KiB had arrived or the command had exited.

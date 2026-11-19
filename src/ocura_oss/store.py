@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import BinaryIO, Literal, TypeVar
 
-from ocura_oss import locking, logstorage, model
+from ocura_oss import index, locking, logstorage, model
 from ocura_oss.errors import StoreError as StoreError
 from ocura_oss.errors import classify_os_error
 
@@ -35,7 +35,7 @@ _T = TypeVar("_T")
 
 UPGRADE_ENV = "OCURA_OSS_UPGRADE"
 # Each setting and its accepted values; the first is the default.
-SETTINGS = {"upgrade": ("off", "overwrite"), "compress": ("off", "on")}
+SETTINGS = {"upgrade": ("off", "overwrite"), "compress": ("off", "on"), "index": ("on", "off")}
 
 
 def check_setting(key: str, value: str) -> None:
@@ -700,9 +700,11 @@ class Store:
     ) -> RunPage:
         """Page finalized runs by terminal branch point timestamp and ID.
 
-        Every branch point record's envelope and fields are checked, and each
-        returned run's records and lineage; log contents are not. *after* is a
-        page's ``next_after`` branch point. A run unfinished when a page is read
+        Each returned run's records and lineage are checked; log contents are not.
+        Every branch point record's envelope and fields are checked too, unless
+        the ledger has an index: then those outside the page are read only when
+        their files are new or changed. *after* is a page's ``next_after`` branch
+        point. A run unfinished when a page is read
         can finish behind its cursor; that page counts it in
         ``unfinished_attempts``. ``limit=None`` returns every match.
         """
@@ -724,27 +726,41 @@ class Store:
         # now or is stamped at or after now, which only later pages list.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
-        # A branch point that needs a newer version cannot be placed in the order,
-        # so the first page counts it.
-        unplaced: list[Path] = []
-        candidates = (
-            point
-            for point in self._iter_typed(
-                self.branch_points_dir, "branch_point", model.branch_point_from_payload, unplaced
+
+        def wanted(point: model.BranchPoint) -> bool:
+            return (
+                (pathway_id is None or point.pathway_id == pathway_id)
+                and (outcome is None or point.outcome is outcome)
+                and point.created_at < now
+                and (start is None or (point.created_at, point.id) > start)
             )
-            if (pathway_id is None or point.pathway_id == pathway_id)
-            and (outcome is None or point.outcome is outcome)
-            and point.created_at < now
-            and (start is None or (point.created_at, point.id) > start)
-        )
-        if limit is None:
-            shown, more = sorted(candidates, key=_finish_order), False
-        else:
-            selected = heapq.nsmallest(limit + 1, candidates, key=_finish_order)
-            shown, more = selected[:limit], len(selected) > limit
+
+        ahead = None if limit is None else limit + 1
+        chosen = self._indexed_page(wanted, pathway_id, outcome, now, start, ahead)
+        if chosen is None:
+            newer_files: list[Path] = []
+            candidates = (
+                point
+                for point in self._iter_typed(
+                    self.branch_points_dir,
+                    "branch_point",
+                    model.branch_point_from_payload,
+                    newer_files,
+                )
+                if wanted(point)
+            )
+            if ahead is None:
+                chosen = sorted(candidates, key=_finish_order), len(newer_files)
+            else:
+                chosen = heapq.nsmallest(ahead, candidates, key=_finish_order), len(newer_files)
+        selected, unplaced = chosen
+        shown = selected[:limit]
+        more = len(selected) > len(shown)
         validated: dict[str, object] = {}
         runs = []
-        newer = 0 if after else len(unplaced)
+        # A branch point that needs a newer version cannot be placed in the order,
+        # so the first page counts it.
+        newer = 0 if after else unplaced
         for point in shown:
             try:
                 self._load_branch_point(point.id, frozenset(), validated)
@@ -763,22 +779,14 @@ class Store:
     def inspect_run(self, run_id: str) -> RunInspection:
         """Load one run with its lineage, terminal branch point, and child pathways.
 
-        Scans branch point and pathway records to find the relationships; reads no
-        logs. The branch point is ``None`` while the run is unfinished.
+        Scans pathway records to find the relationships, and branch point records
+        unless the ledger has an index; reads no logs. The branch point is ``None``
+        while the run is unfinished.
         """
         self.require()
         validated: dict[str, object] = {}
         record = self._load_run(run_id, frozenset(), validated)
-        found = next(
-            (
-                point
-                for point in self._iter_typed(
-                    self.branch_points_dir, "branch_point", model.branch_point_from_payload
-                )
-                if point.run_id == run_id
-            ),
-            None,
-        )
+        found = self._terminal_point(run_id)
         branch_point = None
         children: tuple[model.Pathway, ...] = ()
         if found is not None:
@@ -792,6 +800,76 @@ class Store:
             branch_point=branch_point,
             children=children,
         )
+
+    def _index(self) -> index.Index | None:
+        """Return the branch point index, unless this store must not keep one."""
+        if self.archive or self.setting("index") == "off":
+            return None
+        return index.Index(
+            self.state_dir / index.FILE_NAME, self.branch_points_dir, self._point_facts
+        )
+
+    def _point_facts(self, path: Path) -> index.Facts | None:
+        try:
+            point = self._load_listed(path, "branch_point", model.branch_point_from_payload)
+        except NewerRecord:
+            return None
+        return point.created_at, point.pathway_id, point.outcome.value, point.run_id
+
+    def _indexed_page(
+        self,
+        wanted: Callable[[model.BranchPoint], bool],
+        pathway_id: str | None,
+        outcome: model.Outcome | None,
+        before: str,
+        after: tuple[str, str] | None,
+        limit: int | None,
+    ) -> tuple[list[model.BranchPoint], int] | None:
+        """Choose a page's branch points through the index; None means scan the records."""
+        found = self._index()
+        if found is None:
+            return None
+        try:
+            names, unplaced = found.page(
+                before=before,
+                after=after,
+                pathway_id=pathway_id,
+                outcome=None if outcome is None else outcome.value,
+                limit=limit,
+            )
+            points = [self._indexed_point(name) for name in names]
+        except (index.Unavailable, NewerRecord):
+            return None
+        # The index only chooses which records to read. A record that does not say
+        # what the index holds for it means the index is wrong, so it is dropped.
+        if not all(map(wanted, points)) or points != sorted(points, key=_finish_order):
+            found.discard()
+            return None
+        return points, unplaced
+
+    def _indexed_point(self, branch_point_id: str) -> model.BranchPoint:
+        return self._load_structural(
+            "branch_point", branch_point_id, model.branch_point_from_payload
+        )
+
+    def _terminal_point(self, run_id: str) -> model.BranchPoint | None:
+        """Find the branch point that ends a run, through the index when there is one."""
+        found = self._index()
+        if found is not None:
+            try:
+                name = found.of_run(run_id)
+                if name is None:
+                    return None
+                point = self._indexed_point(name)
+                if point.run_id == run_id:
+                    return point
+                found.discard()
+            except (index.Unavailable, NewerRecord):
+                pass
+        points = self._iter_typed(
+            self.branch_points_dir, "branch_point", model.branch_point_from_payload
+        )
+        return next((point for point in points if point.run_id == run_id), None)
 
     def list_branch_points(self) -> list[model.BranchPoint]:
         """Return validated branch points in reverse creation order."""
