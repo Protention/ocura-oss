@@ -53,9 +53,9 @@ class InitializationTests(unittest.TestCase):
             self.assertTrue(model.is_valid_id(pathway.id, "pathway"))
 
             envelope = json.loads((store.state_dir / "ledger.json").read_text("utf-8"))
-            self.assertEqual(envelope["schema_version"], 3)
+            self.assertEqual(envelope["schema_version"], 4)
             self.assertEqual(envelope["kind"], "ledger")
-            expected = model.checksum_for(3, "ledger", envelope["payload"])["value"]
+            expected = model.checksum_for(4, "ledger", envelope["payload"])["value"]
             self.assertEqual(envelope["checksum"]["algorithm"], "sha256")
             self.assertEqual(envelope["checksum"]["value"], expected)
 
@@ -128,12 +128,10 @@ class ReadValidationTests(unittest.TestCase):
             store = new_store(root)
             ledger_path = store.state_dir / "ledger.json"
             envelope = json.loads(ledger_path.read_text("utf-8"))
-            for version in (2, 4):
-                with self.subTest(version=version):
-                    self._rewrite(ledger_path, version, "ledger", envelope["payload"])
-                    with self.assertRaises(StoreError) as ctx:
-                        store.load_ledger()
-                    self.assertIn(f"unsupported schema version {version}", str(ctx.exception))
+            self._rewrite(ledger_path, 2, "ledger", envelope["payload"])
+            with self.assertRaises(StoreError) as ctx:
+                store.load_ledger()
+            self.assertIn("unsupported schema version 2", str(ctx.exception))
 
     def test_schema_one_rejection_names_the_writing_versions(self):
         with temp_root() as root:
@@ -269,7 +267,8 @@ class PayloadValidationTests(unittest.TestCase):
             "stderr_sha256": empty,
         }
 
-    def _write_run_payload(self, payload):
+    def _write_run_payload(self, working):
+        payload = model.stored_payload("run", working)
         path = self.store.runs_dir / f"{payload['id']}.json"
         checksum = model.checksum_for(model.SCHEMA_VERSION, "run", payload)
         path.write_text(
@@ -454,7 +453,7 @@ class FuzzReaderTests(unittest.TestCase):
                 elif choice == 1:
                     mutated["extra"] = True
                 elif choice == 2:
-                    mutated["schema_version"] = rng.choice([2, 4, True, "3", 3.0, None])
+                    mutated["schema_version"] = rng.choice([2, 5, True, "4", 4.0, None])
                 elif choice == 3:
                     mutated["kind"] = rng.choice(["run", "", None, "LEDGER"])
                 elif choice == 4:

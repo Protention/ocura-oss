@@ -2,6 +2,44 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## 0.9.0 - Unreleased
+
+This release changes the stored record format so that later releases can add to it
+without breaking earlier ones. It reads ledgers written by 0.8 and records into them.
+
+A ledger written by 0.8 stays usable from 0.8: this release records into it in
+schema 3 until you upgrade it. **Upgrade a project only once every environment that
+uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
+
+- Write new ledgers in schema version 4 and read schemas 3 and 4. A schema 4 run record
+  names its captured output in one `streams` object. Command output and the Python
+  API are unchanged: `show --json` and `RunRecord` keep `stdout_log` and the related
+  fields.
+- Keep a ledger written by 0.8 in schema 3 by default. New records are written in
+  schema 3 beside the older ones, so 0.8 still reads, verifies, and records into the
+  ledger, and a manifest retained under 0.8 still verifies. `run`, `branch`,
+  `recover`, and `verify` print a note that says how to upgrade;
+  `ocura-oss settings upgrade=off` stops it.
+- Add an opt-in upgrade. `ocura-oss settings upgrade=overwrite` for one project, or
+  `OCURA_OSS_UPGRADE=overwrite` for every project, converts the ledger to schema 4 in
+  place on the next `run`, `branch`, or `recover`. IDs and log files do not change.
+  Manifests retained before the upgrade no longer match; save a new one afterwards.
+- Add the `settings` command and `.ocura-oss/settings.json`.
+- Add the `compress` setting. `ocura-oss settings compress=on`, or
+  `OCURA_OSS_COMPRESS=on` for every project, compresses each run's large logs as
+  `run --compress` does. `run --no-compress` and `run(compress=False)` keep one
+  run's logs raw. In Python, `run(compress=...)` now defaults to `None`, which
+  follows the setting.
+- Report a record that needs a later version as `newer record` in `verify`, with
+  integrity still ok, where 0.8 reported it as damage. `runs` leaves such a run out
+  and counts it in `newer_runs`; runs branched from it are read as usual. A record may
+  list what a reader needs in a `requires` array.
+- Report a log stored in an encoding this version does not read the same way,
+  where 0.8 reported a missing log and an orphaned file.
+- Add `notices` to JSON results when a command prints a `note:` line.
+- Show a command's output, and write it to its log, as the command writes it. `run`
+  used to hold output back until 64 KiB had arrived or the command had exited.
+
 ## 0.8.0 - 2026-11-06
 
 This release renames stored state and cannot read ledgers written by earlier versions.

@@ -1,6 +1,6 @@
 # State and verification
 
-Version 0.8.0.
+Version 0.9.0.
 
 Ocura OSS stores records and command output under `.ocura-oss/` in one project directory. It does not use a service or a global project index.
 
@@ -15,6 +15,7 @@ before 0.8.
 ```text
 .ocura-oss/
   ledger.json
+  settings.json
   pathways/
     <pathway-id>.json
   runs/
@@ -36,6 +37,8 @@ before 0.8.
 
 `attempts/` holds one entry for each run that has started and is not yet finalized. It is empty when nothing is running and nothing was abandoned.
 
+`settings.json` exists only after [`ocura-oss settings`](cli.md#settings) has stored a value. It is a plain JSON object, not a record: it has no envelope and is not part of verification or the manifest.
+
 Each finalized captured stream normally has either its raw `.log` file or a
 losslessly compressed `.log.gz` backing file. A conversion interrupted after
 publication may leave both; readers verify both representations and prefer raw
@@ -53,7 +56,7 @@ Each JSON record contains an envelope:
 
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "kind": "run",
   "payload": {},
   "checksum": {
@@ -67,17 +70,81 @@ The checksum covers the schema version, kind, and canonical payload. It provides
 
 ## Format compatibility
 
-Records carry schema version 3. This release reads schema 3 only. State written by Ocura OSS 0.5 to 0.7 carries schema 2, and state from 0.4 and earlier carries schema 1; both are rejected, see [upgrading from earlier versions](#upgrading-from-earlier-versions).
+This release writes schema version 4 and reads schemas 3 and 4. Version 0.8 wrote schema 3; see [ledgers written by 0.8](#ledgers-written-by-08). State written by Ocura OSS 0.5 to 0.7 carries schema 2, and state from 0.4 and earlier carries schema 1; both are rejected, see [upgrading from 0.7 and earlier](#upgrading-from-07-and-earlier).
 
-Within one schema version, a record changes only by gaining optional fields:
+Schema 4 differs from schema 3 in one place. A run record names its captured output in one `streams` object, where schema 3 used six separate fields:
 
-- A reader ignores payload fields it does not recognize, so a record from a later release that keeps the same schema version stays readable.
-- An added field must be safe to ignore. A field that changes the meaning of existing fields, a new required field, a removed or renamed field, a changed type, or a new enumeration value requires a new schema version.
-- The envelope's four keys are fixed.
+```json
+"streams": {
+  "stdout": {"log": ".ocura-oss/logs/<run-id>.stdout.log", "bytes": 10, "sha256": "<digest>"},
+  "stderr": {"log": ".ocura-oss/logs/<run-id>.stderr.log", "bytes": 0, "sha256": "<digest>"}
+}
+```
 
-The repository keeps a small ledger in the 0.8.0 layout as a test fixture. Every later release that keeps schema 3 must verify it unchanged.
+A run recorded without capture has an empty `streams`. Command output and the Python API are the same for both schemas: `show --json` and `RunRecord` keep `stdout_log`, `stdout_bytes`, `stdout_sha256` and the `stderr` equivalents.
 
-This describes how the format changes. It is not a commitment that schema 3 is final: the 0.x status in the [overview](index.md#project-status) still applies.
+From schema 4 on, a record changes in one of three ways:
+
+- **An optional field is added.** A reader ignores payload fields it does not recognize, so the record stays readable by earlier releases. The field must be safe to ignore.
+- **The record lists what it needs.** A record that an earlier release would misread carries a `requires` array in its payload naming each capability a reader must have. No record written by this release has one.
+- **The schema version increases.** This is for a change that neither of the first two can express, such as a removed or renamed field.
+
+The envelope's four keys are fixed, and every file a record refers to is named under `streams`.
+
+The repository keeps a small ledger in the 0.8.0 layout as a test fixture. Every later release that reads schema 3 must verify it unchanged.
+
+This describes how the format changes. It is not a commitment that schema 4 is final: the 0.x status in the [overview](index.md#project-status) still applies.
+
+### Records from a later version
+
+A record this version cannot read is named and left alone; it is not reported as damage. That is a record with a higher schema version, or one whose `requires` names something this version does not have.
+
+| Command | What it does with such a record |
+| --- | --- |
+| `verify` | Checks its checksum, prints `newer record: FILE: WHAT IT NEEDS`, and still reports `integrity: ok`. Its logs are not reported as orphaned files, and their contents are not checked |
+| `runs` | Leaves the run out and reports how many were left out |
+| `show`, `logs`, `branch --from`, `run --from`, `compare` | Stop with exit status 2 and `needs a newer ocura-oss` when they need that record's contents |
+
+A captured log stored in an encoding this version does not read, such as one a later version adds beside [gzip](autocompression.md#space-and-compatibility-limits), is handled the same way: `verify` names it and does not check its contents, and `logs` stops with `needs a newer ocura-oss`.
+
+Runs branched from such a run are read, listed, and verified as usual. A record edited after it was written still fails its checksum, whatever its schema.
+
+### Ledgers written by 0.8
+
+This release reads a 0.8 ledger without changing it, and records into it in schema 3, the schema 0.8 wrote. Version 0.8 goes on reading, verifying, and recording into the same ledger, so a project can be used from both versions for as long as it is not upgraded. A manifest retained under 0.8 still verifies.
+
+A new ledger created by `ocura-oss init` starts in schema 4.
+
+`run`, `branch`, `recover`, and `verify` print a note while the ledger record is still schema 3:
+
+```text
+note: this ledger uses schema 3, which ocura-oss 0.8 also reads, and new records keep it. To upgrade it in place: `ocura-oss settings upgrade=overwrite` (for every project: set OCURA_OSS_UPGRADE=overwrite). To keep schema 3 and stop this note: `ocura-oss settings upgrade=off`
+```
+
+Staying on schema 3 is a supported way to use a project. `ocura-oss settings upgrade=off` stores that choice: the note stops, and the project keeps schema 3 even where `OCURA_OSS_UPGRADE=overwrite` is set.
+
+To move the ledger to schema 4, opt in with either of these. A value stored for the project takes precedence over the environment variable.
+
+```text
+ocura-oss settings upgrade=overwrite     # this project, stored in .ocura-oss/settings.json
+OCURA_OSS_UPGRADE=overwrite              # every project used from this environment
+```
+
+The next `run`, `branch`, or `recover` then rewrites each schema 3 record in schema 4 and reports how many it converted. From then on new records are written in schema 4. The upgrade happens as that command starts, so it is done even if the command then stops on a bad argument. Read commands and `--archive` never convert anything.
+
+- Record IDs, log files, and what each record says are unchanged. `compare` gives the same result before and after.
+- Each record is replaced in one step and the ledger record is converted last. An upgrade that is interrupted leaves a ledger that verifies, and the next recording command finishes it.
+- While any process is still recording a run in schema 3, the ledger record is held back, and a later recording command converts what that process wrote.
+- A manifest retained before the upgrade lists the old checksums and no longer matches. Save a new one with `ocura-oss manifest`.
+
+**Upgrade a project only once every environment that uses it has this release.** Version 0.8.0 stops at any schema it does not know, and that cannot be changed in a release that is already installed:
+
+| The ledger | What 0.8.0 does |
+| --- | --- |
+| Has not been upgraded, whichever version recorded into it | Works as before |
+| Has been upgraded, or an upgrade has started | Every command stops with `unsupported schema version 4`, or `verify` reports the converted records as unsupported |
+
+A record that needs schema 4 cannot be written into a schema 3 ledger. No feature in this release needs one; a later feature that does will ask for the upgrade first.
 
 ### Compressed-storage extension
 
@@ -92,7 +159,7 @@ compress active streams or enforce a disk quota, and needs room for temporary
 storage alongside the source file. JSON records and workload artifacts are never
 compressed.
 
-### Upgrading from earlier versions
+### Upgrading from 0.7 and earlier
 
 Version 0.8 renamed the stored names (see the [naming guide](naming-migration.md)), so versions 0.8 and later cannot read a `.ocura-oss/` directory written by 0.7 or earlier, and they do not convert one. Every command pointed at such a directory, including `verify`, stops with exit status 2 and a message naming the cause:
 

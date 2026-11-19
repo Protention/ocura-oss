@@ -1,6 +1,6 @@
 # Command-line reference
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.7 adds opt-in compression and the `logs`, `compress`, and
 `decompress` commands. See [log compression](autocompression.md).
@@ -34,6 +34,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `manifest` | Print one checksum line per verified record, to keep elsewhere |
 | `attempts` | List runs that have started and are not yet finalized |
 | `recover` | Close attempts whose recording process stopped |
+| `settings` | Show or change this project's settings |
 | `logs` | Read verified original log bytes or inspect storage metadata |
 | `compress` | Compress eligible finalized captured logs losslessly |
 | `decompress` | Restore finalized compressed logs to their original bytes |
@@ -72,6 +73,8 @@ Declared parameters do not configure the child process. Pass process arguments a
 ### JSON output
 
 Every command accepts `--json`. JSON mode writes one result document to standard output, with Unicode escaped so it also works on legacy Windows encodings. Diagnostic messages go to standard error.
+
+A command that prints a `note:` line on standard error, as `run`, `branch`, `recover`, and `verify` do in a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08), also returns those messages in a `notices` array in its result document. The key is absent when there are none.
 
 `run --json` retains child stdout and stderr in their logs without streaming them. A recorded command failure, interruption, or launch failure still returns a JSON result with its existing nonzero exit status. Invalid input or a state error returns no result document.
 
@@ -182,7 +185,7 @@ Run one trusted local command and record terminal evidence.
 ocura-oss run [--root PATH] [--pathway ID | --from BRANCH_POINT_ID --reason TEXT]
               [--param KEY=VALUE] [--quiet] [--json] [--json-errors]
               [--no-capture] [--mask-arg POSITION] [--substitute]
-              [--compress] [--compress-min-bytes N]
+              [--compress | --no-compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
 ```
 
@@ -201,7 +204,7 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--json-errors` | flag | false | Emit JSON results and structured errors with execution state and known IDs |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
-| `--compress` | flag | false | Store this run's captured logs as gzip after finalization when that saves at least 10% |
+| `--compress`, `--no-compress` | flag | the project's [`compress` setting](#settings) | Store this run's captured logs as gzip after finalization when that saves at least 10%, or keep them raw |
 | `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original log size to compress; implies `--compress` |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
 | `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
@@ -247,9 +250,11 @@ a variation before executing it.
 
 The command runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment. Environment keys and values are not serialized.
 
-Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal.
+Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal as the command writes them. A command that buffers its own output when it is not writing to a terminal appears late: Python does this for `print()`, so run it as `python -u` or set `PYTHONUNBUFFERED=1`.
 
-Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given.
+Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given, or
+the project's [`compress` setting](#settings) is `on`; `--no-compress` keeps one
+run's logs raw under that setting.
 Then, after finalization, logs of at least 1 MiB (or `N`) are considered once for
 lossless gzip compression. Each must save at least 10%; small and incompressible
 logs remain raw. No older runs are scanned. Compression errors emit storage
@@ -457,7 +462,10 @@ a branch point, normally the previous page's `next_after`.
 
 JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id`),
 `next_after` (the last returned branch point ID when more matches exist, otherwise
-null), `unfinished_attempts`, and `verification: {"scope": "records", "logs_checked": 0}`.
+null), `unfinished_attempts`, `newer_runs`, and
+`verification: {"scope": "records", "logs_checked": 0}`. `newer_runs` counts runs
+left out of the page because they [need a later version](state-and-verification.md#records-from-a-later-version)
+to read; the text view prints `runs not listed: N` when it is not zero.
 Every branch point record's envelope and fields must validate, even when filters
 exclude it, and each returned run's records and lineage are checked. Log contents
 are not read. There is no persistent index: each page scans the branch point records
@@ -703,6 +711,7 @@ Verification covers:
 - referenced log containment, existence, byte count, and SHA-256 digest
 - unreferenced files and unexpected directories under `.ocura-oss/logs/`
 - unfinished attempts
+- records that [need a later version](state-and-verification.md#records-from-a-later-version): their checksums are checked and they are listed, without counting as problems
 - with `--against`, that every retained manifest entry is still present with the same checksum
 
 `logs_checked` counts individual logs that passed verification. A valid run record normally contributes two logs, and none when it was recorded without capture.
@@ -723,8 +732,9 @@ Verification may run while other processes record runs under the same root. An a
 | `attempts.running` | array | Identifiers of attempts a live process is still recording |
 | `attempts.abandoned` | array | Identifiers of attempts whose recorder stopped; each is also a problem |
 | `problems` | array | Objects containing `record` and `problem` strings |
+| `newer_records` | array | Objects containing `record` and `needs` strings, one for each record that needs a later version |
 
-The text view prints the digest on its own line when the state is intact.
+The text view prints the digest on its own line when the state is intact, and one `newer record: FILE: NEEDS` line for each entry in `newer_records`.
 
 Verification establishes consistency among local records and logs. It does not establish authorship or reproduce external execution conditions. Checksums kept inside the state cannot show that a record was rewritten together with its checksum; `--against` with a manifest kept elsewhere can.
 
@@ -848,6 +858,28 @@ The text view prints one line per closed attempt and a final `recovered: N` coun
 | --- | --- |
 | 0 | Every abandoned attempt was closed, including when there were none |
 | 2 | State was missing, or an attempt record or its evidence was malformed or unreadable |
+
+## `settings`
+
+Show this project's settings, or store new values.
+
+```text
+ocura-oss settings [KEY=VALUE ...] [--root PATH] [--json]
+```
+
+| Setting | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `upgrade` | `off`, `overwrite` | `off` | `off` keeps a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08) in schema 3, which 0.8 also reads; storing `off` also stops the note about it. `overwrite` converts it in place on the next `run`, `branch`, or `recover` |
+| `compress` | `off`, `on` | `off` | `on` stores each run's large captured logs as gzip, as [`run --compress`](#run) does. `run --no-compress` keeps one run's logs raw |
+
+Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variables `OCURA_OSS_UPGRADE` and `OCURA_OSS_COMPRESS`, which set `upgrade` and `compress` for every project that has not stored one.
+
+JSON mode returns `settings` (the value in effect for each setting) and `stored` (the values the project stored). An unknown setting or value returns exit status 2.
+
+```console
+$ ocura-oss settings upgrade=overwrite
+upgrade: overwrite (project)
+```
 
 ## `demo`
 

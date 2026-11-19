@@ -1,9 +1,10 @@
 # Log compression
 
-Version 0.8.0.
+Version 0.9.0.
 
 Ocura OSS can store captured stdout and stderr losslessly as gzip. Compression is
-opt-in: logs stay raw unless a run or an explicit `compress` pass asks for it.
+opt-in: logs stay raw unless a run, the project's `compress` setting, or an explicit
+`compress` pass asks for it.
 Records, IDs, byte counts, SHA-256 digests, and retained manifests stay unchanged,
 and every Ocura OSS reader returns the original bytes. The runtime remains
 standard-library only. Compression manages captured logs; it does not manage
@@ -30,6 +31,18 @@ ocura-oss run --compress-min-bytes 4194304 -- python train.py
 nonnegative byte count; `0` considers every captured log, while still requiring
 the savings threshold. `--no-capture` retains no logs and has nothing to compress.
 The Python equivalent is `run(compress=True, compression_min_bytes=N)`.
+
+### Compressing every run in a project
+
+```console
+ocura-oss settings compress=on
+```
+
+With this setting stored, every `run` in the project behaves as if `--compress`
+were given, with the same 1 MiB threshold and 10% saving. `run --no-compress`, or
+`run(compress=False)` in Python, keeps one run's logs raw. Set
+`OCURA_OSS_COMPRESS=on` to choose it for every project that has not stored a value.
+The setting is read when a run starts; it never converts older logs.
 
 There is no timer, background service, or scan of old runs. The work happens
 before `run` returns and grows with the log's size; high-entropy output costs the
@@ -139,6 +152,12 @@ still exists. Already compressed or high-entropy output may save nothing.
 
 Gzip backing is a **physical storage extension**: records and their schema
 version do not change when logs are compressed or restored.
+
+A later version may store a log in another encoding, as the recorded name plus a
+suffix of its own. This version leaves such a file alone: `verify` names it in a
+`newer record:` line and still reports `integrity: ok`, the file is not reported
+as orphaned, and `logs` stops with `needs a newer ocura-oss`. Its contents are
+not checked until a version that reads the encoding verifies the ledger.
 
 Retained manifests cover the original records and digests, so they remain valid
 across compression and decompression. The hash still checks local consistency;

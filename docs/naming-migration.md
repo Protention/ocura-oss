@@ -1,6 +1,6 @@
 # Names before 0.8
 
-Version 0.8.0.
+Version 0.9.0.
 
 A **ledger** identifies the project-local state. A **run record** retains one
 command attempt and its outcome. A **branch point** identifies terminal evidence
@@ -30,7 +30,7 @@ old name to its replacement for updating scripts and callers.
 
 Pathway IDs, the `pathways/`, `attempts/`, and `logs/` directories, and all other
 keys are unchanged. Version 0.8 does not read or convert state from 0.7 or
-earlier; see [upgrading from earlier versions](state-and-verification.md#upgrading-from-earlier-versions).
+earlier; see [upgrading from 0.7 and earlier](state-and-verification.md#upgrading-from-07-and-earlier).
 
 ## CLI
 

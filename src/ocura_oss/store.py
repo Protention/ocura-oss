@@ -28,9 +28,33 @@ _ENVELOPE_KEYS = {"schema_version", "kind", "payload", "checksum"}
 _HASH_CHUNK = 1024 * 1024
 _BUSY_RETRIES = 200
 _BUSY_DELAY = 0.01
+_REPLACE_RETRIES = 25
 _SHOWN_MATCHES = 5
 
 _T = TypeVar("_T")
+
+UPGRADE_ENV = "OCURA_OSS_UPGRADE"
+# Each setting and its accepted values; the first is the default.
+SETTINGS = {"upgrade": ("off", "overwrite"), "compress": ("off", "on")}
+
+
+def check_setting(key: str, value: str) -> None:
+    """Raise StoreError unless *value* is one this version accepts for *key*."""
+    if key not in SETTINGS or value not in SETTINGS[key]:
+        known = "; ".join(f"{name}={'|'.join(values)}" for name, values in SETTINGS.items())
+        raise StoreError(
+            f"unknown setting {key}={value}; choose from {known}", code="invalid_input"
+        )
+
+
+class NewerRecord(StoreError):
+    """A record is intact, but reading it needs a newer version of the package."""
+
+    def __init__(self, message: str, *, needs: tuple[str, ...], payload: dict, checksum: str):
+        super().__init__(message, code="newer_record")
+        self.needs = needs
+        self.payload = payload
+        self.checksum = checksum
 
 
 @dataclass(frozen=True)
@@ -53,6 +77,8 @@ class StateVerification:
     logs_checked: int
     problems: tuple[tuple[str, str], ...]
     running_attempts: tuple[str, ...] = ()
+    # Intact records this version cannot interpret, each with what it needs.
+    newer: tuple[tuple[str, str], ...] = ()
     abandoned_attempts: tuple[str, ...] = ()
     manifest: tuple[str, ...] = ()
     digest: str | None = None
@@ -117,18 +143,21 @@ class RunPage:
 
     ``unfinished_attempts`` counts runs not finished when the page was read.
     They can finish behind its cursor, so a walk is complete only if every page
-    reported none.
+    reported none. ``newer_runs`` counts runs left out of the page because they
+    need a newer version of the package to read.
     """
 
     runs: tuple[ListedRun, ...]
     next_after: str | None
     unfinished_attempts: int
+    newer_runs: int = 0
 
     def to_dict(self) -> dict:
         return {
             "runs": [item.to_dict() for item in self.runs],
             "next_after": self.next_after,
             "unfinished_attempts": self.unfinished_attempts,
+            "newer_runs": self.newer_runs,
             "verification": {"scope": "records", "logs_checked": 0},
         }
 
@@ -184,6 +213,7 @@ class Store:
         self.attempts_dir = self.state_dir / "attempts"
         self.logs_dir = self.state_dir / "logs"
         self.ledger_path = self.state_dir / "ledger.json"
+        self.settings_path = self.state_dir / "settings.json"
 
     def exists(self) -> bool:
         """Return whether the state directory exists."""
@@ -215,6 +245,113 @@ class Store:
         raise StoreError(
             f"{missing}; run `ocura-oss init` there to create it", code="state_not_found"
         )
+
+    def settings(self) -> dict[str, str]:
+        """Return the settings stored for this project; empty when none were set."""
+        stored = self._stored_settings()
+        return {key: stored[key] for key in SETTINGS if stored.get(key) in SETTINGS[key]}
+
+    def _stored_settings(self) -> dict:
+        try:
+            stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StoreError(f"unreadable settings file: {self.settings_path}") from exc
+        if not isinstance(stored, dict):
+            raise StoreError(f"settings file must hold an object: {self.settings_path}")
+        return stored
+
+    def setting(self, key: str) -> str:
+        """Return a setting: the project's value, else the environment's, else the default."""
+        chosen = self.settings().get(key)
+        if chosen is None:
+            chosen = os.environ.get(f"OCURA_OSS_{key.upper()}")
+        return chosen if chosen in SETTINGS[key] else SETTINGS[key][0]
+
+    def set_setting(self, key: str, value: str) -> None:
+        """Store one project setting."""
+        self._require_writable()
+        check_setting(key, value)
+        # Values this version does not know are a later version's: they are kept.
+        text = json.dumps({**self._stored_settings(), key: value}, indent=2) + "\n"
+        _atomic_write_bytes(self.settings_path, text.encode("utf-8"))
+
+    def older_format(self) -> int | None:
+        """Return the ledger record's format when this version would write a newer one.
+
+        An upgrade rewrites the ledger record last, so this stays set until every
+        record has been converted.
+        """
+        version = self._read_stored(self.ledger_path, "ledger")[0]
+        return version if version < model.SCHEMA_VERSION else None
+
+    def upgrade_if_enabled(self) -> tuple[int, int] | None:
+        """Upgrade an older ledger in place when its ``upgrade`` setting is ``overwrite``."""
+        if self.archive or self.setting("upgrade") != "overwrite" or self.older_format() is None:
+            return None
+        return self.upgrade_records()
+
+    def upgrade_records(self) -> tuple[int, int]:
+        """Rewrite records of an older format in the current one; logs are not touched.
+
+        Each record is replaced atomically and the conversion is deterministic, so
+        a stopped or concurrent upgrade leaves every record readable and a later
+        one finishes the work. Returns ``(converted, busy)``: a busy record could
+        not be replaced now, or belongs to a run an earlier version is still
+        recording and will write in its own format. Either holds the ledger
+        record back, so the next upgrade picks up what is left.
+        """
+        self._require_writable()
+        directories = (
+            (self.pathways_dir, "pathway"),
+            (self.runs_dir, "run"),
+            (self.branch_points_dir, "branch_point"),
+        )
+
+        def convert(*chosen: tuple[Path, str]) -> tuple[int, int]:
+            converted = busy = 0
+            for path, kind in chosen or [
+                (path, kind)
+                for directory, kind in directories
+                for path in sorted(directory.glob("*.json"))
+            ]:
+                try:
+                    version, payload, _checksum = self._read_stored(path, kind)
+                except StoreError as exc:
+                    # Damaged or newer records stay as they are, for verify to report.
+                    busy += exc.code in ("permission_denied", "io_error")
+                    continue
+                if version >= model.SCHEMA_VERSION:
+                    continue
+                try:
+                    working = model.working_payload(version, kind, payload)
+                    self._write_record(path, kind, working, schema=model.SCHEMA_VERSION)
+                    converted += 1
+                except OSError:
+                    busy += 1
+            return converted, busy
+
+        converted, busy = convert()
+        busy += self._older_recorders()
+        if not busy:
+            converted += convert((self.ledger_path, "ledger"))[0]
+            # A `branch` or a short run may have written the older format during
+            # the pass above; from here on new records are written in this one.
+            converted += convert()[0]
+        return converted, busy
+
+    def _older_recorders(self) -> int:
+        """Count runs still being recorded by a version that writes an older format."""
+        count = 0
+        for lock in self.attempts_dir.glob("*.lock"):
+            if locking.is_held(lock):
+                try:
+                    version = self._read_stored(lock.with_suffix(".json"), "attempt")[0]
+                except StoreError:
+                    version = 0  # Not written yet, or unreadable: assume an older writer.
+                count += version < model.SCHEMA_VERSION
+        return count
 
     def _check_archive(self) -> None:
         count = sum(1 for _ in self.attempts_dir.glob("*.json")) if self.archive else 0
@@ -351,7 +488,14 @@ class Store:
         if branch_point_id in seen_ids:
             raise StoreError("cyclic lineage reference in state records", code="integrity_error")
         seen = seen_ids | {branch_point_id}
-        record = self._load_run(branch_point.run_id, seen, validated)
+        try:
+            record = self._load_run(branch_point.run_id, seen, validated)
+        except NewerRecord:
+            # The branch point still places its run on a pathway, so what follows
+            # from a run this version cannot read keeps a lineage that can be checked.
+            self._load_pathway(branch_point.pathway_id, seen, validated)
+            validated[branch_point_id] = branch_point
+            return branch_point
         if record.pathway_id != branch_point.pathway_id:
             raise StoreError(
                 f"branch point {branch_point_id} and its run disagree on the pathway",
@@ -580,10 +724,13 @@ class Store:
         # now or is stamped at or after now, which only later pages list.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
+        # A branch point that needs a newer version cannot be placed in the order,
+        # so the first page counts it.
+        unplaced: list[Path] = []
         candidates = (
             point
             for point in self._iter_typed(
-                self.branch_points_dir, "branch_point", model.branch_point_from_payload
+                self.branch_points_dir, "branch_point", model.branch_point_from_payload, unplaced
             )
             if (pathway_id is None or point.pathway_id == pathway_id)
             and (outcome is None or point.outcome is outcome)
@@ -597,14 +744,20 @@ class Store:
             shown, more = selected[:limit], len(selected) > limit
         validated: dict[str, object] = {}
         runs = []
+        newer = 0 if after else len(unplaced)
         for point in shown:
-            self._load_branch_point(point.id, frozenset(), validated)
-            record = self._load_run(point.run_id, frozenset(), validated)
+            try:
+                self._load_branch_point(point.id, frozenset(), validated)
+                record = self._load_run(point.run_id, frozenset(), validated)
+            except NewerRecord:
+                newer += 1  # verify names each record and what it needs.
+                continue
             runs.append(ListedRun(branch_point_id=point.id, run=model.run_summary_from_run(record)))
         return RunPage(
             runs=tuple(runs),
             next_after=shown[-1].id if more else None,
             unfinished_attempts=unfinished,
+            newer_runs=newer,
         )
 
     def inspect_run(self, run_id: str) -> RunInspection:
@@ -906,20 +1059,23 @@ class Store:
         ledger = self.load_ledger()
         problems: list[tuple[str, str]] = []
         manifest = [
-            _manifest_line("ledger", ledger.id, self._read_envelope(self.ledger_path, "ledger"))
+            _manifest_line("ledger", ledger.id, self._read_stored(self.ledger_path, "ledger")[2])
         ]
+        newer: list[tuple[str, NewerRecord]] = []
+        # Understood records whose lineage runs through a newer one.
+        beyond: list[tuple[str, str]] = []
         # Shared by every lineage check below, so each record is validated once.
         validated: dict[str, object] = {}
         # A run writes its attempt before its logs and its run before its
         # branch point, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
         log_entries = sorted(self.logs_dir.iterdir()) if self.logs_dir.is_dir() else []
-        attempts = self._scan_attempts(problems)
+        attempts = self._scan_attempts(problems, newer)
         pathways = self._scan_records(
-            self.pathways_dir, "pathway", model.pathway_from_payload, problems, manifest
+            self.pathways_dir, "pathway", model.pathway_from_payload, problems, manifest, newer
         )
         records = self._scan_records(
-            self.runs_dir, "run", model.run_from_payload, problems, manifest
+            self.runs_dir, "run", model.run_from_payload, problems, manifest, newer
         )
         branch_points = self._scan_records(
             self.branch_points_dir,
@@ -927,10 +1083,13 @@ class Store:
             model.branch_point_from_payload,
             problems,
             manifest,
+            newer,
         )
         for pathway in pathways:
             try:
                 self._load_pathway(pathway.id, frozenset(), validated)
+            except NewerRecord as exc:
+                beyond.append((f"{pathway.id}.json", f"refers to a newer record: {exc}"))
             except StoreError as exc:
                 problems.append((f"{pathway.id}.json", str(exc)))
         logs_checked = 0
@@ -956,6 +1115,8 @@ class Store:
         for record in records:
             try:
                 self._load_run(record.id, frozenset(), validated)
+            except NewerRecord as exc:
+                beyond.append((f"{record.id}.json", f"refers to a newer record: {exc}"))
             except StoreError as exc:
                 problems.append((f"{record.id}.json", str(exc)))
             for relative, size_field, digest_field in _recorded_logs(record):
@@ -964,17 +1125,27 @@ class Store:
                     self._verify_log(record.id, relative, size_field, digest_field)
                     logs_checked += 1
                 except StoreError as exc:
-                    problems.append((f"{record.id}.json", str(exc)))
+                    # A log in a later version's encoding is left for that version.
+                    unread = beyond if exc.code == "newer_record" else problems
+                    unread.append((f"{record.id}.json", str(exc)))
+        # A newer record's logs belong to it even though their contents go unchecked.
+        covered = {attempt.id for attempt, _state in attempts}
+        for name, found in newer:
+            covered.add(str(found.payload.get("run_id")))
+            for relative in model.stream_logs(found.payload):
+                with contextlib.suppress(StoreError):
+                    referenced_logs.add(self._evidence_path(name, relative))
         self._report_orphaned_logs(log_entries, referenced_logs, problems)
         for branch_point in branch_points:
             try:
                 self._load_branch_point(branch_point.id, frozenset(), validated)
+            except NewerRecord as exc:
+                beyond.append((f"{branch_point.id}.json", f"refers to a newer record: {exc}"))
             except StoreError as exc:
                 problems.append((f"{branch_point.id}.json", str(exc)))
-        self._report_missing_branch_points(
-            records, branch_points, {attempt.id for attempt, _state in attempts}, problems
-        )
-        if all(item.id != ledger.default_pathway_id for item in pathways):
+        self._report_missing_branch_points(records, branch_points, covered, problems)
+        known = [item.id for item in pathways] + [name[:-5] for name, _exc in newer]
+        if ledger.default_pathway_id not in known:
             problems.append(("ledger.json", "default pathway record is missing"))
         manifest.sort()
         current = set(manifest)
@@ -996,6 +1167,7 @@ class Store:
             problems=tuple(problems),
             running_attempts=tuple(running),
             abandoned_attempts=tuple(abandoned),
+            newer=(*((name, ", ".join(exc.needs)) for name, exc in newer), *beyond),
             manifest=tuple(manifest) if intact else (),
             digest=manifest_digest(manifest) if intact else None,
         )
@@ -1073,12 +1245,33 @@ class Store:
         return record
 
     def _read_envelope(self, path: Path, expected_kind: str) -> dict:
+        """Read a record of any readable format in the shape the package works with."""
+        version, payload, _checksum = self._read_stored(path, expected_kind)
+        try:
+            return model.working_payload(version, expected_kind, payload)
+        except model.ValidationError as exc:
+            raise StoreError(
+                f"invalid {_label(expected_kind)} record {path.name}: {exc}", code="integrity_error"
+            ) from exc
+
+    def _read_stored(self, path: Path, expected_kind: str) -> tuple[int, dict, str]:
+        """Check a record's envelope; return its format, stored payload, and checksum."""
         if not path.is_file():
             raise StoreError(
                 f"missing {_label(expected_kind)} record: {path}", code="record_not_found"
             )
+        retries = 0 if expected_kind == "attempt" else _REPLACE_RETRIES
         try:
-            raw = path.read_bytes()
+            while True:
+                try:
+                    raw = path.read_bytes()
+                    break
+                except PermissionError:
+                    # Windows briefly denies reading a record an upgrade is replacing.
+                    if not retries:
+                        raise
+                    retries -= 1
+                    time.sleep(_BUSY_DELAY)
             data = json.loads(raw.decode("utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             code = classify_os_error(exc) if isinstance(exc, OSError) else "integrity_error"
@@ -1096,7 +1289,7 @@ class Store:
                 f"malformed {_label(expected_kind)} record {path.name}: bad schema version",
                 code="integrity_error",
             )
-        if schema_version != model.SCHEMA_VERSION:
+        if schema_version < model.OLDEST_READABLE_SCHEMA:
             writers = {1: ("0.4 and earlier", "0.5"), 2: ("0.5 to 0.7", "0.8")}
             hint = ""
             if schema_version in writers:
@@ -1137,15 +1330,44 @@ class Store:
                 f"malformed {_label(expected_kind)} record {path.name}: payload must be an object",
                 code="integrity_error",
             )
-        return data["payload"]
+        needs = model.unmet_requirements(schema_version, data["payload"])
+        if needs:
+            # Its checksum holds, so it is intact: only its meaning is out of reach.
+            raise NewerRecord(
+                f"{_label(expected_kind)} record {path.name} needs a newer ocura-oss"
+                f" ({', '.join(needs)})",
+                needs=needs,
+                payload=data["payload"],
+                checksum=checksum["value"],
+            )
+        return schema_version, data["payload"], checksum["value"]
 
-    def _write_record(self, path: Path, kind: str, payload: dict) -> None:
+    def _ledger_schema(self) -> int:
+        """Return the schema this ledger's records are written in.
+
+        A ledger an earlier version wrote keeps that version's schema until it is
+        upgraded, so that version can still read everything recorded into it.
+        """
+        try:
+            stored = self._read_stored(self.ledger_path, "ledger")[0]
+        except StoreError as exc:
+            if exc.code != "record_not_found":
+                raise  # Unreadable just now: a guess could write what 0.8 cannot read.
+            return model.SCHEMA_VERSION  # No ledger yet: a new one starts current.
+        return min(stored, model.SCHEMA_VERSION)
+
+    def _write_record(
+        self, path: Path, kind: str, payload: dict, *, schema: int | None = None
+    ) -> None:
         self._require_writable()
+        schema = self._ledger_schema() if schema is None else schema
+        if schema >= 4:
+            payload = model.stored_payload(kind, payload)
         envelope = {
-            "schema_version": model.SCHEMA_VERSION,
+            "schema_version": schema,
             "kind": kind,
             "payload": payload,
-            "checksum": model.checksum_for(model.SCHEMA_VERSION, kind, payload),
+            "checksum": model.checksum_for(schema, kind, payload),
         }
         text = json.dumps(envelope, ensure_ascii=False, indent=2) + "\n"
         _atomic_write_bytes(path, text.encode("utf-8"))
@@ -1156,10 +1378,18 @@ class Store:
         return list(self._iter_typed(directory, kind, converter))
 
     def _iter_typed(
-        self, directory: Path, kind: str, converter: Callable[[dict], _T]
+        self,
+        directory: Path,
+        kind: str,
+        converter: Callable[[dict], _T],
+        newer: list[Path] | None = None,
     ) -> Iterator[_T]:
         for path in directory.glob("*.json"):
-            yield self._load_listed(path, kind, converter)
+            try:
+                yield self._load_listed(path, kind, converter)
+            except NewerRecord:
+                if newer is not None:
+                    newer.append(path)
 
     def _load_listed(
         self,
@@ -1169,7 +1399,14 @@ class Store:
         manifest: list[str] | None = None,
     ) -> _T:
         try:
-            payload = self._read_envelope(path, kind)
+            version, stored, checksum = self._read_stored(path, kind)
+            payload = model.working_payload(version, kind, stored)
+        except NewerRecord:
+            raise
+        except model.ValidationError as exc:
+            raise StoreError(
+                f"invalid {_label(kind)} record {path.name}: {exc}", code="integrity_error"
+            ) from exc
         except StoreError as exc:
             raise StoreError(
                 f"invalid {_label(kind)} record {path.name}: {exc}",
@@ -1190,7 +1427,7 @@ class Store:
                 code="integrity_error",
             )
         if manifest is not None:
-            manifest.append(_manifest_line(kind, path.stem, payload))
+            manifest.append(_manifest_line(kind, path.stem, checksum))
         return record
 
     def _scan_records(
@@ -1200,14 +1437,24 @@ class Store:
         converter: Callable[[dict], _T],
         problems: list[tuple[str, str]],
         manifest: list[str] | None = None,
+        newer: list[tuple[str, NewerRecord]] | None = None,
     ) -> list[_T]:
-        """Collect valid records and report invalid ones instead of raising."""
+        """Collect valid records and report invalid ones instead of raising.
+
+        A record that needs a newer version is intact, not invalid: it goes to
+        *newer* and into the manifest, and is left out of the result.
+        """
         records: list[_T] = []
         if not directory.is_dir():
             return records
         for path in sorted(directory.glob("*.json")):
             try:
                 records.append(self._load_listed(path, kind, converter, manifest))
+            except NewerRecord as exc:
+                if newer is not None:
+                    newer.append((path.name, exc))
+                if manifest is not None:
+                    manifest.append(_manifest_line(kind, path.stem, exc.checksum))
             except StoreError as exc:
                 problems.append((path.name, str(exc)))
         return records
@@ -1231,7 +1478,9 @@ class Store:
             time.sleep(_BUSY_DELAY)
 
     def _scan_attempts(
-        self, problems: list[tuple[str, str]]
+        self,
+        problems: list[tuple[str, str]],
+        newer: list[tuple[str, NewerRecord]] | None = None,
     ) -> list[tuple[model.Attempt, model.AttemptState]]:
         """Collect unfinished attempts and whether each is still being recorded."""
         attempts: list[tuple[model.Attempt, model.AttemptState]] = []
@@ -1241,7 +1490,10 @@ class Store:
             try:
                 attempt = self._load_attempt(path)
             except StoreError as exc:
-                problems.append((f"attempts/{path.name}", str(exc)))
+                if isinstance(exc, NewerRecord) and newer is not None:
+                    newer.append((f"attempts/{path.name}", exc))
+                else:
+                    problems.append((f"attempts/{path.name}", str(exc)))
                 continue
             if attempt is None:
                 continue
@@ -1269,8 +1521,12 @@ class Store:
                 continue
             # A gzip is the physical representation of the logical .log path
             # retained in the run. Both copies can exist across a crashed
-            # storage transition; _verify_log checks both in that case.
-            if entry.suffix == ".gz" and logical.with_suffix("") in referenced_logs:
+            # storage transition; _verify_log checks both in that case. A log
+            # in a later version's encoding belongs to its run the same way.
+            recorded = logical.with_suffix("")
+            if recorded in referenced_logs and (
+                entry.suffix == ".gz" or logstorage.newer_encoding(recorded) == logical
+            ):
                 continue
             if entry.is_dir():
                 problems.append((f"logs/{entry.name}", "unexpected directory under logs/"))
@@ -1374,8 +1630,7 @@ def manifest_digest(entries: Iterable[str]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _manifest_line(kind: str, record_id: str, payload: dict) -> str:
-    checksum = model.checksum_for(model.SCHEMA_VERSION, kind, payload)["value"]
+def _manifest_line(kind: str, record_id: str, checksum: str) -> str:
     return f"{kind} {record_id} {checksum}"
 
 
