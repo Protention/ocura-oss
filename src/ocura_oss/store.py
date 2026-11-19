@@ -28,6 +28,7 @@ _ENVELOPE_KEYS = {"schema_version", "kind", "payload", "checksum"}
 _HASH_CHUNK = 1024 * 1024
 _BUSY_RETRIES = 200
 _BUSY_DELAY = 0.01
+_REPLACE_RETRIES = 25
 _SHOWN_MATCHES = 5
 
 _T = TypeVar("_T")
@@ -35,6 +36,15 @@ _T = TypeVar("_T")
 UPGRADE_ENV = "OCURA_OSS_UPGRADE"
 # Each setting and its accepted values; the first is the default.
 SETTINGS = {"upgrade": ("off", "overwrite"), "compress": ("off", "on")}
+
+
+def check_setting(key: str, value: str) -> None:
+    """Raise StoreError unless *value* is one this version accepts for *key*."""
+    if key not in SETTINGS or value not in SETTINGS[key]:
+        known = "; ".join(f"{name}={'|'.join(values)}" for name, values in SETTINGS.items())
+        raise StoreError(
+            f"unknown setting {key}={value}; choose from {known}", code="invalid_input"
+        )
 
 
 class NewerRecord(StoreError):
@@ -238,6 +248,10 @@ class Store:
 
     def settings(self) -> dict[str, str]:
         """Return the settings stored for this project; empty when none were set."""
+        stored = self._stored_settings()
+        return {key: stored[key] for key in SETTINGS if stored.get(key) in SETTINGS[key]}
+
+    def _stored_settings(self) -> dict:
         try:
             stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -246,7 +260,7 @@ class Store:
             raise StoreError(f"unreadable settings file: {self.settings_path}") from exc
         if not isinstance(stored, dict):
             raise StoreError(f"settings file must hold an object: {self.settings_path}")
-        return {key: stored[key] for key in SETTINGS if stored.get(key) in SETTINGS[key]}
+        return stored
 
     def setting(self, key: str) -> str:
         """Return a setting: the project's value, else the environment's, else the default."""
@@ -258,12 +272,9 @@ class Store:
     def set_setting(self, key: str, value: str) -> None:
         """Store one project setting."""
         self._require_writable()
-        if key not in SETTINGS or value not in SETTINGS[key]:
-            known = "; ".join(f"{name}={'|'.join(values)}" for name, values in SETTINGS.items())
-            raise StoreError(
-                f"unknown setting {key}={value}; choose from {known}", code="invalid_input"
-            )
-        text = json.dumps({**self.settings(), key: value}, indent=2) + "\n"
+        check_setting(key, value)
+        # Values this version does not know are a later version's: they are kept.
+        text = json.dumps({**self._stored_settings(), key: value}, indent=2) + "\n"
         _atomic_write_bytes(self.settings_path, text.encode("utf-8"))
 
     def older_format(self) -> int | None:
@@ -292,34 +303,42 @@ class Store:
         record back, so the next upgrade picks up what is left.
         """
         self._require_writable()
-        converted = busy = 0
         directories = (
             (self.pathways_dir, "pathway"),
             (self.runs_dir, "run"),
             (self.branch_points_dir, "branch_point"),
         )
-        paths = [
-            (path, kind)
-            for directory, kind in directories
-            for path in sorted(directory.glob("*.json"))
-        ]
-        for path, kind in [*paths, (self.ledger_path, "ledger")]:
-            if kind == "ledger":
-                busy += self._older_recorders()
-                if busy:
-                    break
-            try:
-                version, payload, _checksum = self._read_stored(path, kind)
-            except StoreError:
-                continue  # Damaged or newer: left exactly as it is, for verify to report.
-            if version >= model.SCHEMA_VERSION:
-                continue
-            try:
-                working = model.working_payload(version, kind, payload)
-                self._write_record(path, kind, working, schema=model.SCHEMA_VERSION)
-                converted += 1
-            except OSError:
-                busy += 1
+
+        def convert(*chosen: tuple[Path, str]) -> tuple[int, int]:
+            converted = busy = 0
+            for path, kind in chosen or [
+                (path, kind)
+                for directory, kind in directories
+                for path in sorted(directory.glob("*.json"))
+            ]:
+                try:
+                    version, payload, _checksum = self._read_stored(path, kind)
+                except StoreError as exc:
+                    # Damaged or newer records stay as they are, for verify to report.
+                    busy += exc.code in ("permission_denied", "io_error")
+                    continue
+                if version >= model.SCHEMA_VERSION:
+                    continue
+                try:
+                    working = model.working_payload(version, kind, payload)
+                    self._write_record(path, kind, working, schema=model.SCHEMA_VERSION)
+                    converted += 1
+                except OSError:
+                    busy += 1
+            return converted, busy
+
+        converted, busy = convert()
+        busy += self._older_recorders()
+        if not busy:
+            converted += convert((self.ledger_path, "ledger"))[0]
+            # A `branch` or a short run may have written the older format during
+            # the pass above; from here on new records are written in this one.
+            converted += convert()[0]
         return converted, busy
 
     def _older_recorders(self) -> int:
@@ -705,10 +724,13 @@ class Store:
         # now or is stamped at or after now, which only later pages list.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
+        # A branch point that needs a newer version cannot be placed in the order,
+        # so the first page counts it.
+        unplaced: list[Path] = []
         candidates = (
             point
             for point in self._iter_typed(
-                self.branch_points_dir, "branch_point", model.branch_point_from_payload
+                self.branch_points_dir, "branch_point", model.branch_point_from_payload, unplaced
             )
             if (pathway_id is None or point.pathway_id == pathway_id)
             and (outcome is None or point.outcome is outcome)
@@ -722,7 +744,7 @@ class Store:
             shown, more = selected[:limit], len(selected) > limit
         validated: dict[str, object] = {}
         runs = []
-        newer = 0
+        newer = 0 if after else len(unplaced)
         for point in shown:
             try:
                 self._load_branch_point(point.id, frozenset(), validated)
@@ -1048,7 +1070,7 @@ class Store:
         # branch point, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
         log_entries = sorted(self.logs_dir.iterdir()) if self.logs_dir.is_dir() else []
-        attempts = self._scan_attempts(problems)
+        attempts = self._scan_attempts(problems, newer)
         pathways = self._scan_records(
             self.pathways_dir, "pathway", model.pathway_from_payload, problems, manifest, newer
         )
@@ -1122,7 +1144,8 @@ class Store:
             except StoreError as exc:
                 problems.append((f"{branch_point.id}.json", str(exc)))
         self._report_missing_branch_points(records, branch_points, covered, problems)
-        if all(item.id != ledger.default_pathway_id for item in pathways):
+        known = [item.id for item in pathways] + [name[:-5] for name, _exc in newer]
+        if ledger.default_pathway_id not in known:
             problems.append(("ledger.json", "default pathway record is missing"))
         manifest.sort()
         current = set(manifest)
@@ -1237,8 +1260,18 @@ class Store:
             raise StoreError(
                 f"missing {_label(expected_kind)} record: {path}", code="record_not_found"
             )
+        retries = 0 if expected_kind == "attempt" else _REPLACE_RETRIES
         try:
-            raw = path.read_bytes()
+            while True:
+                try:
+                    raw = path.read_bytes()
+                    break
+                except PermissionError:
+                    # Windows briefly denies reading a record an upgrade is replacing.
+                    if not retries:
+                        raise
+                    retries -= 1
+                    time.sleep(_BUSY_DELAY)
             data = json.loads(raw.decode("utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             code = classify_os_error(exc) if isinstance(exc, OSError) else "integrity_error"
@@ -1317,7 +1350,9 @@ class Store:
         """
         try:
             stored = self._read_stored(self.ledger_path, "ledger")[0]
-        except StoreError:
+        except StoreError as exc:
+            if exc.code != "record_not_found":
+                raise  # Unreadable just now: a guess could write what 0.8 cannot read.
             return model.SCHEMA_VERSION  # No ledger yet: a new one starts current.
         return min(stored, model.SCHEMA_VERSION)
 
@@ -1343,11 +1378,18 @@ class Store:
         return list(self._iter_typed(directory, kind, converter))
 
     def _iter_typed(
-        self, directory: Path, kind: str, converter: Callable[[dict], _T]
+        self,
+        directory: Path,
+        kind: str,
+        converter: Callable[[dict], _T],
+        newer: list[Path] | None = None,
     ) -> Iterator[_T]:
         for path in directory.glob("*.json"):
-            with contextlib.suppress(NewerRecord):
+            try:
                 yield self._load_listed(path, kind, converter)
+            except NewerRecord:
+                if newer is not None:
+                    newer.append(path)
 
     def _load_listed(
         self,
@@ -1436,7 +1478,9 @@ class Store:
             time.sleep(_BUSY_DELAY)
 
     def _scan_attempts(
-        self, problems: list[tuple[str, str]]
+        self,
+        problems: list[tuple[str, str]],
+        newer: list[tuple[str, NewerRecord]] | None = None,
     ) -> list[tuple[model.Attempt, model.AttemptState]]:
         """Collect unfinished attempts and whether each is still being recorded."""
         attempts: list[tuple[model.Attempt, model.AttemptState]] = []
@@ -1446,7 +1490,10 @@ class Store:
             try:
                 attempt = self._load_attempt(path)
             except StoreError as exc:
-                problems.append((f"attempts/{path.name}", str(exc)))
+                if isinstance(exc, NewerRecord) and newer is not None:
+                    newer.append((f"attempts/{path.name}", exc))
+                else:
+                    problems.append((f"attempts/{path.name}", str(exc)))
                 continue
             if attempt is None:
                 continue

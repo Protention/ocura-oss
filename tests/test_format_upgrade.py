@@ -102,8 +102,12 @@ class OlderLedgerTests(unittest.TestCase):
         self.assertEqual(self.store.setting("upgrade"), "off")
         os.environ[UPGRADE_ENV] = "overwrite"
         self.assertEqual(self.store.setting("upgrade"), "overwrite")
+        self.store.settings_path.write_text('{"retention": "30d"}', "utf-8")
         self.store.set_setting("upgrade", "off")
         self.assertEqual(self.store.setting("upgrade"), "off")
+        # A setting only a later version knows is kept.
+        stored = json.loads(self.store.settings_path.read_text("utf-8"))
+        self.assertEqual(stored, {"retention": "30d", "upgrade": "off"})
         with self.assertRaises(StoreError):
             self.store.set_setting("upgrade", "sometimes")
 
@@ -137,12 +141,34 @@ class OlderLedgerTests(unittest.TestCase):
             self.assertEqual(self.store.upgrade_records(), (1, 0))
         self.assertIsNone(self.store.older_format())
 
+    def test_upgrade_converts_what_was_recorded_while_it_ran(self):
+        path = self.store.runs_dir / f"{BASELINE}.json"
+        late = path.read_bytes()  # Written back in schema 3 just before the ledger record.
+        with mock.patch.object(self.store, "_older_recorders", lambda: path.write_bytes(late) * 0):
+            self.assertEqual(self.store.upgrade_records(), (14, 0))
+        self.assertEqual(self.formats(), {4})
+
+    def test_other_records_needing_a_newer_version_are_not_damage(self):
+        default = self.store.pathways_dir / f"{self.store.load_ledger().default_pathway_id}.json"
+        point = min(self.store.branch_points_dir.glob("*.json"))
+        for path, kind in ((default, "pathway"), (point, "branch_point")):
+            write_record(path, 5, kind, json.loads(path.read_text("utf-8"))["payload"])
+        attempt = self.store._attempt_path(model.make_id("run"))
+        attempt.parent.mkdir()
+        write_record(attempt, 5, "attempt", {})
+        report = ocura_oss.verify(self.root)
+        self.assertTrue(report.ok, report.problems)
+        self.assertIn((f"attempts/{attempt.name}", "schema 5"), report.newer)
+        page = self.store.list_runs()
+        self.assertEqual((len(page.runs), page.newer_runs), (0, 5))
+
     def test_record_needing_a_newer_version_is_named_and_left_alone(self):
         path = self.store.runs_dir / f"{BASELINE}.json"
         payload = json.loads(path.read_text("utf-8"))["payload"]
         cases = (
             (4, {**payload, "requires": ["terminal-capture"]}, "terminal-capture"),
             (5, payload, "schema 5"),
+            (4, {**payload, "requires": [{"name": "x"}]}, "a later form of `requires`"),
         )
         for schema_version, working, needs in cases:
             with self.subTest(needs=needs):

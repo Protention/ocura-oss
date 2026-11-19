@@ -130,7 +130,7 @@ ocura-oss settings upgrade=overwrite     # this project, stored in .ocura-oss/se
 OCURA_OSS_UPGRADE=overwrite              # every project used from this environment
 ```
 
-The next `run`, `branch`, or `recover` then rewrites each schema 3 record in schema 4 and reports how many it converted. From then on new records are written in schema 4. Read commands and `--archive` never convert anything.
+The next `run`, `branch`, or `recover` then rewrites each schema 3 record in schema 4 and reports how many it converted. From then on new records are written in schema 4. The upgrade happens as that command starts, so it is done even if the command then stops on a bad argument. Read commands and `--archive` never convert anything.
 
 - Record IDs, log files, and what each record says are unchanged. `compare` gives the same result before and after.
 - Each record is replaced in one step and the ledger record is converted last. An upgrade that is interrupted leaves a ledger that verifies, and the next recording command finishes it.

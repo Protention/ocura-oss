@@ -42,7 +42,7 @@ With this setting stored, every `run` in the project behaves as if `--compress`
 were given, with the same 1 MiB threshold and 10% saving. `run --no-compress`, or
 `run(compress=False)` in Python, keeps one run's logs raw. Set
 `OCURA_OSS_COMPRESS=on` to choose it for every project that has not stored a value.
-The setting is read when a run finishes; it never converts older logs.
+The setting is read when a run starts; it never converts older logs.
 
 There is no timer, background service, or scan of old runs. The work happens
 before `run` returns and grows with the log's size; high-entropy output costs the

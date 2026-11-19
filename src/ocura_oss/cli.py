@@ -763,10 +763,12 @@ def _ledger_notices(args: argparse.Namespace) -> list[str]:
 
 def _settings(args: argparse.Namespace) -> int:
     state = _open_store(args.root)
-    for token in args.assignments:
-        key, separator, value = token.partition("=")
+    chosen = [token.partition("=") for token in args.assignments]
+    for key, separator, value in chosen:  # Check them all before storing any.
         if not separator:
-            raise StoreError(f"expected KEY=VALUE, got {token!r}", code="invalid_input")
+            raise StoreError(f"expected KEY=VALUE, got {key!r}", code="invalid_input")
+        store.check_setting(key, value)
+    for key, _separator, value in chosen:
         state.set_setting(key, value)
     values = {key: state.setting(key) for key in store.SETTINGS}
     stored = state.settings()
@@ -863,7 +865,9 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             mirror=mirror,
             capture=not args.no_capture,
             # None leaves the choice to the project's `compress` setting.
-            compress=args.compress_min_bytes is not None or args.compress,
+            compress=(args.compress_min_bytes is not None or None)
+            if args.compress is None
+            else args.compress,
             compression_min_bytes=(
                 1_048_576 if args.compress_min_bytes is None else args.compress_min_bytes
             ),

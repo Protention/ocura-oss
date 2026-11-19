@@ -818,9 +818,9 @@ def unmet_requirements(schema_version: int, payload: Mapping[str, object]) -> tu
     if schema_version > SCHEMA_VERSION:
         return (f"schema {schema_version}",)
     required = payload.get("requires", [])
-    if not isinstance(required, list):
-        return ()
-    return tuple(sorted(str(item) for item in required if item not in FEATURES))
+    if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+        return ("a later form of `requires`",)
+    return tuple(sorted(item for item in required if item not in FEATURES))
 
 
 def stream_logs(payload: Mapping[str, object]) -> list[str]:
@@ -828,6 +828,7 @@ def stream_logs(payload: Mapping[str, object]) -> list[str]:
     streams = payload.get("streams")
     entries = list(streams.values()) if isinstance(streams, dict) else []
     logs = [entry.get("log") for entry in entries if isinstance(entry, dict)]
+    logs += [payload.get("stdout_log"), payload.get("stderr_log")]  # An attempt's names.
     return [log for log in logs if isinstance(log, str)]
 
 
