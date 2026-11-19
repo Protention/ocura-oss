@@ -142,6 +142,33 @@ jobs:
       - name: Hold a session with the installed server
         run: python .github/scripts/mcp_client.py
 
+  cross-version:
+    name: Ledger shared with ${{ matrix.release }} (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # Each release whose ledgers this version must keep usable; add one per release.
+        release: ["0.8.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: distributions
+          path: dist
+      - name: Install the built wheel
+        shell: bash
+        run: python -m pip install dist/*.whl
+      - name: Record into one ledger from the release and from this version
+        run: python .github/scripts/cross_version.py ${{ matrix.release }}
+
   quickstart:
     name: README workflow (${{ matrix.os }}, ${{ matrix.shell }})
     needs: package
