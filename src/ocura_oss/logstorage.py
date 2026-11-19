@@ -10,6 +10,7 @@ the ledger's recorded paths, byte counts, or content digests.
 
 from __future__ import annotations
 
+import collections
 import contextlib
 import gzip
 import hashlib
@@ -17,6 +18,7 @@ import io
 import os
 import tempfile
 import zlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, cast
@@ -66,6 +68,14 @@ def _paths(path: Path) -> tuple[Path, Path]:
     except (OSError, ValueError) as exc:
         raise LogStorageError(f"log path is unreadable: {raw}", code=_read_error_code(exc)) from exc
     return raw, compressed
+
+
+def select_lines(
+    source: BinaryIO, *, search: bytes | None = None, tail: int | None = None
+) -> Iterable[tuple[int, bytes]]:
+    """Number *source*'s lines from 1; keep those containing *search*, then the last *tail*."""
+    chosen = (item for item in enumerate(source, 1) if search is None or search in item[1])
+    return chosen if tail is None else collections.deque(chosen, maxlen=tail)
 
 
 def physical_path(path: Path) -> Path:

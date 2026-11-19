@@ -15,7 +15,18 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import NoReturn
 
-from ocura_oss import __version__, api, branching, demo, model, runner, store, supervise
+from ocura_oss import (
+    __version__,
+    api,
+    branching,
+    demo,
+    logstorage,
+    mcp,
+    model,
+    runner,
+    store,
+    supervise,
+)
 from ocura_oss.errors import ExecutionState, StoreError, recovery_action, with_execution
 from ocura_oss.model import ModelError
 
@@ -549,6 +560,12 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     logs_parser.add_argument(
         "--length", type=int, metavar="N", help="return at most N original bytes"
     )
+    logs_parser.add_argument("--tail", type=int, metavar="N", help="print only the last N lines")
+    logs_parser.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="print only the lines containing TEXT, each after its line number",
+    )
 
     for name, verb in (("compress", "compress"), ("decompress", "restore")):
         storage_parser = subparsers.add_parser(
@@ -622,7 +639,19 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     settings_parser.add_argument("--json", action="store_true", help="print settings as JSON")
 
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="serve read-only tools to an AI agent over the Model Context Protocol",
+        description=(
+            "Speaks the Model Context Protocol on stdin and stdout until stdin closes."
+            " An MCP client starts it; it offers runs, show, logs, compare, verify, and"
+            " attempts for the ledger under ROOT, and cannot record or change anything."
+        ),
+    )
+    mcp_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+
     for read_parser in (
+        mcp_parser,
         pathways_parser,
         branch_points_parser,
         compare_parser,
@@ -684,6 +713,9 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _demo(args)
     if name == "settings":
         return _settings(args)
+    if name == "mcp":
+        root = store.resolve_root(args.root)  # Fixed now, whatever the client does later.
+        return mcp.Server(main, root, archive=args.archive).serve()
     raise StoreError(f"unknown command: {name}", code="invalid_input")
 
 
@@ -1275,10 +1307,14 @@ def _demo(args: argparse.Namespace) -> int:
 
 
 def _logs(args: argparse.Namespace) -> int:
-    if (args.info or args.json) and (args.offset or args.length is not None):
+    lines = args.tail is not None or args.search is not None
+    if (args.info or args.json or lines) and (args.offset or args.length is not None):
         raise StoreError(
-            "log byte ranges cannot be combined with --info or --json", code="invalid_input"
+            "log byte ranges cannot be combined with --info, --json, --tail, or --search",
+            code="invalid_input",
         )
+    if args.tail is not None and args.tail < 1:
+        raise StoreError("--tail must be at least 1", code="invalid_input")
     state = _open_store(args.root, archive=args.archive)
     run_id = state.resolve_id(args.run, "run")
     if args.info or args.json:
@@ -1306,6 +1342,10 @@ def _logs(args: argparse.Namespace) -> int:
         run_id, stream=args.stream, offset=args.offset, length=args.length
     ) as source:
         try:
+            if lines:
+                search = None if args.search is None else os.fsencode(args.search)
+                for number, line in logstorage.select_lines(source, search=search, tail=args.tail):
+                    output.write(line if search is None else b"%d:%b" % (number, line))
             while chunk := source.read(1024 * 1024):
                 output.write(chunk)
             output.flush()

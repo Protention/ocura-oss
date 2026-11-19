@@ -38,6 +38,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `logs` | Read verified original log bytes or inspect storage metadata |
 | `compress` | Compress eligible finalized captured logs losslessly |
 | `decompress` | Restore finalized compressed logs to their original bytes |
+| `mcp` | Serve read-only tools to an AI agent over the Model Context Protocol |
 | `demo` | Run the complete workflow in a new retained directory |
 
 Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --version` to print the installed version.
@@ -373,6 +374,7 @@ Read one finalized run record's verified original log bytes or inspect its metad
 
 ```text
 ocura-oss logs ID [--stream stdout|stderr] [--offset N] [--length N]
+                [--tail N] [--search TEXT]
                 [--info] [--json] [--archive] [--root PATH]
 ```
 
@@ -396,6 +398,16 @@ larger windows use OS temporary storage, removed on close. RAM stays bounded for
 large content reads, with one decoding pass. A short range still scans the entire
 original stream for SHA-256 verification. A complete read of a large log needs free
 temporary space about that size; set `TMPDIR` to choose where, or read a range.
+
+`--tail N` prints only the last `N` lines. `--search TEXT` prints only the lines
+containing `TEXT`, each after its line number and a colon; the match is exact and
+case-sensitive. Together they print the last `N` matching lines. Both verify and read
+the complete stream first, and neither combines with a byte range.
+
+```console
+$ ocura-oss logs run-<id> --stream stderr --search Error --tail 1
+212:ValueError: batch must be positive
+```
 
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded
@@ -880,6 +892,45 @@ JSON mode returns `settings` (the value in effect for each setting) and `stored`
 $ ocura-oss settings upgrade=overwrite
 upgrade: overwrite (project)
 ```
+
+## `mcp`
+
+Serve the ledger's read commands to an AI agent as Model Context Protocol tools.
+
+```text
+ocura-oss mcp [--archive] [--root PATH]
+```
+
+An MCP client starts this command and talks to it on stdin and stdout; it runs
+until the client closes stdin. Most clients take an entry like this one:
+
+```json
+{"mcpServers": {"ocura-oss": {"command": "ocura-oss", "args": ["mcp", "--root", "/path/to/project"]}}}
+```
+
+Each tool runs the command of the same name and returns what it prints with `--json`.
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `runs` | `pathway`, `outcome`, `after`, `limit` | The [`runs`](#runs-and-show) page |
+| `show` | `run`, `command` | One run, as [`show`](#runs-and-show) |
+| `logs` | `run`, `stream`, `tail`, `search` | Text from one verified log |
+| `compare` | `from` | The [`compare`](#compare) result |
+| `verify` | none | The [`verify`](#verify) report |
+| `attempts` | none | Unfinished runs, as [`attempts`](#attempts) |
+
+`logs` returns the last `tail` lines (default 100). With `search` it returns the last
+`tail` lines containing that text, each after its line number. It returns at most
+64 KiB, keeping the end, and shows bytes that are not UTF-8 as replacement characters.
+
+A call that is refused, such as an unknown ID or a damaged record, returns the
+[structured error](#structured-errors) with `isError` set. A `verify` that finds
+problems returns its report without `isError`.
+
+The server is read-only. It does not offer `run`, `branch`, `recover`, or `settings`;
+an agent with a shell records runs with `ocura-oss run`. It answers one request at a
+time, so a `verify` of a large ledger delays the requests behind it. It speaks protocol
+revision 2026-07-28 and the `initialize` handshake of 2025-11-25 and earlier.
 
 ## `demo`
 
