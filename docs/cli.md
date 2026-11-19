@@ -185,7 +185,7 @@ Run one trusted local command and record terminal evidence.
 ocura-oss run [--root PATH] [--pathway ID | --from BRANCH_POINT_ID --reason TEXT]
               [--param KEY=VALUE] [--quiet] [--json] [--json-errors]
               [--no-capture] [--mask-arg POSITION] [--substitute]
-              [--compress] [--compress-min-bytes N]
+              [--compress | --no-compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
 ```
 
@@ -204,7 +204,7 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--json-errors` | flag | false | Emit JSON results and structured errors with execution state and known IDs |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
-| `--compress` | flag | false | Store this run's captured logs as gzip after finalization when that saves at least 10% |
+| `--compress`, `--no-compress` | flag | the project's [`compress` setting](#settings) | Store this run's captured logs as gzip after finalization when that saves at least 10%, or keep them raw |
 | `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original log size to compress; implies `--compress` |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
 | `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
@@ -252,7 +252,9 @@ The command runs with `shell=False` and the project root as its working director
 
 Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal as the command writes them. A command that buffers its own output when it is not writing to a terminal appears late: Python does this for `print()`, so run it as `python -u` or set `PYTHONUNBUFFERED=1`.
 
-Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given.
+Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given, or
+the project's [`compress` setting](#settings) is `on`; `--no-compress` keeps one
+run's logs raw under that setting.
 Then, after finalization, logs of at least 1 MiB (or `N`) are considered once for
 lossless gzip compression. Each must save at least 10%; small and incompressible
 logs remain raw. No older runs are scanned. Compression errors emit storage
@@ -868,8 +870,9 @@ ocura-oss settings [KEY=VALUE ...] [--root PATH] [--json]
 | Setting | Values | Default | Effect |
 | --- | --- | --- | --- |
 | `upgrade` | `off`, `overwrite` | `off` | `off` keeps a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08) in schema 3, which 0.8 also reads; storing `off` also stops the note about it. `overwrite` converts it in place on the next `run`, `branch`, or `recover` |
+| `compress` | `off`, `on` | `off` | `on` stores each run's large captured logs as gzip, as [`run --compress`](#run) does. `run --no-compress` keeps one run's logs raw |
 
-Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variable `OCURA_OSS_UPGRADE`, which sets `upgrade` for every project that has not stored one.
+Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variables `OCURA_OSS_UPGRADE` and `OCURA_OSS_COMPRESS`, which set `upgrade` and `compress` for every project that has not stored one.
 
 JSON mode returns `settings` (the value in effect for each setting) and `stored` (the values the project stored). An unknown setting or value returns exit status 2.
 

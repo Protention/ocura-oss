@@ -234,8 +234,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--compress",
-        action="store_true",
-        help="store this run's large captured logs as gzip after finalization",
+        action=argparse.BooleanOptionalAction,
+        help="store this run's large captured logs as gzip after finalization;"
+        " the project's `compress` setting decides when neither is given",
     )
     run_parser.add_argument(
         "--compress-min-bytes",
@@ -612,6 +613,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
             "Shows the project's settings, or stores each KEY=VALUE given."
             " upgrade=off (default) keeps an older ledger in its own schema;"
             " upgrade=overwrite converts it in place on the next run or branch."
+            " compress=on stores each run's large logs as gzip, as `run --compress` does."
         ),
     )
     settings_parser.add_argument("assignments", nargs="*", metavar="KEY=VALUE")
@@ -860,7 +862,8 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             parameters=declared,
             mirror=mirror,
             capture=not args.no_capture,
-            compress=args.compress or args.compress_min_bytes is not None,
+            # None leaves the choice to the project's `compress` setting.
+            compress=args.compress_min_bytes is not None or args.compress,
             compression_min_bytes=(
                 1_048_576 if args.compress_min_bytes is None else args.compress_min_bytes
             ),

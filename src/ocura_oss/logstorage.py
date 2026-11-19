@@ -166,7 +166,35 @@ def read_verified(
         return compressed, _verify(
             compressed, size, digest, collect=collect, sink=sink, gzipped=True
         )
-    raise LogStorageError(f"log is missing: {raw}")
+    raise _absent(raw)
+
+
+def newer_encoding(raw: Path) -> Path | None:
+    """Return the file holding a log in an encoding this version does not read.
+
+    A later version may store a log under its recorded name plus a suffix of its
+    own, as this one does with ``.gz``. Such a file is left for that version.
+    """
+    if raw.is_file() or raw.with_name(f"{raw.name}.gz").is_file():
+        return None
+    try:
+        names = sorted(
+            entry.name
+            for entry in raw.parent.iterdir()
+            if entry.name.startswith(f"{raw.name}.") and entry.is_file() and not entry.is_symlink()
+        )
+    except OSError:
+        return None
+    return raw.with_name(names[0]) if names else None
+
+
+def _absent(raw: Path) -> LogStorageError:
+    stored = newer_encoding(raw)
+    if stored is None:
+        return LogStorageError(f"log is missing: {raw}")
+    return LogStorageError(
+        f"log needs a newer ocura-oss (stored as {stored.name})", code="newer_record"
+    )
 
 
 class _RangeWriter:
@@ -278,7 +306,7 @@ def compress(
         raw, compressed = _paths(path)
         if not raw.is_file():
             if not compressed.is_file():
-                raise LogStorageError(f"log is missing: {raw}")
+                raise _absent(raw)
             _verify(compressed, size, digest, gzipped=True)
             return StorageResult("unchanged", size, compressed.stat().st_size, compressed)
         if compressed.is_file():
@@ -331,7 +359,7 @@ def restore(path: Path, size: int, digest: str, *, dry_run: bool = False) -> Sto
         raw, compressed = _paths(path)
         if not compressed.is_file():
             if not raw.is_file():
-                raise LogStorageError(f"log is missing: {raw}")
+                raise _absent(raw)
             _verify(raw, size, digest, gzipped=False)
             return StorageResult("unchanged", size, size, raw)
         if raw.is_file():

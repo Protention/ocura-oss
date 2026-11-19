@@ -51,7 +51,7 @@ def run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = False,
+    compress: bool | None = None,
     compression_min_bytes: int = logstorage.DEFAULT_MIN_BYTES,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -69,7 +69,8 @@ def run(
     *command* whose values are replaced by a placeholder in every record. The
     command still receives the real values.
 
-    Logs stay raw unless ``compress=True``: completed logs of at least
+    Logs stay raw unless ``compress=True``, or ``compress`` is left as ``None`` and
+    the project's ``compress`` setting is ``on``: completed logs of at least
     ``compression_min_bytes`` (default 1 MiB) are then losslessly compressed once,
     when this saves at least ten percent. Read original output with
     ``Store.read_verified_log()``. Storage errors appear in the returned
@@ -115,6 +116,8 @@ def run(
             known_ids["source_branch_point_id"] = source_branch_point_id
         store = _required_store(root)
         store.upgrade_if_enabled()
+        if compress is None:
+            compress = store.setting("compress") == "on"
         create_child = None
         if source_branch_point_id is None:
             selected_pathway = pathway_id or store.load_ledger().default_pathway_id

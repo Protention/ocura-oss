@@ -34,7 +34,7 @@ _T = TypeVar("_T")
 
 UPGRADE_ENV = "OCURA_OSS_UPGRADE"
 # Each setting and its accepted values; the first is the default.
-SETTINGS = {"upgrade": ("off", "overwrite")}
+SETTINGS = {"upgrade": ("off", "overwrite"), "compress": ("off", "on")}
 
 
 class NewerRecord(StoreError):
@@ -251,8 +251,8 @@ class Store:
     def setting(self, key: str) -> str:
         """Return a setting: the project's value, else the environment's, else the default."""
         chosen = self.settings().get(key)
-        if chosen is None and key == "upgrade":
-            chosen = os.environ.get(UPGRADE_ENV)
+        if chosen is None:
+            chosen = os.environ.get(f"OCURA_OSS_{key.upper()}")
         return chosen if chosen in SETTINGS[key] else SETTINGS[key][0]
 
     def set_setting(self, key: str, value: str) -> None:
@@ -1103,7 +1103,9 @@ class Store:
                     self._verify_log(record.id, relative, size_field, digest_field)
                     logs_checked += 1
                 except StoreError as exc:
-                    problems.append((f"{record.id}.json", str(exc)))
+                    # A log in a later version's encoding is left for that version.
+                    unread = beyond if exc.code == "newer_record" else problems
+                    unread.append((f"{record.id}.json", str(exc)))
         # A newer record's logs belong to it even though their contents go unchecked.
         covered = {attempt.id for attempt, _state in attempts}
         for name, found in newer:
@@ -1472,8 +1474,12 @@ class Store:
                 continue
             # A gzip is the physical representation of the logical .log path
             # retained in the run. Both copies can exist across a crashed
-            # storage transition; _verify_log checks both in that case.
-            if entry.suffix == ".gz" and logical.with_suffix("") in referenced_logs:
+            # storage transition; _verify_log checks both in that case. A log
+            # in a later version's encoding belongs to its run the same way.
+            recorded = logical.with_suffix("")
+            if recorded in referenced_logs and (
+                entry.suffix == ".gz" or logstorage.newer_encoding(recorded) == logical
+            ):
                 continue
             if entry.is_dir():
                 problems.append((f"logs/{entry.name}", "unexpected directory under logs/"))

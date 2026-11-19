@@ -142,7 +142,7 @@ run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = False,
+    compress: bool | None = None,
     compression_min_bytes: int = 1_048_576,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -165,7 +165,7 @@ Run one trusted local command and record terminal evidence.
 | `parameters` | mapping of string to string, or None | `None` | Add or replace labels for this run; with `source_branch_point_id`, set the new child's parameter overrides instead. Labels do not configure the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
-| `compress` | boolean | `False` | Consider only this run's finalized captured logs once for lossless gzip storage |
+| `compress` | boolean or `None` | `None` | Consider only this run's finalized captured logs once for lossless gzip storage. `None` follows the project's `compress` setting |
 | `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size to compress when `compress` is true; require at least 10% savings as well |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
 | `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with the value the run records for that key |
@@ -224,7 +224,8 @@ The child runs with `shell=False` and the project root as its working directory.
 
 Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned run record has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
 
-Logs stay raw by default. With `compress=True`, each captured log of at least
+Logs stay raw by default. With `compress=True`, or with the project's
+[`compress` setting](cli.md#settings) `on` and `compress` left as `None`, each captured log of at least
 `compression_min_bytes` (1 MiB) is considered for gzip compression at level 6
 after this run is finalized. It must save at least 10%; smaller or incompressible
 logs remain raw. Original bytes and hashes remain unchanged, and no older logs are
@@ -785,7 +786,8 @@ store.upgrade_if_enabled() -> tuple[int, int] | None
 ```
 
 `setting("upgrade")` returns the value in effect: the one the project stored, else
-`OCURA_OSS_UPGRADE`, else `"off"`. `settings()` returns only what the project stored, and
+`OCURA_OSS_UPGRADE`, else `"off"`. `setting("compress")` works the same way with
+`OCURA_OSS_COMPRESS`. `settings()` returns only what the project stored, and
 `set_setting()` stores one value. `older_format()` returns the ledger record's schema
 version while an [upgrade](state-and-verification.md#ledgers-written-by-08) is still
 possible, otherwise `None`. `upgrade_if_enabled()` converts the records when the setting
@@ -1740,7 +1742,8 @@ String enum describing evidence completeness for one comparison.
 
 A `StoreError` with code `newer_record`, raised when a record is intact but
 [needs a later version](state-and-verification.md#records-from-a-later-version) to read.
-`needs` is a tuple naming what is missing, such as `("schema 5",)`.
+`needs` is a tuple naming what is missing, such as `("schema 5",)`. Reading a log
+stored in a later version's encoding raises a plain `StoreError` with the same code.
 
 ### `ocura_oss.StoreError`
 

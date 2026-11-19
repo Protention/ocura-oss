@@ -146,7 +146,8 @@ or set `PYTHONUNBUFFERED=1` to see it live. A first Ctrl+C, or a `SIGTERM` sent 
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
 Logs stay raw unless you ask for lossless gzip storage: `run --compress` stores
-that run's logs of at least 1 MiB as gzip when this saves at least 10%, and
+that run's logs of at least 1 MiB as gzip when this saves at least 10%,
+`ocura-oss settings compress=on` does so for every run in the project, and
 `compress --dry-run` previews a pass over older logs; `decompress` restores raw
 files. `ocura-oss logs <run-id>` prints the verified original bytes either way,
 and `--info` shows sizes, the storage path, and a readable fingerprint. See [log compression](autocompression.md).

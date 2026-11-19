@@ -25,10 +25,17 @@ uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
   place on the next `run`, `branch`, or `recover`. IDs and log files do not change.
   Manifests retained before the upgrade no longer match; save a new one afterwards.
 - Add the `settings` command and `.ocura-oss/settings.json`.
+- Add the `compress` setting. `ocura-oss settings compress=on`, or
+  `OCURA_OSS_COMPRESS=on` for every project, compresses each run's large logs as
+  `run --compress` does. `run --no-compress` and `run(compress=False)` keep one
+  run's logs raw. In Python, `run(compress=...)` now defaults to `None`, which
+  follows the setting.
 - Report a record that needs a later version as `newer record` in `verify`, with
   integrity still ok, where 0.8 reported it as damage. `runs` leaves such a run out
   and counts it in `newer_runs`; runs branched from it are read as usual. A record may
   list what a reader needs in a `requires` array.
+- Report a log stored in an encoding this version does not read the same way,
+  where 0.8 reported a missing log and an orphaned file.
 - Add `notices` to JSON results when a command prints a `note:` line.
 - Show a command's output, and write it to its log, as the command writes it. `run`
   used to hold output back until 64 KiB had arrived or the command had exited.

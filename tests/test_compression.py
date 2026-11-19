@@ -764,6 +764,33 @@ class CompressionTests(unittest.TestCase):
                 self.assertEqual((self.root / record.stdout_log).read_bytes(), b"x" * 2048)
                 self.assertEqual(self.store.list_attempts(), [])
 
+    def test_project_setting_compresses_runs_that_do_not_choose(self):
+        big = [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'a'*1048576)"]
+        self.store.set_setting("compress", "on")
+        followed = api.run(big, root=self.root).record
+        refused = api.run(big, root=self.root, compress=False).record
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            cli.main(["run", "--root", str(self.root), "--json", "--no-compress", "--", *big])
+        flagged = self.store.load_run(json.loads(stdout.getvalue())["run_id"])
+        stored = [self._paths(record)[1].is_file() for record in (followed, refused, flagged)]
+        self.assertEqual(stored, [True, False, False])
+
+    def test_log_in_a_later_versions_encoding_is_named_and_left_alone(self):
+        record = self._run_bytes(b"a" * _MIB, compress=True).record
+        packed = self._paths(record)[1]
+        later = packed.rename(packed.with_suffix(".zst"))
+        report = self.store.verify_state()
+        self.assertTrue(report.ok, report.problems)
+        ((name, needs),) = report.newer
+        self.assertEqual(name, f"{record.id}.json")
+        self.assertIn(later.name, needs)
+        with self.assertRaises(StoreError) as raised:
+            self.store.read_verified_log(record.id)
+        self.assertEqual(raised.exception.code, "newer_record")
+        # Only one file stands in for the log: a second one is still an orphan.
+        later.with_suffix(".zzz").write_bytes(b"")
+        self.assertFalse(self.store.verify_state().ok)
+
     def test_cli_run_compression_flags(self):
         for flags, compressed in (
             ([], False),

@@ -105,6 +105,8 @@ A record this version cannot read is named and left alone; it is not reported as
 | `runs` | Leaves the run out and reports how many were left out |
 | `show`, `logs`, `branch --from`, `run --from`, `compare` | Stop with exit status 2 and `needs a newer ocura-oss` when they need that record's contents |
 
+A captured log stored in an encoding this version does not read, such as one a later version adds beside [gzip](autocompression.md#space-and-compatibility-limits), is handled the same way: `verify` names it and does not check its contents, and `logs` stops with `needs a newer ocura-oss`.
+
 Runs branched from such a run are read, listed, and verified as usual. A record edited after it was written still fails its checksum, whatever its schema.
 
 ### Ledgers written by 0.8
