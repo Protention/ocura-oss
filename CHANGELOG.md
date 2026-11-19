@@ -36,6 +36,11 @@ uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
   list what a reader needs in a `requires` array.
 - Report a log stored in an encoding this version does not read the same way,
   where 0.8 reported a missing log and an orphaned file.
+- Add `ocura-oss mcp`, a read-only Model Context Protocol server over stdio. An agent
+  client reads the ledger through the tools `runs`, `show`, `logs`, `compare`,
+  `verify`, and `attempts`; recording still goes through `run`. It adds no dependency.
+- Add `logs --tail N` and `logs --search TEXT`, which print the last lines of a log
+  or its numbered lines containing the text.
 - Add `notices` to JSON results when a command prints a `note:` line.
 - Show a command's output, and write it to its log, as the command writes it. `run`
   used to hold output back until 64 KiB had arrived or the command had exited.
