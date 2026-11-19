@@ -10,7 +10,15 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## New in 0.8.0
+## New in 0.9.0
+
+Version 0.9 reads a ledger written by 0.8 and records into it without changing its
+format, so both versions can use the same project. Moving a ledger to the new record
+format is a choice: `ocura-oss settings upgrade=overwrite`. `verify` names records
+and logs written by a later version and leaves them alone, where it used to report
+damage. `run` shows output as the command writes it, and
+`ocura-oss settings compress=on` compresses large logs for every run in a project.
+See [ledgers written by 0.8](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#ledgers-written-by-08).
 
 Version 0.8 uses the names ledger, run, and branch point throughout, including
 stored IDs, directories, and JSON keys, and removes the older names. It does not
