@@ -120,6 +120,18 @@ branch's parameters without repeating them, and can add or replace labels with i
 own `--param`. To declare a value once, add `--substitute` and write `"{batch}"` in
 the command.
 
+**What a run ran against is recorded on request.** `--context` records the operating
+system, the git revision, and whether the work tree had uncommitted changes.
+`--context-file PATH` records a file's size and SHA-256, for example a lock file:
+
+```console
+ocura-oss run --context --context-file requirements.lock -- python train.py
+```
+
+`show <run-id> --json` returns both under the run's `context`. Nothing about the
+surroundings is recorded without these options, and they describe the launch
+without snapshotting files or installed packages. See [launch context](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#optional-launch-context).
+
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
 the logs without streaming. Output appears as the command writes it. Python holds
