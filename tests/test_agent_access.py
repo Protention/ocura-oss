@@ -62,6 +62,7 @@ class AgentAccessTests(unittest.TestCase):
                 {
                     **model.run_summary_from_run(failed.record).to_dict(),
                     "branch_point_id": points[1].id,
+                    "tags": [],
                 }
             ],
         )

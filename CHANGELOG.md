@@ -6,15 +6,16 @@ This file records user-visible changes to Ocura OSS.
 
 This release changes the stored record format so that later releases can add to it
 without breaking earlier ones. It reads ledgers written by 0.8 and records into them.
+1.0 is meant to keep this format, so please report a ledger that this release reads,
+records into, or upgrades wrongly at https://github.com/Protention/ocura-oss/issues.
 
-A ledger written by 0.8 stays usable from 0.8: this release records into it in
-schema 3 until you upgrade it. **Upgrade a project only once every environment that
-uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
+### Upgrading from 0.8
 
-- Write new ledgers in schema version 4 and read schemas 3 and 4. A schema 4 run record
-  names its captured output in one `streams` object. Command output and the Python
-  API are unchanged: `show --json` and `RunRecord` keep `stdout_log` and the related
-  fields.
+Installing this release leaves an existing project's records as they are. A ledger
+written by 0.8 stays usable from 0.8: this release records into it in schema 3 until
+you upgrade it. **Upgrade a project only once every environment that uses it has this
+release**, because 0.8.0 cannot read an upgraded ledger.
+
 - Keep a ledger written by 0.8 in schema 3 by default. New records are written in
   schema 3 beside the older ones, so 0.8 still reads, verifies, and records into the
   ledger, and a manifest retained under 0.8 still verifies. `run`, `branch`,
@@ -24,21 +25,49 @@ uses it has this release**, because 0.8.0 cannot read an upgraded ledger.
   `OCURA_OSS_UPGRADE=overwrite` for every project, converts the ledger to schema 4 in
   place on the next `run`, `branch`, or `recover`. IDs and log files do not change.
   Manifests retained before the upgrade no longer match; save a new one afterwards.
-- Add the `settings` command and `.ocura-oss/settings.json`.
+- Write new ledgers in schema version 4 and read schemas 3 and 4. A schema 4 run record
+  names its captured output in one `streams` object. Command output and the Python
+  API are unchanged: `show --json` and `RunRecord` keep `stdout_log` and the related
+  fields.
+
+### New commands and settings
+
+- Add `ocura-oss mcp`, a Model Context Protocol server over stdio. An agent client
+  reads the ledger through the tools `runs`, `show`, `logs`, `compare`, `verify`, and
+  `attempts`, and keeps a run's note and tags with `note` and `tag`. It cannot record
+  a run or change a run's record; recording still goes through `run`. It adds no
+  dependency.
+- Add `logs --tail N` and `logs --search TEXT`, which print the last lines of a log
+  or its numbered lines containing the text.
+- Add the `settings` command and `.ocura-oss/settings.json`. Each setting also has an
+  environment variable, which a project follows until it stores its own value.
 - Add the `compress` setting. `ocura-oss settings compress=on`, or
   `OCURA_OSS_COMPRESS=on` for every project, compresses each run's large logs as
   `run --compress` does. `run --no-compress` and `run(compress=False)` keep one
   run's logs raw. In Python, `run(compress=...)` now defaults to `None`, which
   follows the setting.
+- Add `ocura-oss note` and `ocura-oss tag`, which keep editable text and tags beside
+  a finished run, and `runs --tag TAG`, which lists the runs carrying a tag. `show`
+  returns the note, and `runs` returns each run's `tags`. A note can be changed and
+  is not listed in a manifest, so it never alters a run's record or a retained
+  manifest's result. 0.8 ignores the `notes/` directory.
+- Add `notices` to JSON results when a command prints a `note:` line.
+
+### Changed behaviour
+
+- Show a command's output, and write it to its log, as the command writes it. `run`
+  used to hold output back until 64 KiB had arrived or the command had exited.
+- Keep an index for a ledger of 500 or more finished runs, so `runs` and `show` open
+  only the records they return. `.ocura-oss/index.sqlite` is a cache built from the
+  records: `verify` ignores it, deleting it loses nothing, and
+  `ocura-oss settings index=off` or `OCURA_OSS_INDEX=off` turns it off. It uses the
+  `sqlite3` module that ships with Python, so there is still no dependency.
 - Report a record that needs a later version as `newer record` in `verify`, with
   integrity still ok, where 0.8 reported it as damage. `runs` leaves such a run out
   and counts it in `newer_runs`; runs branched from it are read as usual. A record may
   list what a reader needs in a `requires` array.
 - Report a log stored in an encoding this version does not read the same way,
   where 0.8 reported a missing log and an orphaned file.
-- Add `notices` to JSON results when a command prints a `note:` line.
-- Show a command's output, and write it to its log, as the command writes it. `run`
-  used to hold output back until 64 KiB had arrived or the command had exited.
 
 ## 0.8.0 - 2026-11-06
 
