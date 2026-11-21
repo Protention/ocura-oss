@@ -32,9 +32,11 @@ release**, because 0.8.0 cannot read an upgraded ledger.
 
 ### New commands and settings
 
-- Add `ocura-oss mcp`, a read-only Model Context Protocol server over stdio. An agent
-  client reads the ledger through the tools `runs`, `show`, `logs`, `compare`,
-  `verify`, and `attempts`; recording still goes through `run`. It adds no dependency.
+- Add `ocura-oss mcp`, a Model Context Protocol server over stdio. An agent client
+  reads the ledger through the tools `runs`, `show`, `logs`, `compare`, `verify`, and
+  `attempts`, and keeps a run's note and tags with `note` and `tag`. It cannot record
+  a run or change a run's record; recording still goes through `run`. It adds no
+  dependency.
 - Add `logs --tail N` and `logs --search TEXT`, which print the last lines of a log
   or its numbered lines containing the text.
 - Add the `settings` command and `.ocura-oss/settings.json`. Each setting also has an
@@ -44,6 +46,11 @@ release**, because 0.8.0 cannot read an upgraded ledger.
   `run --compress` does. `run --no-compress` and `run(compress=False)` keep one
   run's logs raw. In Python, `run(compress=...)` now defaults to `None`, which
   follows the setting.
+- Add `ocura-oss note` and `ocura-oss tag`, which keep editable text and tags beside
+  a finished run, and `runs --tag TAG`, which lists the runs carrying a tag. `show`
+  returns the note, and `runs` returns each run's `tags`. A note can be changed and
+  is not listed in a manifest, so it never alters a run's record or a retained
+  manifest's result. 0.8 ignores the `notes/` directory.
 - Add `notices` to JSON results when a command prints a `note:` line.
 
 ### Changed behaviour

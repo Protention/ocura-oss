@@ -57,8 +57,12 @@ class Index:
         pathway_id: str | None,
         outcome: str | None,
         limit: int | None,
+        run_ids: frozenset[str] | None = None,
     ) -> tuple[list[str], int]:
-        """Return branch point IDs in finish order, and how many records have no place in it."""
+        """Return branch point IDs in finish order, and how many records have no place in it.
+
+        *run_ids* keeps the branch points of those runs.
+        """
         where, values = ["created_at < ?"], [before]
         for column, value in (("pathway_id", pathway_id), ("outcome", outcome)):
             if value is not None:
@@ -67,12 +71,13 @@ class Index:
         if after is not None:
             where.append("(created_at > ? OR (created_at = ? AND name > ?))")
             values += [after[0], after[0], after[1]]
-        query = (
-            f"SELECT name FROM points WHERE {' AND '.join(where)} ORDER BY created_at, name LIMIT ?"
-        )
+        chosen, order = " AND ".join(where), "ORDER BY created_at, name LIMIT ?"
+        query = f"SELECT name, run_id FROM points WHERE {chosen} {order}"
         with self._synced() as connection:
-            found = connection.execute(query, [*values, -1 if limit is None else limit])
-            names = [name for (name,) in found]
+            # A list of runs is matched here, so SQL cannot cut the page short.
+            bound = -1 if limit is None or run_ids is not None else limit
+            found = connection.execute(query, [*values, bound])
+            names = [name for name, run in found if run_ids is None or run in run_ids][:limit]
             (unplaced,) = connection.execute(
                 "SELECT COUNT(*) FROM points WHERE created_at IS NULL"
             ).fetchone()

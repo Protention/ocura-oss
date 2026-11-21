@@ -58,7 +58,7 @@ class McpServerTests(unittest.TestCase):
         self.assertEqual(pinged, {})
         self.assertEqual(
             [tool["name"] for tool in listed["tools"]],
-            ["runs", "show", "logs", "compare", "verify", "attempts"],
+            ["runs", "show", "logs", "compare", "verify", "attempts", "note", "tag"],
         )
         page = json.loads(called["content"][0]["text"])
         self.assertEqual([item["id"] for item in page["runs"]], [self.record.id])
@@ -99,6 +99,24 @@ class McpServerTests(unittest.TestCase):
         store.resolve_log_path(self.record, "stdout").unlink()
         text, failed = self.call("verify")
         self.assertEqual((json.loads(text)["status"], failed), ("failed", False))
+
+    def test_note_and_tag_edit_a_runs_note_unless_the_server_reads_an_archive(self):
+        text, _failed = self.call("tag", tags=["diverged", "baseline"], run=self.record.id[:8])
+        self.assertEqual(json.loads(text)["note"]["tags"], ["baseline", "diverged"])
+        self.call("tag", run=self.record.id, tags=["baseline"], remove=True)
+        self.call("note", text="--lr was too high", run=self.record.id)  # Not read as an option.
+        note = json.loads(self.call("show", run=self.record.id)[0])["note"]
+        self.assertEqual((note["text"], note["tags"]), ("--lr was too high", ["diverged"]))
+        page = json.loads(self.call("runs", tag="diverged")[0])
+        self.assertEqual([item["id"] for item in page["runs"]], [self.record.id])
+        for tags in ([3], [], ["two words"]):  # Refused by the server, the parser, the store.
+            text, failed = self.call("tag", run=self.record.id, tags=tags)
+            self.assertEqual((json.loads(text)["error"]["code"], failed), ("invalid_input", True))
+
+        self.server = mcp.Server(cli.main, self.root, archive=True)
+        text, failed = self.call("note", run=self.record.id, text="")
+        self.assertEqual((json.loads(text)["error"]["code"], failed), ("invalid_state", True))
+        self.assertEqual(json.loads(self.call("show", run=self.record.id)[0])["note"], note)
 
 
 if __name__ == "__main__":

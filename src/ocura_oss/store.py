@@ -132,9 +132,11 @@ class ListedRun:
 
     branch_point_id: str
     run: model.RunSummary
+    tags: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
-        return {**self.run.to_dict(), "branch_point_id": self.branch_point_id}
+        listed = {**self.run.to_dict(), "branch_point_id": self.branch_point_id}
+        return {**listed, "tags": list(self.tags)}
 
 
 @dataclass(frozen=True)
@@ -164,12 +166,16 @@ class RunPage:
 
 @dataclass(frozen=True)
 class RunInspection:
-    """One validated run, its pathway and branch point, and the branches made from it."""
+    """One validated run, its pathway and branch point, and the branches made from it.
+
+    ``note`` is the run's editable note and tags, or None when it has neither.
+    """
 
     record: model.RunRecord
     pathway: model.Pathway
     branch_point: model.BranchPoint | None
     children: tuple[model.Pathway, ...]
+    note: model.Note | None = None
 
     def to_dict(self, *, include_command: bool = False) -> dict:
         payload = model.run_to_payload(self.record)
@@ -182,6 +188,7 @@ class RunInspection:
             "pathway": model.pathway_to_payload(self.pathway),
             "branch_point": None if point is None else model.branch_point_to_payload(point),
             "children": [model.pathway_to_payload(child) for child in self.children],
+            "note": None if self.note is None else model.note_to_payload(self.note),
             "verification": {"scope": "record_and_lineage", "logs_checked": 0},
         }
 
@@ -212,6 +219,7 @@ class Store:
         self.branch_points_dir = self.state_dir / "branch-points"
         self.attempts_dir = self.state_dir / "attempts"
         self.logs_dir = self.state_dir / "logs"
+        self.notes_dir = self.state_dir / "notes"
         self.ledger_path = self.state_dir / "ledger.json"
         self.settings_path = self.state_dir / "settings.json"
 
@@ -307,6 +315,7 @@ class Store:
             (self.pathways_dir, "pathway"),
             (self.runs_dir, "run"),
             (self.branch_points_dir, "branch_point"),
+            (self.notes_dir, "note"),
         )
 
         def convert(*chosen: tuple[Path, str]) -> tuple[int, int]:
@@ -697,6 +706,7 @@ class Store:
         outcome: model.Outcome | None = None,
         after: str | None = None,
         limit: int | None = 100,
+        tag: str | None = None,
     ) -> RunPage:
         """Page finalized runs by terminal branch point timestamp and ID.
 
@@ -706,7 +716,8 @@ class Store:
         their files are new or changed. *after* is a page's ``next_after`` branch
         point. A run unfinished when a page is read
         can finish behind its cursor; that page counts it in
-        ``unfinished_attempts``. ``limit=None`` returns every match.
+        ``unfinished_attempts``. ``limit=None`` returns every match. *tag* keeps
+        the runs whose note carries that tag.
         """
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
@@ -726,17 +737,22 @@ class Store:
         # now or is stamped at or after now, which only later pages list.
         now = model.format_timestamp(model.utc_now())
         unfinished = sum(1 for _ in self.attempts_dir.glob("*.json"))
+        tagged = None
+        if tag is not None:
+            notes = self._iter_typed(self.notes_dir, "note", model.note_from_payload)
+            tagged = frozenset(note.run_id for note in notes if tag in note.tags)
 
         def wanted(point: model.BranchPoint) -> bool:
             return (
                 (pathway_id is None or point.pathway_id == pathway_id)
                 and (outcome is None or point.outcome is outcome)
+                and (tagged is None or point.run_id in tagged)
                 and point.created_at < now
                 and (start is None or (point.created_at, point.id) > start)
             )
 
         ahead = None if limit is None else limit + 1
-        chosen = self._indexed_page(wanted, pathway_id, outcome, now, start, ahead)
+        chosen = self._indexed_page(wanted, pathway_id, outcome, now, start, ahead, tagged)
         if chosen is None:
             newer_files: list[Path] = []
             candidates = (
@@ -768,7 +784,9 @@ class Store:
             except NewerRecord:
                 newer += 1  # verify names each record and what it needs.
                 continue
-            runs.append(ListedRun(branch_point_id=point.id, run=model.run_summary_from_run(record)))
+            note = self._shown_note(record.id)
+            summary = model.run_summary_from_run(record)
+            runs.append(ListedRun(point.id, summary, () if note is None else note.tags))
         return RunPage(
             runs=tuple(runs),
             next_after=shown[-1].id if more else None,
@@ -799,7 +817,60 @@ class Store:
             pathway=self._load_pathway(record.pathway_id, frozenset(), validated),
             branch_point=branch_point,
             children=children,
+            note=self._shown_note(run_id),
         )
+
+    def load_note(self, run_id: str) -> model.Note | None:
+        """Return a run's note and tags, or None when it has neither."""
+        path = self._record_path(self.notes_dir, run_id, "run")
+        if not path.is_file():
+            return None
+        return self._load_listed(path, "note", model.note_from_payload)
+
+    def _shown_note(self, run_id: str) -> model.Note | None:
+        # A note a later version wrote is left out here; `verify` names it.
+        with contextlib.suppress(NewerRecord):
+            return self.load_note(run_id)
+        return None
+
+    def annotate(
+        self,
+        run_id: str,
+        *,
+        text: str | None = None,
+        add: Iterable[str] = (),
+        remove: Iterable[str] = (),
+    ) -> model.Note:
+        """Change a finished run's note: replace its text, add tags, or remove tags.
+
+        The note is the one record meant to be edited. It is rewritten in place,
+        keeps no earlier text, and is removed once it holds no text and no tags.
+        The run's own record is never touched.
+        """
+        self._require_writable()
+        self.load_run(run_id)
+        try:
+            added = {model.check_tag(tag) for tag in add}
+        except model.ValidationError as exc:
+            raise StoreError(str(exc), code="invalid_input") from exc
+        if text is not None and not isinstance(text, str):
+            raise StoreError("note text must be a string", code="invalid_input")
+        path = self._record_path(self.notes_dir, run_id, "run")
+        self.notes_dir.mkdir(exist_ok=True)
+        # Two changes at once are applied one after the other, so neither is lost.
+        with locking.hold(path.with_suffix(".lock")):
+            current = self.load_note(run_id)
+            note = model.Note(
+                run_id=run_id,
+                updated_at=model.format_timestamp(model.utc_now()),
+                text=(current.text if current else "") if text is None else text,
+                tags=tuple(sorted((set(current.tags if current else ()) | added) - set(remove))),
+            )
+            if note.text or note.tags:
+                self._write_record(path, "note", model.note_to_payload(note))
+            else:
+                _remove_file(path)
+        return note
 
     def _index(self) -> index.Index | None:
         """Return the branch point index, unless this store must not keep one."""
@@ -824,6 +895,7 @@ class Store:
         before: str,
         after: tuple[str, str] | None,
         limit: int | None,
+        run_ids: frozenset[str] | None,
     ) -> tuple[list[model.BranchPoint], int] | None:
         """Choose a page's branch points through the index; None means scan the records."""
         found = self._index()
@@ -836,6 +908,7 @@ class Store:
                 pathway_id=pathway_id,
                 outcome=None if outcome is None else outcome.value,
                 limit=limit,
+                run_ids=run_ids,
             )
             points = [self._indexed_point(name) for name in names]
         except (index.Unavailable, NewerRecord):
@@ -1222,6 +1295,14 @@ class Store:
             except StoreError as exc:
                 problems.append((f"{branch_point.id}.json", str(exc)))
         self._report_missing_branch_points(records, branch_points, covered, problems)
+        # Notes are editable, so they are checked for damage and left out of the manifest.
+        later_notes: list[tuple[str, NewerRecord]] = []
+        recorded = {record.id for record in records} | {name[:-5] for name, _exc in newer}
+        for note in self._scan_records(
+            self.notes_dir, "note", model.note_from_payload, problems, None, later_notes, "notes/"
+        ):
+            if note.run_id not in recorded:
+                problems.append((f"notes/{note.run_id}.json", "note names a run with no record"))
         known = [item.id for item in pathways] + [name[:-5] for name, _exc in newer]
         if ledger.default_pathway_id not in known:
             problems.append(("ledger.json", "default pathway record is missing"))
@@ -1245,7 +1326,10 @@ class Store:
             problems=tuple(problems),
             running_attempts=tuple(running),
             abandoned_attempts=tuple(abandoned),
-            newer=(*((name, ", ".join(exc.needs)) for name, exc in newer), *beyond),
+            newer=(
+                *((name, ", ".join(exc.needs)) for name, exc in (*newer, *later_notes)),
+                *beyond,
+            ),
             manifest=tuple(manifest) if intact else (),
             digest=manifest_digest(manifest) if intact else None,
         )
@@ -1516,6 +1600,7 @@ class Store:
         problems: list[tuple[str, str]],
         manifest: list[str] | None = None,
         newer: list[tuple[str, NewerRecord]] | None = None,
+        prefix: str = "",
     ) -> list[_T]:
         """Collect valid records and report invalid ones instead of raising.
 
@@ -1530,11 +1615,11 @@ class Store:
                 records.append(self._load_listed(path, kind, converter, manifest))
             except NewerRecord as exc:
                 if newer is not None:
-                    newer.append((path.name, exc))
+                    newer.append((prefix + path.name, exc))
                 if manifest is not None:
                     manifest.append(_manifest_line(kind, path.stem, exc.checksum))
             except StoreError as exc:
-                problems.append((path.name, str(exc)))
+                problems.append((prefix + path.name, str(exc)))
         return records
 
     def _load_attempt(self, path: Path) -> model.Attempt | None:

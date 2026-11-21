@@ -79,6 +79,7 @@ def main(release: str) -> None:
 
         # This version records into the earlier release's ledger and leaves it readable there.
         runs.append(record(new, runs[-1], "2"))
+        text(new, "note", runs[0]["run_id"], "kept")  # The release ignores notes.
         check(new, runs)
         assert schemas(root) == written, schemas(root)
         assert (root / ".ocura-oss" / "index.sqlite").is_file()
@@ -93,6 +94,7 @@ def main(release: str) -> None:
         runs.append(record(new, runs[-1], "4"))
         check(new, runs)
         assert len(schemas(root)) == 1, schemas(root)
+        assert result(new, "show", runs[0]["run_id"])["note"]["text"] == "kept"
     print(f"ledger shared with ocura-oss {release}: passed")
 
 

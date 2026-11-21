@@ -26,8 +26,8 @@ async def session(root: str, run_id: str) -> None:
         print("mcp", version("mcp"), "| protocol", opened.protocol_version)
         await client.send_ping()
         listed = await client.list_tools()
-        names = [tool.name for tool in listed.tools]
-        assert names == ["runs", "show", "logs", "compare", "verify", "attempts"], names
+        names = " ".join(tool.name for tool in listed.tools)
+        assert names == "runs show logs compare verify attempts note tag", names
 
         async def call(name: str, **arguments: object) -> tuple[str, bool]:
             result = await client.call_tool(name, arguments)
@@ -46,6 +46,8 @@ async def session(root: str, run_id: str) -> None:
         for name in ("compare", "attempts"):
             text, failed = await call(name)
             assert not failed and isinstance(json.loads(text), dict), (name, text)
+        text, failed = await call("tag", run=run_id, tags=["baseline"])
+        assert not failed and json.loads(text)["note"]["tags"] == ["baseline"], text
 
         text, failed = await call("show", run="ffff")
         assert failed and json.loads(text)["error"]["message"], text

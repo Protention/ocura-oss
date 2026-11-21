@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""A Model Context Protocol server over stdio: read-only tools for one ledger.
+"""A Model Context Protocol server over stdio: tools that read one ledger and annotate its runs.
 
 Each tool runs the CLI command of the same name and returns what that command
 prints with ``--json``, so the two cannot drift apart. The server speaks the
@@ -26,17 +26,21 @@ _META = "io.modelcontextprotocol/"
 _INFO = {"name": "ocura-oss", "version": __version__}
 _CAPABILITIES: dict = {"tools": {}}
 _INSTRUCTIONS = (
-    "Read-only access to this project's Ocura OSS ledger of recorded command runs."
+    "Access to this project's Ocura OSS ledger of recorded command runs."
     " `runs` lists them, failed and interrupted ones included; `show` describes one;"
     " `logs` reads the end of its output or searches it; `compare` sets a run beside"
-    " the runs branched from it. An ID may be shortened to its first four or more"
+    " the runs branched from it. `note` and `tag` keep editable commentary on a run"
+    " without changing its record. An ID may be shortened to its first four or more"
     " hexadecimal characters. To record a run, use `ocura-oss run` in a shell."
 )
 _LOG_LIMIT = 64 * 1024
-_TYPES = {"string": str, "integer": int, "boolean": bool}
+_TYPES = {"string": str, "integer": int, "boolean": bool, "array": list}
+_POSITIONAL = ("run", "text", "tags")  # Arguments the commands take as positionals.
 
 
-def _tool(description: str, properties: dict, *, required: Sequence[str] = ()) -> dict:
+def _tool(
+    description: str, properties: dict, *, required: Sequence[str] = (), writes: bool = False
+) -> dict:
     return {
         "description": description,
         "inputSchema": {
@@ -45,7 +49,8 @@ def _tool(description: str, properties: dict, *, required: Sequence[str] = ()) -
             "required": list(required),
             "additionalProperties": False,
         },
-        "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        # A writing tool keeps the default destructiveHint: a note keeps no earlier text.
+        "annotations": {"readOnlyHint": not writes, "openWorldHint": False},
     }
 
 
@@ -61,6 +66,7 @@ _TOOLS = {
         {
             "pathway": _text("Only runs on this pathway (pathway-... or a unique prefix)."),
             "outcome": _text("Only this outcome.", enum=[item.value for item in model.Outcome]),
+            "tag": _text("Only runs carrying this tag."),
             "after": _text("Continue after this branch point: the last page's next_after."),
             "limit": {"type": "integer", "description": "Page size, 1 to 1000. Default 100."},
         },
@@ -102,6 +108,24 @@ _TOOLS = {
         {},
     ),
     "attempts": _tool("List runs that have started and are not finished.", {}),
+    "note": _tool(
+        "Replace the text of a finished run's note: commentary kept beside the run, never"
+        " part of its record. Empty text removes it; earlier text is not kept.",
+        {"run": _RUN, "text": _text("The note's new text.")},
+        required=["run", "text"],
+        writes=True,
+    ),
+    "tag": _tool(
+        "Add tags to a finished run's note, or remove them. `runs` with tag lists the runs"
+        " carrying one.",
+        {
+            "run": _RUN,
+            "tags": {"type": "array", "items": _text("Letters, digits, _ . -"), "minItems": 1},
+            "remove": {"type": "boolean", "description": "Remove these tags instead."},
+        },
+        required=["run", "tags"],
+        writes=True,
+    ),
 }
 
 
@@ -208,16 +232,20 @@ class Server:
         if problem is not None:
             payload: dict = {"error": {"code": "invalid_input", "message": problem}}
             return _content(json.dumps(payload), failed=True)
+        if self._archive and not tool["annotations"]["readOnlyHint"]:
+            refused = {"code": "invalid_state", "message": "archive mode does not permit changes"}
+            return _content(json.dumps({"error": refused}), failed=True)
         if name == "logs":
             arguments = {"tail": 100, **arguments}
         argv = [str(name), "--json-errors", f"--root={self._root}"]
         if self._archive:
             argv.append("--archive")
         for key, value in arguments.items():
-            if key != "run" and value is not False:
+            if key not in _POSITIONAL and value is not False:
                 argv.append(f"--{key}" if value is True else f"--{key}={value}")
-        if "run" in arguments:
-            argv += ["--", arguments["run"]]  # After `--` a value is never read as an option.
+        given = [arguments[key] for key in ("run", "text") if key in arguments]
+        if given:  # After `--` a value is never read as an option.
+            argv += ["--", *given, *arguments.get("tags", [])]
         # The command prints to this capture, so stdout carries protocol messages only.
         captured = io.BytesIO()
         printed = io.TextIOWrapper(captured, encoding="utf-8", newline="\n")
@@ -245,6 +273,8 @@ def _problem(schema: dict, arguments: dict) -> str | None:
             return f"unknown argument: {key}"
         if type(value) is not _TYPES[kind]:
             return f"argument {key} must be of type {kind}"
+        if isinstance(value, list) and any(type(item) is not str for item in value):
+            return f"argument {key} must hold only strings"
     return None
 
 

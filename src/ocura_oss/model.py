@@ -25,6 +25,7 @@ MASKED_ARGUMENT = "<masked>"
 ID_PREFIX_MIN = 4
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PARAMETER_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_.-]*)\}|[{}]")
 _GIT_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
@@ -469,6 +470,24 @@ class BranchPoint:
     branchable: bool
 
 
+@dataclass(frozen=True)
+class Note:
+    """A run's editable text and tags.
+
+    A note is commentary, not evidence: it can be changed or removed, and a
+    retained manifest does not list it.
+    """
+
+    run_id: str
+    updated_at: str
+    text: str
+    tags: tuple[str, ...]
+
+    @property
+    def id(self) -> str:
+        return self.run_id  # A note's file is named for its run.
+
+
 _LOG_FIELDS = (
     "stdout_log",
     "stderr_log",
@@ -856,6 +875,37 @@ def branch_point_from_payload(payload: object) -> BranchPoint:
         kind=kind,
         outcome=_outcome(payload["outcome"], "outcome"),
         branchable=_boolean(payload["branchable"], "branchable"),
+    )
+
+
+def check_tag(value: object) -> str:
+    """Return *value* if it can be a tag: letters, digits, ``_``, ``.`` and ``-``."""
+    tag = _string(value, "tag")
+    _require(
+        _TAG_PATTERN.fullmatch(tag) is not None,
+        f"tag {tag!r} must be letters, digits, '_', '.' or '-', and not start with '.' or '-'",
+    )
+    return tag
+
+
+def note_to_payload(note: Note) -> dict:
+    return {
+        "run_id": note.run_id,
+        "updated_at": note.updated_at,
+        "text": note.text,
+        "tags": list(note.tags),
+    }
+
+
+def note_from_payload(payload: object) -> Note:
+    payload = _fields(payload, "note", frozenset({"run_id", "updated_at", "text", "tags"}))
+    tags = payload["tags"]
+    _require(isinstance(tags, list), "tags must be an array")
+    return Note(
+        run_id=_id(payload["run_id"], "run", "run_id"),
+        updated_at=format_timestamp(parse_timestamp(payload["updated_at"], "updated_at")),
+        text=_string(payload["text"], "text", allow_empty=True),
+        tags=tuple(sorted({check_tag(tag) for tag in tags})),
     )
 
 

@@ -26,6 +26,8 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `run` | Run one command and retain a run record, logs, and a branch point |
 | `runs` | Page recorded run metadata, including failed retries |
 | `show` | Inspect one run, its branch point, and its branches without reading logs |
+| `note` | Show, set, or clear a finished run's editable note |
+| `tag` | Add tags to a finished run, or remove them |
 | `pathways` | List pathway lineage and evidence status |
 | `branch-points` | List terminal evidence boundaries |
 | `branch` | Create a metadata-only child pathway |
@@ -38,7 +40,7 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `logs` | Read verified original log bytes or inspect storage metadata |
 | `compress` | Compress eligible finalized captured logs losslessly |
 | `decompress` | Restore finalized compressed logs to their original bytes |
-| `mcp` | Serve read-only tools to an AI agent over the Model Context Protocol |
+| `mcp` | Serve the ledger to an AI agent over the Model Context Protocol |
 | `demo` | Run the complete workflow in a new retained directory |
 
 Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --version` to print the installed version.
@@ -460,8 +462,8 @@ temporary disk headroom. See [log compression](autocompression.md).
 ## `runs` and `show`
 
 ```text
-ocura-oss runs [--pathway ID] [--outcome OUTCOME] [--after ID] [--limit N | --all]
-               [--json] [--root PATH]
+ocura-oss runs [--pathway ID] [--outcome OUTCOME] [--tag TAG] [--after ID]
+               [--limit N | --all] [--json] [--root PATH]
 ocura-oss show ID [--command] [--json] [--root PATH]
 ```
 
@@ -469,10 +471,12 @@ ocura-oss show ID [--command] [--json] [--root PATH]
 failed attempts on a pathway. Each entry carries the run record ID and the `branch_point_id`
 to pass to `branch --from`. `--limit` defaults to 100 and accepts 1 through 1000;
 `--all` returns every match instead. `--pathway` selects one pathway; `--outcome`
-accepts the recorded outcomes listed under `run`. `--after` resumes strictly after
+accepts the recorded outcomes listed under `run`. `--tag` selects the runs carrying
+one [tag](#note-and-tag). `--after` resumes strictly after
 a branch point, normally the previous page's `next_after`.
 
-JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id`),
+JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id` and
+the run's `tags`),
 `next_after` (the last returned branch point ID when more matches exist, otherwise
 null), `unfinished_attempts`, `newer_runs`, and
 `verification: {"scope": "records", "logs_checked": 0}`. `newer_runs` counts runs
@@ -496,8 +500,10 @@ its last page. Otherwise, list again once they finish or `recover` closes them.
 This relies on the system clock not stepping backward.
 
 `show` selects one run record, validates its record and lineage, and returns `run`,
-`pathway`, `branch_point`, `children`, `log_files`, and
-`verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
+`pathway`, `branch_point`, `children`, `note`, `log_files`, and
+`verification: {"scope": "record_and_lineage", "logs_checked": 0}`. `note` is the run's
+[editable note](#note-and-tag), or null when it has none; it is outside that
+verification scope. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
 `log_files` gives each captured stream's current file, as for `run`. If that
 lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
@@ -512,6 +518,38 @@ the branch point records unless the ledger has an
 Both commands accept unique ID prefixes in their ID options. Agents should retain
 and reuse the full returned IDs. A successful view returns 0, and invalid input
 or records return 2 without a partial JSON result.
+
+## `note` and `tag`
+
+Keep editable commentary beside a finished run.
+
+```text
+ocura-oss note ID [TEXT | --clear] [--json] [--root PATH]
+ocura-oss tag ID TAG... [--remove] [--json] [--root PATH]
+```
+
+```text
+ocura-oss note run-7ce6 "diverged at step 400, lr too high"
+ocura-oss tag run-7ce6 diverged baseline
+ocura-oss tag run-7ce6 baseline --remove
+ocura-oss runs --tag diverged
+```
+
+`note ID TEXT` replaces the run's note text, `note ID --clear` removes it, and
+`note ID` prints the note and tags. `tag` adds each `TAG`, or removes it with
+`--remove`. A tag is made of letters, digits, `_`, `.`, and `-`, and does not start
+with `.` or `-`. Both commands print the resulting note; with `--json` they return
+`run_id` and `note`, an object with `run_id`, `updated_at`, `text`, and `tags`, or null
+when the run has no text and no tags left.
+
+A note is commentary, not evidence. The run's record is never changed by it, and
+`run --param` and `--reason` remain the place for facts that must not change. A
+note keeps no earlier text, anyone able to write the project can change it, and a
+[manifest](#manifest) does not list it. `verify` still reports a note file that is
+damaged. See [notes](state-and-verification.md#notes).
+
+Both commands accept a unique ID prefix. They return 0, or 2 for an unknown run or
+an invalid tag.
 
 ## `pathways`
 
@@ -899,7 +937,8 @@ upgrade: overwrite (project)
 
 ## `mcp`
 
-Serve the ledger's read commands to an AI agent as Model Context Protocol tools.
+Serve the ledger's read commands, `note`, and `tag` to an AI agent as Model Context
+Protocol tools.
 
 ```text
 ocura-oss mcp [--archive] [--root PATH]
@@ -916,25 +955,31 @@ Each tool runs the command of the same name and returns what it prints with `--j
 
 | Tool | Arguments | Returns |
 | --- | --- | --- |
-| `runs` | `pathway`, `outcome`, `after`, `limit` | The [`runs`](#runs-and-show) page |
+| `runs` | `pathway`, `outcome`, `tag`, `after`, `limit` | The [`runs`](#runs-and-show) page |
 | `show` | `run`, `command` | One run, as [`show`](#runs-and-show) |
 | `logs` | `run`, `stream`, `tail`, `search` | Text from one verified log |
 | `compare` | `from` | The [`compare`](#compare) result |
 | `verify` | none | The [`verify`](#verify) report |
 | `attempts` | none | Unfinished runs, as [`attempts`](#attempts) |
+| `note` | `run`, `text` | The run's note after replacing its text, as [`note`](#note-and-tag) |
+| `tag` | `run`, `tags`, `remove` | The run's note after the change, as [`tag`](#note-and-tag) |
 
 `logs` returns the last `tail` lines (default 100). With `search` it returns the last
 `tail` lines containing that text, each after its line number. It returns at most
 64 KiB, keeping the end, and shows bytes that are not UTF-8 as replacement characters.
+`note` with an empty `text` removes the text and keeps the tags.
 
 A call that is refused, such as an unknown ID or a damaged record, returns the
 [structured error](#structured-errors) with `isError` set. A `verify` that finds
 problems returns its report without `isError`.
 
-The server is read-only. It does not offer `run`, `branch`, `recover`, or `settings`;
-an agent with a shell records runs with `ocura-oss run`. It answers one request at a
-time, so a `verify` of a large ledger delays the requests behind it. It speaks protocol
-revision 2026-07-28 and the `initialize` handshake of 2025-11-25 and earlier.
+Only `note` and `tag` change anything, and only a run's editable note; a server
+started with `--archive` refuses them. The server does not offer `run`, `branch`,
+`recover`, or `settings`; an agent with a shell records runs with `ocura-oss run`.
+The other tools are marked read-only for clients that ask before a change. It
+answers one request at a time, so a `verify` of a large ledger delays the requests
+behind it. It speaks protocol revision 2026-07-28 and the `initialize` handshake of
+2025-11-25 and earlier.
 
 ## `demo`
 

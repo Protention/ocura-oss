@@ -26,6 +26,8 @@ before 0.8.
   attempts/
     <run-id>.json
     <run-id>.lock
+  notes/
+    <run-id>.json
   log-locks/
     <run-id>.stdout.log.lock
     <run-id>.stderr.log.lock
@@ -39,6 +41,39 @@ before 0.8.
 `attempts/` holds one entry for each run that has started and is not yet finalized. It is empty when nothing is running and nothing was abandoned.
 
 `settings.json` exists only after [`ocura-oss settings`](cli.md#settings) has stored a value. It is a plain JSON object, not a record: it has no envelope and is not part of verification or the manifest.
+
+### Notes
+
+`notes/` holds at most one record for each run: the text and tags stored by
+[`ocura-oss note` and `tag`](cli.md#note-and-tag). The directory exists once a note
+has been stored.
+
+```json
+{
+  "schema_version": 4,
+  "kind": "note",
+  "payload": {
+    "run_id": "run-7ce6...",
+    "updated_at": "2026-11-20T14:20:05.120000+00:00",
+    "text": "diverged at step 400, lr too high",
+    "tags": ["diverged"]
+  },
+  "checksum": {"algorithm": "sha256", "value": "..."}
+}
+```
+
+A note is the one record meant to be edited. Changing it replaces the file, earlier
+text is not kept, and a note left with no text and no tags is removed. The run,
+pathway, and branch point records are never rewritten for it.
+
+Verification checks each note's envelope and checksum and that its run is recorded,
+so a damaged note is reported. The manifest does not list notes: an edit would
+otherwise fail `verify --against`. So a note can be changed or removed without a
+retained manifest showing it, and it should hold nothing that has to be provable
+later. Put such facts in `run --param` or the branch reason.
+
+A note is written in the ledger's schema and converted with it by an upgrade.
+Version 0.8 ignores the `notes/` directory.
 
 ### The index
 

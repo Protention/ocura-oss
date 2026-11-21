@@ -11,7 +11,8 @@ variations, with reasons, outputs, and verification.
 
 An agent whose client speaks the Model Context Protocol can also read the ledger
 through [`ocura-oss mcp`](cli.md#mcp), which offers `runs`, `show`, `logs`, `compare`,
-`verify`, and `attempts` as tools. Recording still goes through the commands below.
+`verify`, and `attempts` as tools, and keep a run's [note and tags](cli.md#note-and-tag)
+with `note` and `tag`. Recording still goes through the commands below.
 
 ## Command workflow
 
