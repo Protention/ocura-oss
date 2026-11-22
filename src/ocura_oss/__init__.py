@@ -2,7 +2,7 @@
 
 """Public Python interface for Ocura OSS."""
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from ocura_oss.api import (
     Initialization,
@@ -24,6 +24,7 @@ from ocura_oss.model import (
     ComparisonState,
     FileDigest,
     Ledger,
+    Note,
     Outcome,
     OutputCapture,
     ParameterDelta,
@@ -49,6 +50,7 @@ __all__ = (
     "FileDigest",
     "Initialization",
     "Ledger",
+    "Note",
     "Outcome",
     "OutputCapture",
     "ParameterDelta",

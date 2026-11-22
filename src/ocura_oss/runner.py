@@ -357,12 +357,17 @@ def _stop_process(process: subprocess.Popen) -> None:
 
 
 def _pump(source: BinaryIO, sink: BinaryIO | None, echo: BinaryIO | None) -> None:
-    """Copy one output stream to its log file and, optionally, the console."""
+    """Copy one output stream to its log file and, optionally, the console.
+
+    Each read returns what the command has written so far: ``source.read`` would
+    hold output back until a whole chunk had arrived or the command had exited.
+    """
     try:
-        while chunk := source.read(_PUMP_CHUNK):
+        while chunk := os.read(source.fileno(), _PUMP_CHUNK):
             if sink is not None:
                 try:
                     sink.write(chunk)
+                    sink.flush()
                 except (OSError, ValueError):
                     break
             if echo is not None:

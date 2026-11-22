@@ -10,7 +10,15 @@ records and logs before branching or comparing them.
 Use it from your terminal, Python scripts, or an AI agent with a shell. The CLI
 provides JSON output throughout the workflow; the Python API returns typed results.
 
-## New in 0.8.0
+## New in 0.9.0
+
+Version 0.9 reads a ledger written by 0.8 and records into it without changing its
+format, so both versions can use the same project. Moving a ledger to the new record
+format is a choice: `ocura-oss settings upgrade=overwrite`. `verify` names records
+and logs written by a later version and leaves them alone, where it used to report
+damage. `run` shows output as the command writes it, and
+`ocura-oss settings compress=on` compresses large logs for every run in a project.
+See [ledgers written by 0.8](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#ledgers-written-by-08).
 
 Version 0.8 uses the names ledger, run, and branch point throughout, including
 stored IDs, directories, and JSON keys, and removes the older names. It does not
@@ -31,7 +39,7 @@ runs in a new project, especially for local development:
 - **Dependency free.** It needs Python 3.11 or later and nothing else. Installing
   it adds no runtime dependencies to your project.
 - **Easy setup.** `pip install ocura-oss`, then `ocura-oss init`. There is no
-  server, database, account, or configuration file. Every command accepts `--json`
+  server, database, or account, and nothing to configure. Every command accepts `--json`
   and returns a documented exit code, so an AI agent with a shell can do the setup
   and run the whole workflow.
 - **Easy to inspect and adapt.** Records are plain JSON files, and the typed
@@ -112,14 +120,29 @@ branch's parameters without repeating them, and can add or replace labels with i
 own `--param`. To declare a value once, add `--substitute` and write `"{batch}"` in
 the command.
 
+**What a run ran against is recorded on request.** `--context` records the operating
+system, the git revision, and whether the work tree had uncommitted changes.
+`--context-file PATH` records a file's size and SHA-256, for example a lock file:
+
+```console
+ocura-oss run --context --context-file requirements.lock -- python train.py
+```
+
+`show <run-id> --json` returns both under the run's `context`. Nothing about the
+surroundings is recorded without these options, and they describe the launch
+without snapshotting files or installed packages. See [launch context](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md#optional-launch-context).
+
 Omit `--json` for terminal output. By default, `run` streams the command's output
 while retaining stdout and stderr logs; `--json` or `--quiet` keeps that output in
-the logs without streaming. A first Ctrl+C, or a `SIGTERM` sent to
+the logs without streaming. Output appears as the command writes it. Python holds
+`print()` output back when it is not writing to a terminal, so run it as `python -u`
+or set `PYTHONUNBUFFERED=1` to see it live. A first Ctrl+C, or a `SIGTERM` sent to
 `ocura-oss run`, stops the command and records an interrupted attempt; a second
 Ctrl+C exits immediately and leaves the attempt for `ocura-oss recover` to close.
 
 Logs stay raw unless you ask for lossless gzip storage: `run --compress` stores
-that run's logs of at least 1 MiB as gzip when this saves at least 10%, and
+that run's logs of at least 1 MiB as gzip when this saves at least 10%,
+`ocura-oss settings compress=on` does so for every run in the project, and
 `compress --dry-run` previews a pass over older logs; `decompress` restores raw
 files. `ocura-oss logs <run-id>` prints the verified original bytes either way,
 and `--info` shows sizes, the storage path, and a readable fingerprint. See [log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md).
@@ -158,7 +181,7 @@ command. The [history guide](https://github.com/Protention/ocura-oss/blob/main/e
 JSON report and how to inspect your own ledger. No optional dependencies are needed.
 
 The fuller CI-report, autoregressive, and Dream demonstrations live on the
-semi-permanent [`examples/0.8` branch](https://github.com/Protention/ocura-oss/tree/examples/0.8).
+semi-permanent [`examples/0.9` branch](https://github.com/Protention/ocura-oss/tree/examples/0.9).
 See [use cases](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md) for their requirements and checkout instructions.
 
 ## Python and automation
@@ -208,7 +231,7 @@ exit codes, parameter labels, and how to inspect earlier attempts.
 - [Scripts and AI agents](https://github.com/Protention/ocura-oss/blob/main/docs/automation.md): JSON workflows and verified output consumption
 - [State and verification](https://github.com/Protention/ocura-oss/blob/main/docs/state-and-verification.md): records and checks
 - [Log compression](https://github.com/Protention/ocura-oss/blob/main/docs/autocompression.md): opt-in gzip storage, verified reading, fingerprints, and compatibility
-- [Examples](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.8`
+- [Examples](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md): the primary walkthrough and demonstrations on `examples/0.9`
 - [Migration tool](https://github.com/Protention/ocura-oss/blob/main/tools/migrations/README.md): optional import of 0.4 ledgers, downloaded separately
 
 The documentation for the published release is at [protention.dev](https://protention.dev/).

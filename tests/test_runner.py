@@ -6,6 +6,7 @@ import io
 import os
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -267,6 +268,40 @@ class RunnerTests(unittest.TestCase):
         self.assertIn(b"tee-marker", log)
         self.assertIn(b"tee-marker", console.getvalue())
         self.assertEqual(execution.record.outcome, model.Outcome.PASSED)
+
+    def test_mirror_delivers_output_while_the_command_is_still_running(self):
+        # The command exits 0 only once the console has received its first line.
+        seen = self.store.root / "seen"
+        logged_live = []
+        child = (
+            "import pathlib, sys, time\n"
+            "print('early', flush=True)\n"
+            "deadline = time.monotonic() + 10\n"
+            "while not pathlib.Path('seen').exists():\n"
+            "    if time.monotonic() > deadline:\n"
+            "        sys.exit(3)\n"
+            "    time.sleep(0.01)\n"
+        )
+        logs_dir = self.store.logs_dir
+
+        class Console(io.BytesIO):
+            def write(self, data):
+                if b"early" in data:
+                    (log,) = logs_dir.glob("*.stdout.log")
+                    logged_live.append(log.read_bytes())
+                    seen.touch()
+                return super().write(data)
+
+        with contextlib.redirect_stdout(types.SimpleNamespace(buffer=Console())):
+            execution = runner.run_command(
+                self.store,
+                pathway_id=self.pathway.id,
+                argv=[sys.executable, "-c", child],
+                declared_parameters={},
+                mirror=True,
+            )
+        self.assertEqual(execution.record.return_code, 0)
+        self.assertEqual(logged_live, [b"early" + os.linesep.encode()])
 
     def test_quiet_mode_keeps_output_out_of_the_console(self):
         console = io.StringIO()

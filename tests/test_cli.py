@@ -200,7 +200,7 @@ class CliTests(unittest.TestCase):
         self.assertIn(argument_marker, run_payload["command"])
         self.assertNotIn(environment_marker, run_text)
         self.assertNotIn(log_marker, run_text)
-        stdout_log = (self.root / run_payload["stdout_log"]).read_text("utf-8")
+        stdout_log = (self.root / run_payload["streams"]["stdout"]["log"]).read_text("utf-8")
         self.assertIn(log_marker, stdout_log)
         self.assertNotIn(environment_marker, stdout_log)
 

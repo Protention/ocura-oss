@@ -1,6 +1,6 @@
 # Command-line reference
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.7 adds opt-in compression and the `logs`, `compress`, and
 `decompress` commands. See [log compression](autocompression.md).
@@ -26,6 +26,8 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `run` | Run one command and retain a run record, logs, and a branch point |
 | `runs` | Page recorded run metadata, including failed retries |
 | `show` | Inspect one run, its branch point, and its branches without reading logs |
+| `note` | Show, set, or clear a finished run's editable note |
+| `tag` | Add tags to a finished run, or remove them |
 | `pathways` | List pathway lineage and evidence status |
 | `branch-points` | List terminal evidence boundaries |
 | `branch` | Create a metadata-only child pathway |
@@ -34,9 +36,11 @@ Commands run against one project root. Unless `--root PATH` is supplied, the roo
 | `manifest` | Print one checksum line per verified record, to keep elsewhere |
 | `attempts` | List runs that have started and are not yet finalized |
 | `recover` | Close attempts whose recording process stopped |
+| `settings` | Show or change this project's settings |
 | `logs` | Read verified original log bytes or inspect storage metadata |
 | `compress` | Compress eligible finalized captured logs losslessly |
 | `decompress` | Restore finalized compressed logs to their original bytes |
+| `mcp` | Serve the ledger to an AI agent over the Model Context Protocol |
 | `demo` | Run the complete workflow in a new retained directory |
 
 Run `ocura-oss COMMAND --help` for command-specific help, and `ocura-oss --version` to print the installed version.
@@ -72,6 +76,8 @@ Declared parameters do not configure the child process. Pass process arguments a
 ### JSON output
 
 Every command accepts `--json`. JSON mode writes one result document to standard output, with Unicode escaped so it also works on legacy Windows encodings. Diagnostic messages go to standard error.
+
+A command that prints a `note:` line on standard error, as `run`, `branch`, `recover`, and `verify` do in a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08), also returns those messages in a `notices` array in its result document. The key is absent when there are none.
 
 `run --json` retains child stdout and stderr in their logs without streaming them. A recorded command failure, interruption, or launch failure still returns a JSON result with its existing nonzero exit status. Invalid input or a state error returns no result document.
 
@@ -182,7 +188,7 @@ Run one trusted local command and record terminal evidence.
 ocura-oss run [--root PATH] [--pathway ID | --from BRANCH_POINT_ID --reason TEXT]
               [--param KEY=VALUE] [--quiet] [--json] [--json-errors]
               [--no-capture] [--mask-arg POSITION] [--substitute]
-              [--compress] [--compress-min-bytes N]
+              [--compress | --no-compress] [--compress-min-bytes N]
               [--context] [--context-file PATH] -- COMMAND...
 ```
 
@@ -201,7 +207,7 @@ The `--` separator is required. Ocura OSS options belong before it. Every token 
 | `--json` | flag | false | Emit one result as JSON; retain child output in logs without streaming |
 | `--json-errors` | flag | false | Emit JSON results and structured errors with execution state and known IDs |
 | `--no-capture` | flag | false | Retain no stdout or stderr; the record states that output was not captured |
-| `--compress` | flag | false | Store this run's captured logs as gzip after finalization when that saves at least 10% |
+| `--compress`, `--no-compress` | flag | the project's [`compress` setting](#settings) | Store this run's captured logs as gzip after finalization when that saves at least 10%, or keep them raw |
 | `--compress-min-bytes N` | nonnegative integer | `1048576` | Minimum original log size to compress; implies `--compress` |
 | `--mask-arg POSITION` | integer | none | Record `<masked>` in place of the `COMMAND` token at this zero-based position; repeatable |
 | `--substitute` | flag | false | Replace `{KEY}` in `COMMAND` tokens with that parameter's value |
@@ -247,9 +253,11 @@ a variation before executing it.
 
 The command runs with `shell=False` and the project root as its working directory. It inherits the invoking process environment. Environment keys and values are not serialized.
 
-Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal.
+Stdout and stderr are captured as separate files under `.ocura-oss/logs/`. Unless `--quiet` or `--json` is present, the same bytes are also streamed to the terminal as the command writes them. A command that buffers its own output when it is not writing to a terminal appears late: Python does this for `print()`, so run it as `python -u` or set `PYTHONUNBUFFERED=1`.
 
-Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given.
+Captured logs stay raw unless `--compress` or `--compress-min-bytes N` is given, or
+the project's [`compress` setting](#settings) is `on`; `--no-compress` keeps one
+run's logs raw under that setting.
 Then, after finalization, logs of at least 1 MiB (or `N`) are considered once for
 lossless gzip compression. Each must save at least 10%; small and incompressible
 logs remain raw. No older runs are scanned. Compression errors emit storage
@@ -304,7 +312,7 @@ If log-file lookup fails, `run` preserves the recorded result, IDs, and exit sta
 returns empty `log_files`, and reports a storage warning. Text output marks the
 current log files as unavailable; the recorded logical paths remain in JSON.
 
-Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.8` branch.
+Use returned IDs to continue the [automated workflow](automation.md). The [training example](https://github.com/Protention/ocura-oss/blob/examples/0.9/examples/autoregressive/README.md) provides an executable client on the separate `examples/0.9` branch.
 
 #### Exit status
 
@@ -368,6 +376,7 @@ Read one finalized run record's verified original log bytes or inspect its metad
 
 ```text
 ocura-oss logs ID [--stream stdout|stderr] [--offset N] [--length N]
+                [--tail N] [--search TEXT]
                 [--info] [--json] [--archive] [--root PATH]
 ```
 
@@ -391,6 +400,16 @@ larger windows use OS temporary storage, removed on close. RAM stays bounded for
 large content reads, with one decoding pass. A short range still scans the entire
 original stream for SHA-256 verification. A complete read of a large log needs free
 temporary space about that size; set `TMPDIR` to choose where, or read a range.
+
+`--tail N` prints only the last `N` lines. `--search TEXT` prints only the lines
+containing `TEXT`, each after its line number and a colon; the match is exact and
+case-sensitive. Together they print the last `N` matching lines. Both verify and read
+the complete stream first, and neither combines with a byte range.
+
+```console
+$ ocura-oss logs run-<id> --stream stderr --search Error --tail 1
+212:ValueError: batch must be positive
+```
 
 The default writes the exact original bytes, with no summary or added newline,
 only after the byte count and SHA-256 verify. Gzip storage is decoded
@@ -443,8 +462,8 @@ temporary disk headroom. See [log compression](autocompression.md).
 ## `runs` and `show`
 
 ```text
-ocura-oss runs [--pathway ID] [--outcome OUTCOME] [--after ID] [--limit N | --all]
-               [--json] [--root PATH]
+ocura-oss runs [--pathway ID] [--outcome OUTCOME] [--tag TAG] [--after ID]
+               [--limit N | --all] [--json] [--root PATH]
 ocura-oss show ID [--command] [--json] [--root PATH]
 ```
 
@@ -452,17 +471,23 @@ ocura-oss show ID [--command] [--json] [--root PATH]
 failed attempts on a pathway. Each entry carries the run record ID and the `branch_point_id`
 to pass to `branch --from`. `--limit` defaults to 100 and accepts 1 through 1000;
 `--all` returns every match instead. `--pathway` selects one pathway; `--outcome`
-accepts the recorded outcomes listed under `run`. `--after` resumes strictly after
+accepts the recorded outcomes listed under `run`. `--tag` selects the runs carrying
+one [tag](#note-and-tag). `--after` resumes strictly after
 a branch point, normally the previous page's `next_after`.
 
-JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id`),
+JSON contains `runs` (the run summaries used by `compare`, plus `branch_point_id` and
+the run's `tags`),
 `next_after` (the last returned branch point ID when more matches exist, otherwise
-null), `unfinished_attempts`, and `verification: {"scope": "records", "logs_checked": 0}`.
-Every branch point record's envelope and fields must validate, even when filters
-exclude it, and each returned run's records and lineage are checked. Log contents
-are not read. There is no persistent index: each page scans the branch point records
-once, so walking a long history page by page repeats that scan, and `--all` does it
-once.
+null), `unfinished_attempts`, `newer_runs`, and
+`verification: {"scope": "records", "logs_checked": 0}`. `newer_runs` counts runs
+left out of the page because they [need a later version](state-and-verification.md#records-from-a-later-version)
+to read; the text view prints `runs not listed: N` when it is not zero.
+Each returned run's records and lineage are checked. Log contents are not read.
+
+A page goes through the ledger's [index](state-and-verification.md#the-index) and
+opens only the records it returns plus any whose files are new or changed. With the
+index off or unavailable, each page scans the branch point records once, and every
+one must validate, even when filters exclude it. `verify` still checks every record.
 
 Each page reads the clock and counts unfinished attempts before it scans, and
 lists only runs that finished before then; a run stamped with that same clock
@@ -474,21 +499,56 @@ its last page. Otherwise, list again once they finish or `recover` closes them.
 This relies on the system clock not stepping backward.
 
 `show` selects one run record, validates its record and lineage, and returns `run`,
-`pathway`, `branch_point`, `children`, `log_files`, and
-`verification: {"scope": "record_and_lineage", "logs_checked": 0}`. The run record includes
+`pathway`, `branch_point`, `children`, `note`, `log_files`, and
+`verification: {"scope": "record_and_lineage", "logs_checked": 0}`. `note` is the run's
+[editable note](#note-and-tag), or null when it has none; it is outside that
+verification scope. The run record includes
 declared parameters, timing, outcome, and recorded log paths, sizes, and digests.
 `log_files` gives each captured stream's current file, as for `run`. If that
 lookup fails, `log_files` is empty and `storage_warnings` reports why; the view
 still succeeds, because the run record itself is valid.
 The pathway includes the reason and source relationship. `branch_point` is the run's
 terminal branch point, or null while the run is unfinished, and `children` lists the
-pathways branched from it, oldest first. Finding them scans the branch point and
-pathway records. Command arguments and masking positions are omitted unless
+pathways branched from it, oldest first. Finding them scans the pathway records, and
+the branch point records unless the ledger has an
+[index](state-and-verification.md#the-index). Command arguments and masking positions are omitted unless
 `--command` is supplied. No log contents are read.
 
 Both commands accept unique ID prefixes in their ID options. Agents should retain
 and reuse the full returned IDs. A successful view returns 0, and invalid input
 or records return 2 without a partial JSON result.
+
+## `note` and `tag`
+
+Keep editable commentary beside a finished run.
+
+```text
+ocura-oss note ID [TEXT | --clear] [--json] [--root PATH]
+ocura-oss tag ID TAG... [--remove] [--json] [--root PATH]
+```
+
+```text
+ocura-oss note run-7ce6 "diverged at step 400, lr too high"
+ocura-oss tag run-7ce6 diverged baseline
+ocura-oss tag run-7ce6 baseline --remove
+ocura-oss runs --tag diverged
+```
+
+`note ID TEXT` replaces the run's note text, `note ID --clear` removes it, and
+`note ID` prints the note and tags. `tag` adds each `TAG`, or removes it with
+`--remove`. A tag is made of letters, digits, `_`, `.`, and `-`, and does not start
+with `.` or `-`. Both commands print the resulting note; with `--json` they return
+`run_id` and `note`, an object with `run_id`, `updated_at`, `text`, and `tags`, or null
+when the run has no text and no tags left.
+
+A note is commentary, not evidence. The run's record is never changed by it, and
+`run --param` and `--reason` remain the place for facts that must not change. A
+note keeps no earlier text, anyone able to write the project can change it, and a
+[manifest](#manifest) does not list it. `verify` still reports a note file that is
+damaged. See [notes](state-and-verification.md#notes).
+
+Both commands accept a unique ID prefix. They return 0, or 2 for an unknown run or
+an invalid tag.
 
 ## `pathways`
 
@@ -703,6 +763,7 @@ Verification covers:
 - referenced log containment, existence, byte count, and SHA-256 digest
 - unreferenced files and unexpected directories under `.ocura-oss/logs/`
 - unfinished attempts
+- records that [need a later version](state-and-verification.md#records-from-a-later-version): their checksums are checked and they are listed, without counting as problems
 - with `--against`, that every retained manifest entry is still present with the same checksum
 
 `logs_checked` counts individual logs that passed verification. A valid run record normally contributes two logs, and none when it was recorded without capture.
@@ -723,8 +784,9 @@ Verification may run while other processes record runs under the same root. An a
 | `attempts.running` | array | Identifiers of attempts a live process is still recording |
 | `attempts.abandoned` | array | Identifiers of attempts whose recorder stopped; each is also a problem |
 | `problems` | array | Objects containing `record` and `problem` strings |
+| `newer_records` | array | Objects containing `record` and `needs` strings, one for each record that needs a later version |
 
-The text view prints the digest on its own line when the state is intact.
+The text view prints the digest on its own line when the state is intact, and one `newer record: FILE: NEEDS` line for each entry in `newer_records`.
 
 Verification establishes consistency among local records and logs. It does not establish authorship or reproduce external execution conditions. Checksums kept inside the state cannot show that a record was rewritten together with its checksum; `--against` with a manifest kept elsewhere can.
 
@@ -848,6 +910,75 @@ The text view prints one line per closed attempt and a final `recovered: N` coun
 | --- | --- |
 | 0 | Every abandoned attempt was closed, including when there were none |
 | 2 | State was missing, or an attempt record or its evidence was malformed or unreadable |
+
+## `settings`
+
+Show this project's settings, or store new values.
+
+```text
+ocura-oss settings [KEY=VALUE ...] [--root PATH] [--json]
+```
+
+| Setting | Values | Default | Effect |
+| --- | --- | --- | --- |
+| `upgrade` | `off`, `overwrite` | `off` | `off` keeps a [ledger written by 0.8](state-and-verification.md#ledgers-written-by-08) in schema 3, which 0.8 also reads; storing `off` also stops the note about it. `overwrite` converts it in place on the next `run`, `branch`, or `recover` |
+| `compress` | `off`, `on` | `off` | `on` stores each run's large captured logs as gzip, as [`run --compress`](#run) does. `run --no-compress` keeps one run's logs raw |
+| `index` | `on`, `off` | `on` | `on` lets `runs` and `show` keep and use the [index](state-and-verification.md#the-index) of a large ledger. `off` makes them scan the records |
+
+Without arguments the command prints each setting, its value, and whether the project stored it. Each `KEY=VALUE` is stored in `.ocura-oss/settings.json` first. A stored value takes precedence over the environment variables `OCURA_OSS_UPGRADE`, `OCURA_OSS_COMPRESS`, and `OCURA_OSS_INDEX`, which set `upgrade`, `compress`, and `index` for every project that has not stored one.
+
+JSON mode returns `settings` (the value in effect for each setting) and `stored` (the values the project stored). An unknown setting or value returns exit status 2.
+
+```console
+$ ocura-oss settings upgrade=overwrite
+upgrade: overwrite (project)
+```
+
+## `mcp`
+
+Serve the ledger's read commands, `note`, and `tag` to an AI agent as Model Context
+Protocol tools.
+
+```text
+ocura-oss mcp [--archive] [--root PATH]
+```
+
+An MCP client starts this command and talks to it on stdin and stdout; it runs
+until the client closes stdin. Most clients take an entry like this one:
+
+```json
+{"mcpServers": {"ocura-oss": {"command": "ocura-oss", "args": ["mcp", "--root", "/path/to/project"]}}}
+```
+
+Each tool runs the command of the same name and returns what it prints with `--json`.
+
+| Tool | Arguments | Returns |
+| --- | --- | --- |
+| `runs` | `pathway`, `outcome`, `tag`, `after`, `limit` | The [`runs`](#runs-and-show) page |
+| `show` | `run`, `command` | One run, as [`show`](#runs-and-show) |
+| `logs` | `run`, `stream`, `tail`, `search` | Text from one verified log |
+| `compare` | `from` | The [`compare`](#compare) result |
+| `verify` | none | The [`verify`](#verify) report |
+| `attempts` | none | Unfinished runs, as [`attempts`](#attempts) |
+| `note` | `run`, `text` | The run's note after replacing its text, as [`note`](#note-and-tag) |
+| `tag` | `run`, `tags`, `remove` | The run's note after the change, as [`tag`](#note-and-tag) |
+
+`logs` returns the last `tail` lines (default 100). With `search` it returns the last
+`tail` lines containing that text, each after its line number. It returns at most
+64 KiB, keeping the end, and shows bytes that are not UTF-8 as replacement characters.
+`note` with an empty `text` removes the text and keeps the tags.
+
+A call that is refused, such as an unknown ID or a damaged record, returns the
+[structured error](#structured-errors) with `isError` set. A `verify` that finds
+problems returns its report without `isError`.
+
+Only `note` and `tag` change anything, and only a run's editable note; a server
+started with `--archive` refuses them. The server does not offer `run`, `branch`,
+`recover`, or `settings`; an agent with a shell records runs with `ocura-oss run`.
+The other tools are marked read-only for clients that ask before a change. It
+answers one request at a time, so a `verify` of a large ledger delays the requests
+behind it. It speaks protocol revision 2026-07-28 and the `initialize` handshake of
+2025-11-25 and earlier.
 
 ## `demo`
 
