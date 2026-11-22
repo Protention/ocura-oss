@@ -3,6 +3,7 @@
 """A ledger written by 0.8 stays usable as it is and is converted only on request."""
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -186,6 +187,24 @@ class OlderLedgerTests(unittest.TestCase):
                 self.assertEqual((len(page.runs), page.newer_runs), (4, 1))
                 self.assertNotIn(BASELINE, [item.run.id for item in page.runs])
         path.write_text(path.read_text("utf-8").replace('"passed"', '"failed"'), "utf-8")
+        self.assertFalse(ocura_oss.verify(self.root).ok)
+        # A later schema may change the envelope itself.
+        later = {"schema_version": 5, "kind": "run", "payload": payload, "signatures": []}
+        path.write_text(json.dumps(later), "utf-8")
+        report = ocura_oss.verify(self.root)
+        self.assertEqual((report.ok, report.newer), (True, ((f"{BASELINE}.json", "schema 5"),)))
+
+    def test_a_stream_a_later_version_adds_is_verified_like_stdout(self):
+        path = self.store.runs_dir / f"{BASELINE}.json"
+        stored = model.stored_payload("run", json.loads(path.read_text("utf-8"))["payload"])
+        log = Path(stored["streams"]["stdout"]["log"]).with_suffix(".terminal")
+        (self.root / log).write_bytes(b"later\n")
+        digest = hashlib.sha256(b"later\n").hexdigest()
+        stored["streams"]["terminal"] = {"log": log.as_posix(), "bytes": 6, "sha256": digest}
+        write_record(path, 4, "run", stored)
+        checked = ocura_oss.verify(self.root)
+        self.assertTrue(checked.ok, checked.problems)
+        (self.root / log).write_bytes(b"edited")
         self.assertFalse(ocura_oss.verify(self.root).ok)
 
     def test_cli_says_how_to_opt_in_and_upgrades_on_the_next_run(self):

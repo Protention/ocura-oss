@@ -472,6 +472,22 @@ class AbandonedAttemptTests(JournalTestCase):
         self.assertEqual(self.attempt_files(), [])
         self.assertTrue(self.store.verify_state().ok)
 
+    def test_an_attempt_names_its_logs_under_streams_as_a_run_does(self):
+        attempt = self.abandon()
+        path = self.store.attempts_dir / f"{attempt.id}.json"
+        envelope = json.loads(path.read_text("utf-8"))
+        payload = envelope["payload"]
+        self.assertNotIn("stdout_log", payload)
+        self.assertEqual(payload["streams"]["stdout"], {"log": attempt.stdout_log})
+        # A stream a later version adds is the attempt's own file, not an orphan.
+        later = Path(attempt.stdout_log).with_suffix(".terminal")
+        (self.store.root / later).write_bytes(b"")
+        payload["streams"]["terminal"] = {"log": later.as_posix()}
+        envelope["checksum"] = model.checksum_for(envelope["schema_version"], "attempt", payload)
+        path.write_text(json.dumps(envelope), "utf-8")
+        report = self.store.verify_state()
+        self.assertEqual([record for record, _ in report.problems], [f"attempts/{path.name}"])
+
     def test_malformed_attempt_record_is_reported_and_stops_recovery(self):
         attempt = self.abandon()
         path = self.store.attempts_dir / f"{attempt.id}.json"

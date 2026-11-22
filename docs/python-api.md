@@ -800,16 +800,17 @@ anything.
 ```python
 store.list_runs(
     *, pathway_id: str | None = None, outcome: Outcome | None = None,
-    after: str | None = None, limit: int | None = 100,
+    after: str | None = None, limit: int | None = 100, tag: str | None = None,
 ) -> RunPage
 store.inspect_run(run_id: str) -> RunInspection
 ```
 
 `RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`,
 `unfinished_attempts: int`, and `newer_runs: int`, the number of runs left out because
-they need a later version to read. Each `ListedRun` holds `branch_point_id: str` and
-`run: RunSummary`. `RunInspection` contains `record: RunRecord`, `pathway: Pathway`,
-`branch_point: BranchPoint | None`, and `children: tuple[Pathway, ...]`. These result
+they need a later version to read. Each `ListedRun` holds `branch_point_id: str`,
+`run: RunSummary`, and the run's `tags: tuple[str, ...]`. `RunInspection` contains
+`record: RunRecord`, `pathway: Pathway`, `branch_point: BranchPoint | None`,
+`children: tuple[Pathway, ...]`, and `note: Note | None`. These result
 types live in `ocura_oss.store`. Their `to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
 includes command arguments, which are omitted by default.
 
@@ -821,6 +822,26 @@ its branch point and child pathways. Neither reads log contents. Ordering,
 completeness, filters and failure behavior follow the [CLI contract](cli.md#runs-and-show). Python callers
 supply full IDs and `Outcome` values. Invalid limits, selectors or records raise
 `StoreError`.
+
+### `Store.load_note` and `Store.annotate`
+
+```python
+store.load_note(run_id: str) -> Note | None
+store.annotate(
+    run_id: str, *, text: str | None = None,
+    add: Iterable[str] = (), remove: Iterable[str] = (),
+) -> Note
+```
+
+A `Note` holds a run's editable commentary: `run_id: str`, `updated_at: str`,
+`text: str`, and `tags: tuple[str, ...]`, sorted. `load_note()` returns `None` for a run
+with no note. `annotate()` replaces the text when *text* is given, adds and removes
+tags, and returns the result; a note left with no text and no tags is removed from
+the ledger. Changes to one run's note from several processes are applied one after
+another. An unknown run, an invalid tag, or archive mode raises `StoreError`.
+
+Notes are not evidence and a manifest does not list them; see
+[notes](state-and-verification.md#notes).
 
 ### `Store.list_branch_points`
 
