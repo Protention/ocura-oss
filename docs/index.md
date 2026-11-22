@@ -22,6 +22,14 @@ damage. `run` shows output as the command writes it, and
 `ocura-oss settings compress=on` compresses large logs for every run in a project.
 See [ledgers written by 0.8](state-and-verification.md#ledgers-written-by-08).
 
+[`ocura-oss mcp`](cli.md#mcp) is a Model Context Protocol server: an agent
+client reads the ledger through it and can keep a run's note and tags, but cannot
+record or change a run. [`note` and `tag`](cli.md#note-and-tag) keep editable
+text and tags beside a finished run, and `runs --tag` lists the runs carrying a tag.
+`runs` and `show` keep an [index](state-and-verification.md#the-index) at
+`.ocura-oss/index.sqlite`, so they open only the records they return. None of these
+adds a dependency.
+
 Version 0.8 uses the names ledger, run, and branch point throughout, including
 stored IDs, directories, and JSON keys, and removes the older names. It does not
 read state written by 0.7 or earlier; the [naming guide](naming-migration.md) maps the old names.
