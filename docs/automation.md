@@ -66,9 +66,9 @@ it stops the command and still returns a recorded `interrupted` result. If a `ru
 process is killed instead, its attempt remains unfinished. `attempts --json` lists it, `verify --json` reports it as a problem, and
 `recover --json` closes it as `abandoned` once the command itself has stopped.
 
-On the `examples/0.8` branch, the [CI-report example](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/ci_report/README.md) demonstrates a failed test
+On the `examples/0.9` branch, the [CI-report example](https://github.com/Protention/ocura-oss/blob/examples/0.9/examples/ci_report/README.md) demonstrates a failed test
 run, a reasoned fix through the combined operation, and later inspection without
-rerunning the work. The [autoregressive example](https://github.com/Protention/ocura-oss/blob/examples/0.8/examples/autoregressive/README.md) is an executable
+rerunning the work. The [autoregressive example](https://github.com/Protention/ocura-oss/blob/examples/0.9/examples/autoregressive/README.md) is an executable
 client of this interface, with PyTorch/JAX choices and an optional Ray Core executor.
 See [use cases](use-cases.md) for the separate checkout and requirements.
 The [Python API](python-api.md) provides the same operations with typed results.
