@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, examples/0.8]
+    branches: [main, examples/0.9]
   pull_request:
   schedule:
     # Mondays 06:17 UTC: catch breakage from new runner images and Python releases.
@@ -113,6 +113,62 @@ jobs:
       - name: Run the test suite against the installed package
         run: python -m unittest discover -s tests
 
+  mcp-client:
+    name: MCP client session (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: distributions
+          path: dist
+      - name: Install the built wheel
+        shell: bash
+        run: python -m pip install dist/*.whl
+      # Pinned, so a client release cannot fail an unrelated change; the weekly run takes
+      # the newest release and shows within a week when one stops working with the server.
+      - name: Install the official MCP client library
+        run: python -m pip install "mcp${{ github.event_name != 'schedule' && '==2.3.0' || '' }}"
+      - name: Hold a session with the installed server
+        run: python .github/scripts/mcp_client.py
+
+  cross-version:
+    name: Ledger shared with ${{ matrix.release }} (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # Each release whose ledgers this version must keep usable; add one per release.
+        release: ["0.8.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: distributions
+          path: dist
+      - name: Install the built wheel
+        shell: bash
+        run: python -m pip install dist/*.whl
+      - name: Record into one ledger from the release and from this version
+        run: python .github/scripts/cross_version.py ${{ matrix.release }}
+
   quickstart:
     name: README workflow (${{ matrix.os }}, ${{ matrix.shell }})
     needs: package
@@ -175,10 +231,10 @@ jobs:
           -r examples/autoregressive/requirements-pytorch.txt
           -r examples/autoregressive/requirements-jax.txt
           -r examples/dream_replay/requirements.txt
-      - name: Confirm the examples import the installed 0.8 package
+      - name: Confirm the examples import the installed 0.9 package
         run: >-
           python -c "import ocura_oss, pathlib;
-          assert ocura_oss.__version__ == '0.8.0';
+          assert ocura_oss.__version__ == '0.9.0';
           assert 'site-packages' in pathlib.Path(ocura_oss.__file__).parts;
           print(ocura_oss.__version__, ocura_oss.__file__)"
       - name: Run the example tests that the main suite skips

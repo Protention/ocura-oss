@@ -1,11 +1,11 @@
 # Fix a CI job report and retain the evidence
 
-This repository-only example uses **Ocura OSS 0.8.0**. It needs Python 3.11+
+This repository-only example uses **Ocura OSS 0.9.0**. It needs Python 3.11+
 with Ocura installed; the reporter and its checks use only the standard library.
 The example is copied separately and is not bundled in the wheel or source distribution.
 
-It is part of the [0.8 example catalog](../../docs/use-cases.md) on
-`examples/0.8`. Use the [catalog setup](../../README.md#install-and-try) to obtain
+It is part of the [0.9 example catalog](../../docs/use-cases.md) on
+`examples/0.9`. Use the [catalog setup](../../README.md#install-and-try) to obtain
 the matching checkout.
 
 A small CI job reporter starts by counting input rows. That gives the wrong answer
@@ -18,7 +18,7 @@ recording the failure, the reason for the change, and the passing result.
 From the repository root, in a virtual environment:
 
 ```console
-python -m pip install ocura-oss==0.8.0
+python -m pip install ocura-oss==0.9.0
 python examples/ci_report/workflow.py run --root ./ci-report-run
 python examples/ci_report/workflow.py report --root ./ci-report-run --json
 ```
@@ -79,7 +79,7 @@ variation = run(
 The example declares the intent and reporter version on both calls: labels set
 only on the source run are not inherited by a child pathway.
 
-The 0.8 CLI's `run --json` returns `run_id`, `branch_point_id`, and `pathway_id`;
+The 0.9 CLI's `run --json` returns `run_id`, `branch_point_id`, and `pathway_id`;
 `show --json` uses `run` and `branch_point` objects. Use the *branch point*
 for `--from`, and the *run ID* for `show` and `logs`:
 
@@ -128,7 +128,7 @@ destination names:
 ```powershell
 python -m pip wheel . --no-deps --wheel-dir ./dist
 python -m venv .venv-example
-.\.venv-example\Scripts\python.exe -m pip install --no-index --no-deps ./dist/ocura_oss-0.8.0-py3-none-any.whl
+.\.venv-example\Scripts\python.exe -m pip install --no-index --no-deps ./dist/ocura_oss-0.9.0-py3-none-any.whl
 Copy-Item -Recurse ./examples/ci_report ./ci-report-example
 $env:PYTHONPATH = ''
 .\.venv-example\Scripts\python.exe ./ci-report-example/workflow.py run --root ./ci-report-wheel-run

@@ -1,20 +1,22 @@
-# Ocura OSS 0.8 example catalog
+# Ocura OSS 0.9 example catalog
 
-Version 0.8.0.
+Version 0.9.0.
 
-The `examples/0.8` branch holds the fuller demonstrations separately
+The `examples/0.9` branch holds the fuller demonstrations separately
 from the primary demo and history walkthrough on
 [`main`](https://github.com/Protention/ocura-oss/tree/main). These examples show how
 a caller uses Ocura to retain execution evidence and explain a variation. They
-use the 0.8.0 interfaces. Follow the [catalog setup](../README.md#install-and-try)
-to check out this branch and install `ocura-oss==0.8.0` from PyPI.
+use the 0.9.0 interfaces. Follow the [catalog setup](../README.md#install-and-try)
+to check out this branch and install `ocura-oss==0.9.0` from PyPI.
 `python -m pip install .` also works for package development. Keep the example
 directories when using a separately installed package.
 Example scripts and optional frameworks are not installed with the package.
 
-Start new ledgers with 0.8. To inspect older work, keep the
+0.9 reads and records into ledgers written by 0.8; the
+[0.8 catalog](https://github.com/Protention/ocura-oss/tree/examples/0.8) keeps the
+examples pinned to 0.8.0. To inspect work from 0.7 or earlier, keep the
 [0.7 catalog](https://github.com/Protention/ocura-oss/tree/examples/0.7) and its
-matching package; 0.8 does not convert or read earlier ledger formats.
+matching package; 0.9 does not convert or read those formats.
 
 | Workflow | Question it answers | Requirements |
 | --- | --- | --- |
@@ -65,5 +67,5 @@ Dream replay and Dream RSI are experimental entries in this branch's catalog.
 Their code owns model checkpoints, policies, budgets, replay semantics, and agent access.
 The fixed-recipe replay path needs no remote agent. The live RSI path is opt-in
 and consumes the caller's agent usage. Retained replay/report commands do not train
-or call an agent. Historical pilot measurements remain historical; the 0.8 refresh
+or call an agent. Historical pilot measurements remain historical; the 0.9 refresh
 does not establish new scientific results or compute savings.

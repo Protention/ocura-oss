@@ -15,7 +15,18 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import NoReturn
 
-from ocura_oss import __version__, api, branching, demo, model, runner, store, supervise
+from ocura_oss import (
+    __version__,
+    api,
+    branching,
+    demo,
+    logstorage,
+    mcp,
+    model,
+    runner,
+    store,
+    supervise,
+)
 from ocura_oss.errors import ExecutionState, StoreError, recovery_action, with_execution
 from ocura_oss.model import ModelError
 
@@ -85,6 +96,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.json = True
     retained = False
     try:
+        _NOTICES[:] = _ledger_notices(args)
+        for notice in _NOTICES:
+            print(f"note: {notice}", file=sys.stderr)
         return _dispatch(args, command_tail)
     except (StoreError, ModelError, OSError) as exc:
         error = exc if isinstance(exc, StoreError) else with_execution(exc, "not_applicable", {})
@@ -231,8 +245,9 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--compress",
-        action="store_true",
-        help="store this run's large captured logs as gzip after finalization",
+        action=argparse.BooleanOptionalAction,
+        help="store this run's large captured logs as gzip after finalization;"
+        " the project's `compress` setting decides when neither is given",
     )
     run_parser.add_argument(
         "--compress-min-bytes",
@@ -282,6 +297,7 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     runs_parser = subparsers.add_parser("runs", help="page recorded runs without reading logs")
     runs_parser.add_argument("--pathway", metavar="ID", help="only runs on this pathway")
     runs_parser.add_argument("--outcome", choices=[item.value for item in model.Outcome])
+    runs_parser.add_argument("--tag", metavar="TAG", help="only runs carrying this tag")
     runs_parser.add_argument(
         "--after", metavar="ID", help="continue after this branch point: a page's next_after"
     )
@@ -304,6 +320,36 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     )
     show_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
     show_parser.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
+    note_parser = subparsers.add_parser(
+        "note",
+        help="show, set, or clear a finished run's editable note",
+        description=(
+            "With TEXT, replaces the run's note; with --clear, removes it; with neither,"
+            " prints the note and tags. A note is commentary kept beside the run record:"
+            " it can be changed, keeps no earlier text, and is not part of a manifest."
+        ),
+    )
+    note_parser.add_argument("run", metavar="ID", help="run ID (run-...) or unique prefix")
+    note_text = note_parser.add_mutually_exclusive_group()
+    note_text.add_argument("text", nargs="?", metavar="TEXT", help="the new note text")
+    note_text.add_argument("--clear", action="store_true", help="remove the note text")
+    tag_parser = subparsers.add_parser(
+        "tag",
+        help="add tags to a finished run, or remove them",
+        description=(
+            "Adds each TAG to the run, or removes it with --remove. Tags are part of the"
+            " run's editable note; `runs --tag TAG` lists the runs carrying one."
+        ),
+    )
+    tag_parser.add_argument("run", metavar="ID", help="run ID (run-...) or unique prefix")
+    tag_parser.add_argument("tags", nargs="+", metavar="TAG", help="letters, digits, _ . -")
+    tag_parser.add_argument("--remove", action="store_true", help="remove the tags instead")
+    for note_command in (note_parser, tag_parser):
+        note_command.add_argument(
+            "--root", default=None, metavar="PATH", help="project root directory"
+        )
+        note_command.add_argument("--json", action="store_true", help="print the note as JSON")
 
     pathways_parser = subparsers.add_parser(
         "pathways",
@@ -545,6 +591,12 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     logs_parser.add_argument(
         "--length", type=int, metavar="N", help="return at most N original bytes"
     )
+    logs_parser.add_argument("--tail", type=int, metavar="N", help="print only the last N lines")
+    logs_parser.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="print only the lines containing TEXT, each after its line number",
+    )
 
     for name, verb in (("compress", "compress"), ("decompress", "restore")):
         storage_parser = subparsers.add_parser(
@@ -602,7 +654,36 @@ def _build_parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
         "--json", action="store_true", help="print a JSON report of steps and comparison"
     )
 
+    settings_parser = subparsers.add_parser(
+        "settings",
+        help="show or change this project's settings",
+        description=(
+            "Shows the project's settings, or stores each KEY=VALUE given."
+            " upgrade=off (default) keeps an older ledger in its own schema;"
+            " upgrade=overwrite converts it in place on the next run or branch."
+            " compress=on stores each run's large logs as gzip, as `run --compress` does."
+        ),
+    )
+    settings_parser.add_argument("assignments", nargs="*", metavar="KEY=VALUE")
+    settings_parser.add_argument(
+        "--root", default=None, metavar="PATH", help="project root directory"
+    )
+    settings_parser.add_argument("--json", action="store_true", help="print settings as JSON")
+
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="serve the ledger to an AI agent over the Model Context Protocol",
+        description=(
+            "Speaks the Model Context Protocol on stdin and stdout until stdin closes."
+            " An MCP client starts it; it offers runs, show, logs, compare, verify,"
+            " attempts, note, and tag for the ledger under ROOT. It cannot record a run"
+            " or change a run's record: note and tag change only the run's editable note."
+        ),
+    )
+    mcp_parser.add_argument("--root", default=None, metavar="PATH", help="project root directory")
+
     for read_parser in (
+        mcp_parser,
         pathways_parser,
         branch_points_parser,
         compare_parser,
@@ -640,6 +721,8 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _runs(args)
     if name == "show":
         return _show(args)
+    if name in ("note", "tag"):
+        return _note(args)
     if name == "pathways":
         return _pathways(args)
     if name == "branch-points":
@@ -662,6 +745,11 @@ def _dispatch(args: argparse.Namespace, command_tail: list[str]) -> int:
         return _change_log_storage(args)
     if name == "demo":
         return _demo(args)
+    if name == "settings":
+        return _settings(args)
+    if name == "mcp":
+        root = store.resolve_root(args.root)  # Fixed now, whatever the client does later.
+        return mcp.Server(main, root, archive=args.archive).serve()
     raise StoreError(f"unknown command: {name}", code="invalid_input")
 
 
@@ -685,7 +773,83 @@ def _collect_parameters(tokens: Sequence[str]) -> dict:
     return parameters
 
 
+_NOTICES: list[str] = []
+_WRITING_COMMANDS = ("run", "branch", "recover")
+_FORMAT_WRITERS = {3: "0.8"}
+
+
+def _ledger_notices(args: argparse.Namespace) -> list[str]:
+    """Upgrade an older ledger when its setting allows; otherwise say how to allow it.
+
+    Only the commands that record, and ``verify``, mention an older ledger: the
+    others read it the same either way.
+    """
+    if args.command_name not in (*_WRITING_COMMANDS, "verify"):
+        return []
+    state = store.Store(store.resolve_root(args.root), archive=getattr(args, "archive", False))
+    try:
+        older = state.older_format() if state.ledger_path.is_file() else None
+        if older is None:
+            return []
+        writing = args.command_name in _WRITING_COMMANDS and not state.archive
+        upgrade = state.setting("upgrade") == "overwrite"
+        chosen = "upgrade" in state.settings()
+        result = state.upgrade_records() if writing and upgrade else None
+    except StoreError:
+        return []  # The command itself reports what is wrong with the ledger.
+    current = model.SCHEMA_VERSION
+    if result is not None:
+        converted, busy = result
+        if busy:
+            return [
+                f"upgrading this ledger from schema {older} to {current}: {converted} records"
+                " converted. A run is still being recorded, or a file was in use, so a"
+                " later `run` or `branch` finishes the upgrade"
+            ]
+        return [
+            f"upgraded ledger from schema {older} to {current} ({converted} records)."
+            " Output logs were not changed. Manifests saved before this upgrade no longer"
+            " match; save a new one with `ocura-oss manifest`"
+        ]
+    if upgrade:
+        return [
+            f"this ledger uses schema {older}; the next `run` or `branch` upgrades it"
+            f" to schema {current}"
+        ]
+    if chosen:
+        return []  # The project stored `upgrade=off`: it keeps this schema on purpose.
+    writer = _FORMAT_WRITERS.get(older, "an earlier version")
+    return [
+        f"this ledger uses schema {older}, which ocura-oss {writer} also reads, and new"
+        " records keep it. To upgrade it in place: `ocura-oss settings upgrade=overwrite`"
+        f" (for every project: set {store.UPGRADE_ENV}=overwrite). To keep schema {older}"
+        " and stop this note: `ocura-oss settings upgrade=off`"
+    ]
+
+
+def _settings(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    chosen = [token.partition("=") for token in args.assignments]
+    for key, separator, value in chosen:  # Check them all before storing any.
+        if not separator:
+            raise StoreError(f"expected KEY=VALUE, got {key!r}", code="invalid_input")
+        store.check_setting(key, value)
+    for key, _separator, value in chosen:
+        state.set_setting(key, value)
+    values = {key: state.setting(key) for key in store.SETTINGS}
+    stored = state.settings()
+    if args.json:
+        _emit_json({"settings": values, "stored": stored})
+        return EXIT_OK
+    for key, value in values.items():
+        source = "project" if key in stored else "default or environment"
+        print(f"{key}: {value} ({source})")
+    return EXIT_OK
+
+
 def _emit_json(payload: dict) -> None:
+    if _NOTICES and "error" not in payload:
+        payload = {**payload, "notices": list(_NOTICES)}
     # Escaped Unicode round-trips through JSON even on legacy Windows stdout encodings.
     print(json.dumps(payload, ensure_ascii=True, indent=2))
 
@@ -766,7 +930,10 @@ def _run(args: argparse.Namespace, command_tail: Sequence[str]) -> int:
             parameters=declared,
             mirror=mirror,
             capture=not args.no_capture,
-            compress=args.compress or args.compress_min_bytes is not None,
+            # None leaves the choice to the project's `compress` setting.
+            compress=(args.compress_min_bytes is not None or None)
+            if args.compress is None
+            else args.compress,
             compression_min_bytes=(
                 1_048_576 if args.compress_min_bytes is None else args.compress_min_bytes
             ),
@@ -912,6 +1079,7 @@ def _runs(args: argparse.Namespace) -> int:
         outcome=None if args.outcome is None else model.Outcome(args.outcome),
         after=None if args.after is None else state.resolve_id(args.after, "branch_point"),
         limit=None if args.all else args.limit,
+        tag=args.tag,
     )
     if args.json:
         _emit_json(page.to_dict())
@@ -921,11 +1089,14 @@ def _runs(args: argparse.Namespace) -> int:
             print(
                 f"{run.started_at}  {run.id}  branch_point={item.branch_point_id}"
                 f"  pathway={run.pathway_id}  {_run_phrase(run)}"
+                + (f"  tags={','.join(item.tags)}" if item.tags else "")
             )
         if page.next_after is not None:
             print(f"next after: {page.next_after}")
         if page.unfinished_attempts:
             print(f"unfinished attempts: {page.unfinished_attempts} (may finish behind this page)")
+        if page.newer_runs:
+            print(f"runs not listed: {page.newer_runs} (need a newer ocura-oss; see `verify`)")
         print("verification: records checked; logs not checked")
     return EXIT_OK
 
@@ -963,6 +1134,41 @@ def _show(args: argparse.Namespace) -> int:
     if args.command:
         print(f"command: {json.dumps(list(record.command), ensure_ascii=True)}")
     print("verification: record and lineage checked; logs not checked")
+    _print_note(inspected.note)
+    return EXIT_OK
+
+
+def _print_note(note: model.Note | None) -> None:
+    """Print a run's note and tags, which can be edited and are not verified evidence."""
+    if note is None:
+        return
+    if note.text:
+        print(f"note: {note.text}")
+    if note.tags:
+        print(f"tags: {', '.join(note.tags)}")
+    print(f"note updated: {note.updated_at}")
+
+
+def _note(args: argparse.Namespace) -> int:
+    state = _open_store(args.root)
+    run_id = state.resolve_id(args.run, "run")
+    note: model.Note | None
+    if args.command_name == "tag":
+        note = state.annotate(run_id, **{"remove" if args.remove else "add": args.tags})
+    elif args.clear or args.text is not None:
+        note = state.annotate(run_id, text="" if args.clear else args.text)
+    else:
+        note = state.load_note(run_id)
+    if note is not None and not (note.text or note.tags):
+        note = None  # The change left nothing, so no note is stored.
+    if args.json:
+        payload = None if note is None else model.note_to_payload(note)
+        _emit_json({"run_id": run_id, "note": payload})
+        return EXIT_OK
+    print(f"run: {run_id}")
+    _print_note(note)
+    if note is None:
+        print("note: -")
     return EXIT_OK
 
 
@@ -1052,6 +1258,9 @@ def _verify(args: argparse.Namespace) -> int:
                 "problems": [
                     {"record": record, "problem": problem} for record, problem in report.problems
                 ],
+                "newer_records": [
+                    {"record": record, "needs": needs} for record, needs in report.newer
+                ],
             }
         )
         return EXIT_OK if report.ok else EXIT_INVALID
@@ -1062,6 +1271,8 @@ def _verify(args: argparse.Namespace) -> int:
     )
     if report.running_attempts:
         print(f"running attempts: {len(report.running_attempts)}")
+    for record, needs in report.newer:
+        print(f"newer record: {record}: {needs}")
     for record, problem in report.problems:
         print(f"problem: {record}: {problem}")
     if report.digest is not None:
@@ -1167,10 +1378,14 @@ def _demo(args: argparse.Namespace) -> int:
 
 
 def _logs(args: argparse.Namespace) -> int:
-    if (args.info or args.json) and (args.offset or args.length is not None):
+    lines = args.tail is not None or args.search is not None
+    if (args.info or args.json or lines) and (args.offset or args.length is not None):
         raise StoreError(
-            "log byte ranges cannot be combined with --info or --json", code="invalid_input"
+            "log byte ranges cannot be combined with --info, --json, --tail, or --search",
+            code="invalid_input",
         )
+    if args.tail is not None and args.tail < 1:
+        raise StoreError("--tail must be at least 1", code="invalid_input")
     state = _open_store(args.root, archive=args.archive)
     run_id = state.resolve_id(args.run, "run")
     if args.info or args.json:
@@ -1198,6 +1413,10 @@ def _logs(args: argparse.Namespace) -> int:
         run_id, stream=args.stream, offset=args.offset, length=args.length
     ) as source:
         try:
+            if lines:
+                search = None if args.search is None else os.fsencode(args.search)
+                for number, line in logstorage.select_lines(source, search=search, tail=args.tail):
+                    output.write(line if search is None else b"%d:%b" % (number, line))
             while chunk := source.read(1024 * 1024):
                 output.write(chunk)
             output.flush()

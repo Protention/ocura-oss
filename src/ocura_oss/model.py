@@ -14,7 +14,10 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+OLDEST_READABLE_SCHEMA = 3
+# Features a record may name under ``requires`` that this version understands.
+FEATURES: frozenset[str] = frozenset()
 CHECKSUM_ALGORITHM = "sha256"
 TERMINAL_KIND = "terminal"
 MASKED_ARGUMENT = "<masked>"
@@ -22,6 +25,7 @@ MASKED_ARGUMENT = "<masked>"
 ID_PREFIX_MIN = 4
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PARAMETER_KEY_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+_TAG_PATTERN = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_.-]*)\}|[{}]")
 _GIT_REVISION_PATTERN = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
@@ -466,6 +470,24 @@ class BranchPoint:
     branchable: bool
 
 
+@dataclass(frozen=True)
+class Note:
+    """A run's editable text and tags.
+
+    A note is commentary, not evidence: it can be changed or removed, and a
+    retained manifest does not list it.
+    """
+
+    run_id: str
+    updated_at: str
+    text: str
+    tags: tuple[str, ...]
+
+    @property
+    def id(self) -> str:
+        return self.run_id  # A note's file is named for its run.
+
+
 _LOG_FIELDS = (
     "stdout_log",
     "stderr_log",
@@ -772,6 +794,97 @@ def attempt_from_payload(payload: object) -> Attempt:
     )
 
 
+_STREAMS = ("stdout", "stderr")
+# What a run and an unfinished attempt record about each stream they name.
+_STREAM_FIELDS = {"run": ("log", "bytes", "sha256"), "attempt": ("log",)}
+
+
+def stored_payload(kind: str, payload: Mapping[str, object]) -> dict:
+    """Return the format 4 stored form of a payload in the shape the package works with.
+
+    The flat stdout and stderr fields of a run or attempt move into one ``streams``
+    map, the single place a record names its files. Every other field, including
+    one this version does not recognize, is carried over unchanged, and so is a
+    stream a later version added.
+    """
+    fields = _STREAM_FIELDS.get(kind)
+    if fields is None:
+        return dict(payload)
+    flat = {f"{name}_{field}" for name in _STREAMS for field in fields}
+    stored = {key: value for key, value in payload.items() if key not in flat}
+    later = payload.get("streams")
+    stored["streams"] = {
+        **(later if isinstance(later, dict) else {}),
+        **{
+            name: {field: payload.get(f"{name}_{field}") for field in fields}
+            for name in _STREAMS
+            if payload.get(f"{name}_log") is not None
+        },
+    }
+    return stored
+
+
+def working_payload(schema_version: int, kind: str, payload: Mapping[str, object]) -> dict:
+    """Return a stored payload of any readable format in the shape the package works with.
+
+    stdout and stderr return to their flat fields; ``streams`` keeps only the
+    streams a later version added, for :func:`other_streams`.
+    """
+    fields = _STREAM_FIELDS.get(kind)
+    if fields is None or schema_version < 4:
+        return dict(payload)
+    streams = payload.get("streams")
+    _require(isinstance(streams, dict), "streams must be an object")
+    assert isinstance(streams, dict)
+    working = dict(payload)
+    working["streams"] = {name: entry for name, entry in streams.items() if name not in _STREAMS}
+    for name in _STREAMS:
+        entry = streams.get(name, {})
+        _require(isinstance(entry, dict), f"streams.{name} must be an object")
+        for field in fields:
+            working[f"{name}_{field}"] = entry.get(field)
+    return working
+
+
+def other_streams(payload: Mapping[str, object]) -> list[tuple[str, int | None, str | None]]:
+    """Return ``(log, bytes, sha256)`` for each stream a later version named in a working payload.
+
+    Size and digest are None when the record leaves them out, as an attempt does.
+    """
+    streams = payload.get("streams") or {}
+    _require(isinstance(streams, dict), "streams must be an object")
+    assert isinstance(streams, dict)
+    found: list[tuple[str, int | None, str | None]] = []
+    for name, entry in streams.items():
+        label = f"streams.{name}"
+        _require(isinstance(entry, dict), f"{label} must be an object")
+        size, digest = entry.get("bytes"), entry.get("sha256")
+        if size is not None or digest is not None:
+            size = _integer(size, f"{label}.bytes", minimum=0)
+            digest = _sha256(digest, f"{label}.sha256")
+        found.append((_string(entry.get("log"), f"{label}.log"), size, digest))
+    return found
+
+
+def unmet_requirements(schema_version: int, payload: Mapping[str, object]) -> tuple[str, ...]:
+    """Name what a record needs that this version lacks; empty when it can be read."""
+    if schema_version > SCHEMA_VERSION:
+        return (f"schema {schema_version}",)
+    required = payload.get("requires", [])
+    if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+        return ("a later form of `requires`",)
+    return tuple(sorted(item for item in required if item not in FEATURES))
+
+
+def stream_logs(payload: Mapping[str, object]) -> list[str]:
+    """Return the log paths a stored payload names, without interpreting the record."""
+    streams = payload.get("streams")
+    entries = list(streams.values()) if isinstance(streams, dict) else []
+    logs = [entry.get("log") for entry in entries if isinstance(entry, dict)]
+    logs += [payload.get("stdout_log"), payload.get("stderr_log")]  # An attempt's names.
+    return [log for log in logs if isinstance(log, str)]
+
+
 def branch_point_to_payload(branch_point: BranchPoint) -> dict:
     return {
         "id": branch_point.id,
@@ -796,6 +909,37 @@ def branch_point_from_payload(payload: object) -> BranchPoint:
         kind=kind,
         outcome=_outcome(payload["outcome"], "outcome"),
         branchable=_boolean(payload["branchable"], "branchable"),
+    )
+
+
+def check_tag(value: object) -> str:
+    """Return *value* if it can be a tag: letters, digits, ``_``, ``.`` and ``-``."""
+    tag = _string(value, "tag")
+    _require(
+        _TAG_PATTERN.fullmatch(tag) is not None,
+        f"tag {tag!r} must be letters, digits, '_', '.' or '-', and not start with '.' or '-'",
+    )
+    return tag
+
+
+def note_to_payload(note: Note) -> dict:
+    return {
+        "run_id": note.run_id,
+        "updated_at": note.updated_at,
+        "text": note.text,
+        "tags": list(note.tags),
+    }
+
+
+def note_from_payload(payload: object) -> Note:
+    payload = _fields(payload, "note", frozenset({"run_id", "updated_at", "text", "tags"}))
+    tags = payload["tags"]
+    _require(isinstance(tags, list), "tags must be an array")
+    return Note(
+        run_id=_id(payload["run_id"], "run", "run_id"),
+        updated_at=format_timestamp(parse_timestamp(payload["updated_at"], "updated_at")),
+        text=_string(payload["text"], "text", allow_empty=True),
+        tags=tuple(sorted({check_tag(tag) for tag in tags})),
     )
 
 

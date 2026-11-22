@@ -27,6 +27,7 @@ class PublicSurfaceTests(unittest.TestCase):
                 "DemoStep",
                 "FileDigest",
                 "Initialization",
+                "Note",
                 "Outcome",
                 "OutputCapture",
                 "ParameterDelta",

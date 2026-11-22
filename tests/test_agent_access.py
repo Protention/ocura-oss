@@ -62,6 +62,7 @@ class AgentAccessTests(unittest.TestCase):
                 {
                     **model.run_summary_from_run(failed.record).to_dict(),
                     "branch_point_id": points[1].id,
+                    "tags": [],
                 }
             ],
         )
@@ -70,6 +71,7 @@ class AgentAccessTests(unittest.TestCase):
         )
 
     def test_a_page_counts_runs_that_can_finish_behind_its_cursor(self):
+        self.store.set_setting("index", "off")  # The race below is inside a scan.
         early, later = self.record(), self.record()
         # `early` finished first, but publishes its branch point while a page scans.
         point = self.store.branch_points_dir / f"{early.branch_point.id}.json"

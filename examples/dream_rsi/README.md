@@ -1,9 +1,9 @@
 # Dream-RSI training adaptation with Ocura OSS
 
-Version 0.8.0.
+Version 0.9.0.
 
-This experimental example belongs to the [0.8 catalog](../../docs/use-cases.md)
-on `examples/0.8` and uses the 0.8.0 package. Use the
+This experimental example belongs to the [0.9 catalog](../../docs/use-cases.md)
+on `examples/0.9` and uses the 0.9.0 package. Use the
 [catalog setup](../../README.md#install-and-try) to obtain the matching checkout.
 The pilot and its published evidence summary remain historical 0.4.0 results;
 updating the adapter does not revalidate those results or establish a policy benefit.
@@ -38,7 +38,7 @@ Both agent requests and training jobs pass through `record_command()` in
 
 The example owns agent access, checkpoints, artifact digests, resource limits,
 replay, scoring, and policy selection. Ocura lineage identifies execution
-relationships; it does not restore model state. The example uses Ocura OSS 0.8.0
+relationships; it does not restore model state. The example uses Ocura OSS 0.9.0
 and stays outside the package distributions and runtime dependencies.
 
 ## Setup
@@ -50,7 +50,7 @@ systems defer when that check is unavailable. Docker and a GPU are not required.
 Install the matching release from the repository root:
 
 ```console
-python -m pip install ocura-oss==0.8.0
+python -m pip install ocura-oss==0.9.0
 python -m unittest discover -s tests -p "test_dream_rsi_*.py" -v
 ```
 
@@ -115,7 +115,7 @@ checkpoints. Training also needs the prepared inputs.
 
 ## Inspect intention and failures
 
-The controller uses the 0.8 `record` and `branch_point` fields and public
+The controller uses the 0.9 `record` and `branch_point` fields and public
 `Store.load_run()`, `Store.list_run_records()`, and `Store.load_branch_point()`
 readers. The example's own v1 report keys, including `root_atom`, `agent_atom`,
 `terminal_atom`, and `atom_id`, retain their names. They contain `run-...` IDs;
@@ -141,10 +141,10 @@ does not create a snapshot or repair unfinished work. When a storage error can
 be retained in the completion record, the report preserves its `error_details`
 (code, execution state, known IDs, and recovery hint) alongside the existing text.
 
-Ocura 0.8 cannot read schema-1 or schema-2 ledgers. Retain the complete original
+Ocura 0.9 cannot read schema-1 or schema-2 ledgers. Retain the complete original
 experiment and use its matching package and example checkout to reconstruct it.
 The [0.7 guide](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/dream_rsi)
-documents older-ledger reporting; its migration tool does not convert to 0.8.
+documents older-ledger reporting; its migration tool does not convert to 0.8 or later.
 Start new experiments in new directories. Do not replace historical source or
 checkpoint digests with today's values. The curated `evidence-summary.json` is
 not a ledger and cannot be migrated into one.

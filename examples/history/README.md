@@ -18,7 +18,7 @@ ran the demo, use only the second command. Archive mode requires a stable ledger
 with no writers or unfinished attempts.
 
 This is the core repository's primary example. Fuller development, training, and
-replay demonstrations live on [`examples/0.8`](https://github.com/Protention/ocura-oss/tree/examples/0.8);
+replay demonstrations live on [`examples/0.9`](https://github.com/Protention/ocura-oss/tree/examples/0.9);
 see the [use-case catalog](../../docs/use-cases.md).
 
 ## Inspect your own ledger

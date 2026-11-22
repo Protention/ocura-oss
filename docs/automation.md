@@ -1,6 +1,6 @@
 # Scripts and AI agents
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.8 renamed stored IDs and JSON keys; the [naming guide](naming-migration.md)
 maps the names used before 0.8.
@@ -8,6 +8,11 @@ maps the names used before 0.8.
 Ocura OSS can be called from a shell, a Python program, or an AI agent's existing
 command tool. Use it when you want a durable record connecting a baseline to later
 variations, with reasons, outputs, and verification.
+
+An agent whose client speaks the Model Context Protocol can also read the ledger
+through [`ocura-oss mcp`](cli.md#mcp), which offers `runs`, `show`, `logs`, `compare`,
+`verify`, and `attempts` as tools, and keep a run's [note and tags](cli.md#note-and-tag)
+with `note` and `tag`. Recording still goes through the commands below.
 
 ## Command workflow
 

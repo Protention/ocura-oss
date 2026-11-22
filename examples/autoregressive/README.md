@@ -1,9 +1,9 @@
 # Small autoregressive experiment
 
-For Ocura OSS 0.8.0.
+For Ocura OSS 0.9.0.
 
-This guide belongs to the [0.8 example catalog](../../docs/use-cases.md)
-on `examples/0.8`. Use the [catalog setup](../../README.md#install-and-try) to obtain
+This guide belongs to the [0.9 example catalog](../../docs/use-cases.md)
+on `examples/0.9`. Use the [catalog setup](../../README.md#install-and-try) to obtain
 the matching checkout.
 
 Train a character-level next-token model with **PyTorch** or **JAX**, either directly
@@ -37,12 +37,12 @@ From a repository checkout, use a virtual
 environment with Python 3.11 or later, subject to your framework's platform support:
 
 ```console
-python -m pip install ocura-oss==0.8.0
+python -m pip install ocura-oss==0.9.0
 ```
 
-The driver uses the combined branch-and-run interface with 0.8's JSON fields.
+The driver uses the combined branch-and-run interface with 0.9's JSON fields.
 Installing this checkout with `python -m pip install .` also works. Use a new
-ledger: 0.8 cannot read schema-2 histories. Keep the
+ledger or one written by 0.8: 0.9 cannot read schema-2 histories. Keep the
 [0.7 checkout](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/autoregressive)
 and its matching package to report on older experiments.
 
@@ -99,7 +99,7 @@ ocura-oss compare --root ./ar-pytorch --json
 ocura-oss verify --root ./ar-pytorch --json
 ```
 
-Reporting with this driver needs Ocura OSS 0.8.0 and the standard
+Reporting with this driver needs Ocura OSS 0.9.0 and the standard
 library; PyTorch, JAX, and Ray are not imported for a report. It verifies
 the saved state, reads each run's stdout through `Store.read_verified_log()` so the
 consumed bytes match their recorded size and digest, and checks that reported

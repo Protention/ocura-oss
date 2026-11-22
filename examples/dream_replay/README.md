@@ -1,9 +1,9 @@
 # Replay a training search with Ocura OSS
 
-Version 0.8.0.
+Version 0.9.0.
 
-This experimental example is part of the [0.8 catalog](../../docs/use-cases.md)
-on `examples/0.8` and uses the 0.8.0 interfaces. Follow the
+This experimental example is part of the [0.9 catalog](../../docs/use-cases.md)
+on `examples/0.9` and uses the 0.9.0 interfaces. Follow the
 [catalog setup](../../README.md#install-and-try) for the scripts and matching release.
 Installing this checkout also works.
 
@@ -31,7 +31,7 @@ CPU PyTorch.
 From the repository root, in an activated virtual environment:
 
 ```console
-python -m pip install ocura-oss==0.8.0
+python -m pip install ocura-oss==0.9.0
 python -m pip install -r examples/dream_replay/requirements.txt --index-url https://download.pytorch.org/whl/cpu
 python examples/dream_replay/experiment.py prepare --root .tmp-tests/dream-inputs --download
 ```
@@ -169,13 +169,13 @@ run creates another child and is not a resume operation.
 
 ## Reading an older experiment
 
-Ocura 0.8 reads schema 3 only. Keep the original experiment, package version and
-example checkout together when reporting on earlier work. The
-[0.7 catalog](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/dream_replay)
+Ocura 0.9 reads schemas 3 and 4, written by 0.8 and 0.9. Keep the original
+experiment, package version and example checkout together when reporting on
+earlier work. The [0.7 catalog](https://github.com/Protention/ocura-oss/tree/examples/0.7/examples/dream_replay)
 documents schema-2 reporting and the separate 0.4-to-schema-2 migration tool.
-That tool does not convert ledgers to 0.8.
+That tool does not convert ledgers to 0.8 or later.
 
-Start a fresh 0.8 collection for new evaluation. Keep historical logs, checkpoints
+Start a fresh 0.9 collection for new evaluation. Keep historical logs, checkpoints
 and source fingerprints unchanged; updating the adapter does not repeat the study.
 
 ## Replay and costs

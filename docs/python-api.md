@@ -1,6 +1,6 @@
 # Python API reference
 
-Version 0.8.0.
+Version 0.9.0.
 
 Version 0.7 adds opt-in compression, storage metadata, and conversion
 methods. See [log compression](autocompression.md).
@@ -142,7 +142,7 @@ run(
     parameters: Mapping[str, str] | None = None,
     mirror: bool = False,
     capture: bool = True,
-    compress: bool = False,
+    compress: bool | None = None,
     compression_min_bytes: int = 1_048_576,
     masked_arguments: Iterable[int] = (),
     substitute: bool = False,
@@ -165,7 +165,7 @@ Run one trusted local command and record terminal evidence.
 | `parameters` | mapping of string to string, or None | `None` | Add or replace labels for this run; with `source_branch_point_id`, set the new child's parameter overrides instead. Labels do not configure the child process |
 | `mirror` | boolean | `False` | Stream stdout and stderr to the current terminal while retaining the same bytes in logs |
 | `capture` | boolean | `True` | Retain stdout and stderr as logs; `False` writes no output to disk and records that it was not captured |
-| `compress` | boolean | `False` | Consider only this run's finalized captured logs once for lossless gzip storage |
+| `compress` | boolean or `None` | `None` | Consider only this run's finalized captured logs once for lossless gzip storage. `None` follows the project's `compress` setting |
 | `compression_min_bytes` | nonnegative integer | `1048576` | Minimum original size to compress when `compress` is true; require at least 10% savings as well |
 | `masked_arguments` | iterable of integers | `()` | Zero-based positions in `command` whose tokens are stored as `<masked>`; the command still receives the real values |
 | `substitute` | boolean | `False` | Replace `{KEY}` in command tokens with the value the run records for that key |
@@ -224,7 +224,8 @@ The child runs with `shell=False` and the project root as its working directory.
 
 Stdout and stderr are stored separately under `.ocura-oss/logs/`. With `capture=False`, no log files are written: the returned run record has `output_capture` set to `OutputCapture.NONE` and `None` in its six log fields, and `mirror=True` still streams the output.
 
-Logs stay raw by default. With `compress=True`, each captured log of at least
+Logs stay raw by default. With `compress=True`, or with the project's
+[`compress` setting](cli.md#settings) `on` and `compress` left as `None`, each captured log of at least
 `compression_min_bytes` (1 MiB) is considered for gzip compression at level 6
 after this run is finalized. It must save at least 10%; smaller or incompressible
 logs remain raw. Original bytes and hashes remain unchanged, and no older logs are
@@ -774,20 +775,42 @@ A list sorted by `started_at`, then `id`.
 
 `load_run()` adds pathway validation. `verify_state()` adds complete relationship and log verification.
 
+### Settings and upgrading a 0.8 ledger
+
+```python
+store.setting(key: str) -> str
+store.settings() -> dict[str, str]
+store.set_setting(key: str, value: str) -> None
+store.older_format() -> int | None
+store.upgrade_if_enabled() -> tuple[int, int] | None
+```
+
+`setting("upgrade")` returns the value in effect: the one the project stored, else
+`OCURA_OSS_UPGRADE`, else `"off"`. `setting("compress")` works the same way with
+`OCURA_OSS_COMPRESS`. `settings()` returns only what the project stored, and
+`set_setting()` stores one value. `older_format()` returns the ledger record's schema
+version while an [upgrade](state-and-verification.md#ledgers-written-by-08) is still
+possible, otherwise `None`. `upgrade_if_enabled()` converts the records when the setting
+is `overwrite` and returns `(converted, waiting)`, or `None` when there was nothing to do.
+`ocura_oss.run()` and `ocura_oss.branch()` call it before they record, without printing
+anything.
+
 ### `Store.list_runs` and `Store.inspect_run`
 
 ```python
 store.list_runs(
     *, pathway_id: str | None = None, outcome: Outcome | None = None,
-    after: str | None = None, limit: int | None = 100,
+    after: str | None = None, limit: int | None = 100, tag: str | None = None,
 ) -> RunPage
 store.inspect_run(run_id: str) -> RunInspection
 ```
 
-`RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`, and
-`unfinished_attempts: int`. Each `ListedRun` holds `branch_point_id: str` and
-`run: RunSummary`. `RunInspection` contains `record: RunRecord`, `pathway: Pathway`,
-`branch_point: BranchPoint | None`, and `children: tuple[Pathway, ...]`. These result
+`RunPage` contains `runs: tuple[ListedRun, ...]`, `next_after: str | None`,
+`unfinished_attempts: int`, and `newer_runs: int`, the number of runs left out because
+they need a later version to read. Each `ListedRun` holds `branch_point_id: str`,
+`run: RunSummary`, and the run's `tags: tuple[str, ...]`. `RunInspection` contains
+`record: RunRecord`, `pathway: Pathway`, `branch_point: BranchPoint | None`,
+`children: tuple[Pathway, ...]`, and `note: Note | None`. These result
 types live in `ocura_oss.store`. Their `to_dict()` methods include verification scope. `RunInspection.to_dict(include_command=True)`
 includes command arguments, which are omitted by default.
 
@@ -799,6 +822,26 @@ its branch point and child pathways. Neither reads log contents. Ordering,
 completeness, filters and failure behavior follow the [CLI contract](cli.md#runs-and-show). Python callers
 supply full IDs and `Outcome` values. Invalid limits, selectors or records raise
 `StoreError`.
+
+### `Store.load_note` and `Store.annotate`
+
+```python
+store.load_note(run_id: str) -> Note | None
+store.annotate(
+    run_id: str, *, text: str | None = None,
+    add: Iterable[str] = (), remove: Iterable[str] = (),
+) -> Note
+```
+
+A `Note` holds a run's editable commentary: `run_id: str`, `updated_at: str`,
+`text: str`, and `tags: tuple[str, ...]`, sorted. `load_note()` returns `None` for a run
+with no note. `annotate()` replaces the text when *text* is given, adds and removes
+tags, and returns the result; a note left with no text and no tags is removed from
+the ledger. Changes to one run's note from several processes are applied one after
+another. An unknown run, an invalid tag, or archive mode raises `StoreError`.
+
+Notes are not evidence and a manifest does not list them; see
+[notes](state-and-verification.md#notes).
 
 ### `Store.list_branch_points`
 
@@ -1588,6 +1631,7 @@ StateVerification(
     logs_checked: int,
     problems: tuple[tuple[str, str], ...],
     running_attempts: tuple[str, ...] = (),
+    newer: tuple[tuple[str, str], ...] = (),
     abandoned_attempts: tuple[str, ...] = (),
     manifest: tuple[str, ...] = (),
     digest: str | None = None,
@@ -1606,6 +1650,7 @@ Result of verifying records and referenced logs under one state directory.
 | `logs_checked` | integer | Individual referenced logs that passed verification |
 | `problems` | tuple of pairs | `(record, problem)` entries collected during verification |
 | `running_attempts` | tuple of strings | Attempts a live process is still recording; not problems |
+| `newer` | tuple of pairs | `(record, needs)` for each record that [needs a later version](state-and-verification.md#records-from-a-later-version); not problems |
 | `abandoned_attempts` | tuple of strings | Attempts whose recorder stopped; each also appears in `problems` |
 | `manifest` | tuple of strings | Sorted `KIND ID CHECKSUM` lines for every verified record; empty when there are problems |
 | `digest` | string or None | SHA-256 of the manifest lines, each newline-terminated; `None` when there are problems |
@@ -1714,6 +1759,13 @@ String enum describing evidence completeness for one comparison.
 
 ## Exceptions
 
+### `ocura_oss.store.NewerRecord`
+
+A `StoreError` with code `newer_record`, raised when a record is intact but
+[needs a later version](state-and-verification.md#records-from-a-later-version) to read.
+`needs` is a tuple naming what is missing, such as `("schema 5",)`. Reading a log
+stored in a later version's encoding raises a plain `StoreError` with the same code.
+
 ### `ocura_oss.StoreError`
 
 In 0.7, `StoreError` also exposes `code`, `execution`, `ids`,
@@ -1767,7 +1819,7 @@ The destination is retained when it was created before the failure.
 ocura_oss.__version__: str
 ```
 
-Installed package version. This release reports `"0.8.0"`.
+Installed package version. This release reports `"0.9.0"`.
 
 ## Typing
 
