@@ -184,6 +184,12 @@ The fuller CI-report, autoregressive, and Dream demonstrations live on the
 semi-permanent [`examples/0.9` branch](https://github.com/Protention/ocura-oss/tree/examples/0.9).
 See [use cases](https://github.com/Protention/ocura-oss/blob/main/docs/use-cases.md) for their requirements and checkout instructions.
 
+This `feat/dream-replay-example` branch is a feature-branch example: the 0.9.0 release
+plus the [Dream replay](examples/dream_replay/README.md) and
+[Dream RSI](examples/dream_rsi/README.md) examples and their tests, as maintained on
+`examples/0.9`. It is not intended to merge into `main`. Install the package from this
+checkout with `python -m pip install .`, then follow either guide.
+
 ## Python and automation
 
 ```python

@@ -2,6 +2,12 @@
 
 This file records user-visible changes to Ocura OSS.
 
+## Unreleased
+
+- Add the Dream replay and Dream RSI examples on this feature branch, as maintained on
+  `examples/0.9`. They are repository-only: the package API and runtime dependencies
+  are unchanged, and the sdist leaves out their tests.
+
 ## 0.9.0 - 2026-11-22
 
 This release changes the stored record format so that later releases can add to it
