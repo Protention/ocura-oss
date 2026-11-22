@@ -65,7 +65,8 @@ release**, because 0.8.0 cannot read an upgraded ledger.
 - Report a record that needs a later version as `newer record` in `verify`, with
   integrity still ok, where 0.8 reported it as damage. `runs` leaves such a run out
   and counts it in `newer_runs`; runs branched from it are read as usual. A record may
-  list what a reader needs in a `requires` array.
+  list what a reader needs in a `requires` array. `verify` checks a stream a later
+  version adds under `streams` as it checks stdout.
 - Report a log stored in an encoding this version does not read the same way,
   where 0.8 reported a missing log and an orphaned file.
 

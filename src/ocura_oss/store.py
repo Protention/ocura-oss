@@ -1221,13 +1221,24 @@ class Store:
         # branch point, and removes the attempt last. Reading in that same order
         # never mistakes a run in progress for damage.
         log_entries = sorted(self.logs_dir.iterdir()) if self.logs_dir.is_dir() else []
-        attempts = self._scan_attempts(problems, newer)
+        # Streams a later version named beside stdout and stderr, by run ID.
+        others: dict[str, list[tuple[str, int | None, str | None]]] = {}
+
+        def read_attempt(payload: dict) -> model.Attempt:
+            attempt = model.attempt_from_payload(payload)
+            others[attempt.id] = model.other_streams(payload)
+            return attempt
+
+        def read_run(payload: dict) -> model.RunRecord:
+            record = model.run_from_payload(payload)
+            others[record.id] = model.other_streams(payload)
+            return record
+
+        attempts = self._scan_attempts(problems, newer, read_attempt)
         pathways = self._scan_records(
             self.pathways_dir, "pathway", model.pathway_from_payload, problems, manifest, newer
         )
-        records = self._scan_records(
-            self.runs_dir, "run", model.run_from_payload, problems, manifest, newer
-        )
+        records = self._scan_records(self.runs_dir, "run", read_run, problems, manifest, newer)
         branch_points = self._scan_records(
             self.branch_points_dir,
             "branch_point",
@@ -1256,7 +1267,8 @@ class Store:
                 problems.append(
                     (label, "attempt was not finalized; run `ocura-oss recover` to close it")
                 )
-            for relative in (attempt.stdout_log, attempt.stderr_log):
+            later = [log for log, _size, _digest in others.get(attempt.id, [])]
+            for relative in (attempt.stdout_log, attempt.stderr_log, *later):
                 if relative is None:
                     continue
                 try:
@@ -1270,9 +1282,14 @@ class Store:
                 beyond.append((f"{record.id}.json", f"refers to a newer record: {exc}"))
             except StoreError as exc:
                 problems.append((f"{record.id}.json", str(exc)))
-            for relative, size_field, digest_field in _recorded_logs(record):
+            for relative, size_field, digest_field in [
+                *_recorded_logs(record),
+                *others.get(record.id, []),
+            ]:
                 try:
                     referenced_logs.add(self._evidence_path(record.id, relative))
+                    if size_field is None or digest_field is None:
+                        continue  # A later stream that records no digest is only named.
                     self._verify_log(record.id, relative, size_field, digest_field)
                     logs_checked += 1
                 except StoreError as exc:
@@ -1440,7 +1457,10 @@ class Store:
             raise StoreError(
                 f"malformed {_label(expected_kind)} record {path.name}: unreadable", code=code
             ) from exc
+        later = _later_schema(data, raw, f"{_label(expected_kind)} record {path.name}")
         if not isinstance(data, dict) or set(data) != _ENVELOPE_KEYS:
+            if later:
+                raise later  # A later schema may change the envelope too.
             raise StoreError(
                 f"malformed {_label(expected_kind)} record {path.name}: unexpected envelope",
                 code="integrity_error",
@@ -1477,6 +1497,8 @@ class Store:
             or set(checksum) != {"algorithm", "value"}
             or checksum["algorithm"] != model.CHECKSUM_ALGORITHM
         ):
+            if later:
+                raise later
             raise StoreError(
                 f"malformed checksum in {_label(expected_kind)} record {path.name}",
                 code="integrity_error",
@@ -1488,6 +1510,8 @@ class Store:
                 code="integrity_error",
             )
         if not isinstance(data["payload"], dict):
+            if later:
+                raise later
             raise StoreError(
                 f"malformed {_label(expected_kind)} record {path.name}: payload must be an object",
                 code="integrity_error",
@@ -1622,7 +1646,11 @@ class Store:
                 problems.append((prefix + path.name, str(exc)))
         return records
 
-    def _load_attempt(self, path: Path) -> model.Attempt | None:
+    def _load_attempt(
+        self,
+        path: Path,
+        convert: Callable[[dict], model.Attempt] = model.attempt_from_payload,
+    ) -> model.Attempt | None:
         """Read an attempt record, or return None if its run finalized meanwhile.
 
         Windows can briefly deny reads of a record that its finishing run is
@@ -1631,7 +1659,7 @@ class Store:
         retries = _BUSY_RETRIES
         while True:
             try:
-                return self._load_listed(path, "attempt", model.attempt_from_payload)
+                return self._load_listed(path, "attempt", convert)
             except StoreError as exc:
                 if not path.exists():
                     return None
@@ -1644,6 +1672,7 @@ class Store:
         self,
         problems: list[tuple[str, str]],
         newer: list[tuple[str, NewerRecord]] | None = None,
+        convert: Callable[[dict], model.Attempt] = model.attempt_from_payload,
     ) -> list[tuple[model.Attempt, model.AttemptState]]:
         """Collect unfinished attempts and whether each is still being recorded."""
         attempts: list[tuple[model.Attempt, model.AttemptState]] = []
@@ -1651,7 +1680,7 @@ class Store:
             return attempts
         for path in sorted(self.attempts_dir.glob("*.json")):
             try:
-                attempt = self._load_attempt(path)
+                attempt = self._load_attempt(path, convert)
             except StoreError as exc:
                 if isinstance(exc, NewerRecord) and newer is not None:
                     newer.append((f"attempts/{path.name}", exc))
@@ -1828,6 +1857,31 @@ def _parse_manifest(lines: Iterable[str] | None) -> list[str]:
 
 def _finish_order(branch_point: model.BranchPoint) -> tuple[str, str]:
     return branch_point.created_at, branch_point.id
+
+
+def _later_schema(data: object, raw: bytes, label: str) -> NewerRecord | None:
+    """Return the error for a record in a schema after this version's, else None.
+
+    A later schema may lay out the whole envelope differently, so only its
+    version is read.
+    """
+    if not isinstance(data, dict):
+        return None
+    version = data.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return None
+    if version <= model.SCHEMA_VERSION:
+        return None
+    payload, checksum = data.get("payload"), data.get("checksum")
+    value = checksum.get("value") if isinstance(checksum, dict) else None
+    if not isinstance(value, str) or len(value) != 64 or set(value) - set("0123456789abcdef"):
+        value = hashlib.sha256(raw).hexdigest()  # Still a manifest line that detects change.
+    return NewerRecord(
+        f"{label} needs a newer ocura-oss (schema {version})",
+        needs=(f"schema {version}",),
+        payload=payload if isinstance(payload, dict) else {},
+        checksum=value,
+    )
 
 
 def _recorded_logs(record: model.RunRecord) -> list[tuple[str, int, str]]:

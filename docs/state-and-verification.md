@@ -140,15 +140,15 @@ Schema 4 differs from schema 3 in one place. A run record names its captured out
 }
 ```
 
-A run recorded without capture has an empty `streams`. Command output and the Python API are the same for both schemas: `show --json` and `RunRecord` keep `stdout_log`, `stdout_bytes`, `stdout_sha256` and the `stderr` equivalents.
+A run recorded without capture has an empty `streams`. An unfinished attempt names its logs the same way, with only `log` in each entry. Command output and the Python API are the same for both schemas: `show --json` and `RunRecord` keep `stdout_log`, `stdout_bytes`, `stdout_sha256` and the `stderr` equivalents.
 
 From schema 4 on, a record changes in one of three ways:
 
-- **An optional field is added.** A reader ignores payload fields it does not recognize, so the record stays readable by earlier releases. The field must be safe to ignore.
-- **The record lists what it needs.** A record that an earlier release would misread carries a `requires` array in its payload naming each capability a reader must have. No record written by this release has one.
-- **The schema version increases.** This is for a change that neither of the first two can express, such as a removed or renamed field.
+- **An optional field is added.** A reader ignores payload fields it does not recognize, so the record stays readable by earlier releases. The field must be safe to ignore. A new stream is such a field: `verify` checks any entry under `streams` that has `bytes` and `sha256`, and counts its file as the record's own.
+- **The record lists what it needs.** A record that an earlier release would reject or misread carries a `requires` array in its payload naming each capability a reader must have. That includes a value outside the documented set, such as a new outcome or branch point kind. No record written by this release has one.
+- **The schema version increases.** This is for a change that neither of the first two can express, such as a removed or renamed field. A record with a later schema is reported as newer, not damaged, whatever its envelope holds; a later schema that computes the checksum differently names a different algorithm.
 
-The envelope's four keys are fixed, and every file a record refers to is named under `streams`.
+A new kind of fact goes in its own record kind and directory, as notes do; earlier releases do not look inside directories they do not know. Every file a record refers to is named under `streams` in its payload.
 
 The repository keeps a small ledger in the 0.8.0 layout as a test fixture. Every later release that reads schema 3 must verify it unchanged.
 
