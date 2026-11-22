@@ -57,8 +57,8 @@ release**, because 0.8.0 cannot read an upgraded ledger.
 
 - Show a command's output, and write it to its log, as the command writes it. `run`
   used to hold output back until 64 KiB had arrived or the command had exited.
-- Keep an index for a ledger of 500 or more finished runs, so `runs` and `show` open
-  only the records they return. `.ocura-oss/index.sqlite` is a cache built from the
+- Keep an index of finished runs, so `runs` and `show` open only the records they
+  return. `.ocura-oss/index.sqlite` is a cache built from the
   records: `verify` ignores it, deleting it loses nothing, and
   `ocura-oss settings index=off` or `OCURA_OSS_INDEX=off` turns it off. It uses the
   `sqlite3` module that ships with Python, so there is still no dependency.

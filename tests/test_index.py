@@ -25,9 +25,6 @@ class IndexTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name) / "project"
         shutil.copytree(FIXTURE, self.root / STATE_DIR_NAME)
-        smallest = mock.patch.object(index, "SMALLEST", 1)
-        smallest.start()
-        self.addCleanup(smallest.stop)
         self.store = Store(self.root)
         self.file = self.store.state_dir / index.FILE_NAME
         run([sys.executable, "-c", "raise SystemExit(3)"], root=self.root)
@@ -56,9 +53,7 @@ class IndexTests(unittest.TestCase):
 
     def test_listings_match_a_scan_and_follow_new_and_changed_records(self):
         expected = self.scanned()
-        with mock.patch.object(index, "SMALLEST", len(self.points) + 1):
-            self.assertEqual(self.listings(), expected)
-        self.assertFalse(self.file.exists())  # Neither a scan nor a small ledger makes one.
+        self.assertFalse(self.file.exists())  # A scan makes none.
         self.assertEqual(self.listings(), expected)
         self.assertEqual(self.sql("SELECT COUNT(*) FROM points"), [(len(self.points),)])
         self.sql("CREATE TABLE kept (x)")

@@ -5,6 +5,7 @@
 import contextlib
 import io
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -12,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest import mock
 
-from ocura_oss import cli, index, model
+from ocura_oss import cli, model
 from ocura_oss.store import STATE_DIR_NAME, Store, StoreError
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "ledger-0.8.0" / "state"
@@ -52,8 +53,8 @@ class NoteTests(unittest.TestCase):
         self.assertEqual(self.command("note", first)["note"], edited)
         self.assertEqual(self.command("show", first)["note"], edited)
         self.assertIsNone(self.command("show", third)["note"])
-        for smallest in (1, len(self.runs) + 1):  # Through the index, then by a scan.
-            with mock.patch.object(index, "SMALLEST", smallest):
+        for indexed in ("on", "off"):  # Through the index, then by a scan.
+            with mock.patch.dict(os.environ, {"OCURA_OSS_INDEX": indexed}):
                 listed = self.command("runs", "--tag", "baseline", "--limit", "1")
             found = [(item["id"], item["tags"]) for item in listed["runs"]]
             self.assertEqual((found, listed["next_after"]), ([(second, ["baseline"])], None))

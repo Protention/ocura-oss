@@ -77,8 +77,9 @@ Version 0.8 ignores the `notes/` directory.
 
 ### The index
 
-`index.sqlite` appears once a ledger holds 500 finished runs. It is a cache, not part
-of the ledger: verification and the manifest ignore it, and deleting it loses nothing.
+`index.sqlite` appears with the first `runs` or `show` after a run finishes. It is a
+cache, not part of the ledger: verification and the manifest ignore it, and deleting
+it loses nothing.
 
 It records where each branch point falls in finish order, so `runs` and `show` open
 only the records they return instead of every one. For example, `runs --limit 20` on

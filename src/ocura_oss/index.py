@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
 FILE_NAME = "index.sqlite"
 LAYOUT = 1
-# A ledger with fewer branch points is quick to scan and gets no index file.
-SMALLEST = 500
 _BUSY_SECONDS = 2.0
 _TABLE = """CREATE TABLE points (
     name TEXT PRIMARY KEY, size INTEGER, mtime INTEGER,
@@ -108,8 +106,8 @@ class Index:
                 }
         except OSError as exc:
             raise Unavailable from exc
-        if len(listed) < SMALLEST:
-            raise Unavailable
+        if not listed:
+            raise Unavailable  # Nothing to order yet, so no file either.
         try:
             import sqlite3
         except ImportError as exc:  # Some Python builds leave it out.

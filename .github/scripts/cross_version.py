@@ -39,9 +39,8 @@ def main(release: str) -> None:
         old = (python, "-m", "ocura_oss")
         package = f"ocura-oss=={release}"
         subprocess.run([python, "-m", "pip", "install", "--quiet", package], check=True)
-        # This version keeps its index from the first run on, so the release meets one.
-        indexed = "import sys; from ocura_oss import cli, index; index.SMALLEST = 1"
-        new = (sys.executable, "-c", f"{indexed}; sys.exit(cli.main(sys.argv[1:]))")
+        # This version keeps its index from the first listing on, so the release meets one.
+        new = (sys.executable, "-m", "ocura_oss")
         root = work / "project"
         root.mkdir()
 

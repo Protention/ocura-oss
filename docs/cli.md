@@ -484,11 +484,10 @@ left out of the page because they [need a later version](state-and-verification.
 to read; the text view prints `runs not listed: N` when it is not zero.
 Each returned run's records and lineage are checked. Log contents are not read.
 
-In a ledger with fewer than 500 finished runs, each page scans the branch point
-records once, and every one must validate, even when filters exclude it. A larger
-ledger gets an [index](state-and-verification.md#the-index), and a page then opens
-only the records it returns plus any whose files are new or changed. `verify` still
-checks every record.
+A page goes through the ledger's [index](state-and-verification.md#the-index) and
+opens only the records it returns plus any whose files are new or changed. With the
+index off or unavailable, each page scans the branch point records once, and every
+one must validate, even when filters exclude it. `verify` still checks every record.
 
 Each page reads the clock and counts unfinished attempts before it scans, and
 lists only runs that finished before then; a run stamped with that same clock
