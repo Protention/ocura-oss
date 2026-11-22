@@ -2,7 +2,7 @@
 
 This file records user-visible changes to Ocura OSS.
 
-## 0.9.0 - Unreleased
+## 0.9.0 - 2026-11-22
 
 This release changes the stored record format so that later releases can add to it
 without breaking earlier ones. It reads ledgers written by 0.8 and records into them.
